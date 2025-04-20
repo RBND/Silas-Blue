@@ -1,3 +1,8 @@
+#Silas-Blue V1.0
+#Copyright (c) 2025 RobotsNeverDie 
+#You should have received a copy of the RBND-NC License along with this program.
+#If not, see https://github.com/RBND/Silus-Blue
+
 import discord
 import aiohttp
 import json
