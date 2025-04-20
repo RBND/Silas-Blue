@@ -917,7 +917,7 @@ def terminal_input_handler():
 async def on_ready():
     global session
     # Print startup text
-    print("Silas Blue V1.0")
+    print("Silas Blue V1.1.0")
     print("Copyright (C) 2025 RobotsNeverDie")
     print("This program comes with ABSOLUTELY NO WARRANTY")
     print("You may only run this software under the RBND-NC license.")
