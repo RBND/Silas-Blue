@@ -1,4 +1,4 @@
-#Silas-Blue V1.1
+#Silas-Blue V1.1.0
 #Copyright (c) 2025 RobotsNeverDie 
 #You should have received a copy of the RBND-NC License along with this program.
 #If not, see https://github.com/RBND/Silus-Blue
@@ -12,10 +12,11 @@ import pickle
 import asyncio
 import random
 import re
-from discord.ext import commands
-from discord import ui, ButtonStyle
 import threading
 import sys
+import shlex
+from discord.ext import commands
+from discord import ui, ButtonStyle
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -404,13 +405,465 @@ async def send_paginated_response(ctx, content, author_id):
     view.message = message
 
 
+# Terminal command handlers
+def handle_terminal_servers_command():
+    """Handle the 'servers' terminal command to list all servers"""
+    if not bot.guilds:
+        print("Bot is not connected to any servers.")
+        return
+
+    print("\nServers the bot is connected to:")
+    print("-" * 50)
+    for i, guild in enumerate(bot.guilds, 1):
+        print(f"{i}. {guild.name} (ID: {guild.id})")
+        # Check if we have a config for this server
+        if str(guild.id) in config.servers:
+            print(f"   Config: Yes")
+        else:
+            print(f"   Config: No (will be created on first interaction)")
+    print("-" * 50)
+
+
+def handle_terminal_server_command(args):
+    """Handle the 'server' terminal command to view a specific server's configuration"""
+    if not args:
+        print("Error: Server ID is required. Usage: server <server_id>")
+        return
+
+    server_id = args[0]
+    
+    # Check if the server ID is valid
+    guild = None
+    for g in bot.guilds:
+        if str(g.id) == server_id:
+            guild = g
+            break
+    
+    if not guild:
+        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        return
+    
+    # Get the server config
+    if server_id not in config.servers:
+        print(f"No configuration exists for server {guild.name} (ID: {server_id}).")
+        print("A default configuration will be created on first interaction.")
+        return
+    
+    server_config = config.servers[server_id]
+    
+    print(f"\nConfiguration for server: {guild.name} (ID: {server_id})")
+    print("-" * 50)
+    
+    # Display allowed models
+    print(f"Allowed Models: {'All' if not server_config.allowed_models else ', '.join(server_config.allowed_models)}")
+    
+    # Display permissions
+    print("\nPermissions:")
+    for perm_type, role_ids in server_config.permissions.items():
+        role_names = []
+        for role_id in role_ids:
+            role = guild.get_role(role_id)
+            if role:
+                role_names.append(f"{role.name} (ID: {role.id})")
+        
+        if role_names:
+            print(f"  {perm_type}: {', '.join(role_names)}")
+        else:
+            if perm_type in ["set_model", "manage_config"]:
+                print(f"  {perm_type}: No roles assigned (only server owner and administrators)")
+            elif perm_type == "reply_to":
+                print(f"  {perm_type}: No roles assigned (replies to everyone)")
+            else:
+                print(f"  {perm_type}: No roles assigned")
+    
+    # Display bot nickname
+    print(f"\nBot Nickname: {server_config.bot_nickname if server_config.bot_nickname else 'Default'}")
+    
+    # Display random replies settings
+    print("\nRandom Replies:")
+    print(f"  Enabled: {server_config.random_replies['enabled']}")
+    print(f"  Probability: {server_config.random_replies['probability'] * 100}%")
+    print(f"  Cooldown: {server_config.random_replies['cooldown']} seconds")
+    print(f"  Last Reply: {datetime.datetime.fromtimestamp(server_config.last_random_reply).strftime('%Y-%m-%d %H:%M:%S') if server_config.last_random_reply > 0 else 'Never'}")
+    
+    # Display system instructions
+    print("\nSystem Instructions:")
+    if server_config.system_instructions:
+        print(f"  {server_config.system_instructions}")
+    else:
+        print("  None")
+    
+    # Display paginated responses settings
+    print("\nPaginated Responses:")
+    print(f"  Enabled: {server_config.paginated_responses['enabled']}")
+    print(f"  Page Size: {server_config.paginated_responses['page_size']} characters")
+    
+    print("-" * 50)
+
+
+def handle_terminal_edit_command(args):
+    """Handle the 'edit' terminal command to edit a server's configuration"""
+    if len(args) < 3:
+        print("Error: Insufficient arguments. Usage: edit <server_id> <setting> <value>")
+        print("Available settings: allowed_models, bot_nickname, random_replies, system_instructions, paginated_responses")
+        return
+
+    server_id = args[0]
+    setting = args[1]
+    value = ' '.join(args[2:])
+    
+    # Check if the server ID is valid
+    guild = None
+    for g in bot.guilds:
+        if str(g.id) == server_id:
+            guild = g
+            break
+    
+    if not guild:
+        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        return
+    
+    # Get or create the server config
+    server_config = config.get_server_config(guild.id)
+    
+    # Edit the specified setting
+    if setting == "allowed_models":
+        if value.lower() == "all":
+            server_config.allowed_models = []
+            print(f"Set allowed models to: All models")
+        else:
+            models = [model.strip() for model in value.split(',')]
+            server_config.allowed_models = models
+            print(f"Set allowed models to: {', '.join(models)}")
+    
+    elif setting == "bot_nickname":
+        if value.lower() == "default" or value.lower() == "none":
+            server_config.bot_nickname = None
+            print("Reset bot nickname to default")
+            # Update the bot's nickname in the guild
+            asyncio.run_coroutine_threadsafe(guild.me.edit(nick=None), bot.loop)
+        else:
+            server_config.bot_nickname = value
+            print(f"Set bot nickname to: {value}")
+            # Update the bot's nickname in the guild
+            asyncio.run_coroutine_threadsafe(guild.me.edit(nick=value), bot.loop)
+    
+    elif setting == "random_replies":
+        # Parse the value as a JSON object
+        try:
+            if value.lower() in ["enable", "enabled", "true", "yes", "1"]:
+                server_config.random_replies["enabled"] = True
+                print("Enabled random replies")
+            elif value.lower() in ["disable", "disabled", "false", "no", "0"]:
+                server_config.random_replies["enabled"] = False
+                print("Disabled random replies")
+            elif value.lower().startswith("probability="):
+                prob_str = value.split('=')[1].strip()
+                prob = float(prob_str)
+                if 0 <= prob <= 1:
+                    server_config.random_replies["probability"] = prob
+                    print(f"Set random reply probability to: {prob * 100}%")
+                else:
+                    print("Error: Probability must be between 0 and 1")
+                    return
+            elif value.lower().startswith("cooldown="):
+                cooldown_str = value.split('=')[1].strip()
+                cooldown = int(cooldown_str)
+                if cooldown >= 0:
+                    server_config.random_replies["cooldown"] = cooldown
+                    print(f"Set random reply cooldown to: {cooldown} seconds")
+                else:
+                    print("Error: Cooldown must be a non-negative integer")
+                    return
+            else:
+                print("Error: Invalid value for random_replies. Use 'enable', 'disable', 'probability=X', or 'cooldown=X'")
+                return
+        except Exception as e:
+            print(f"Error parsing random_replies value: {e}")
+            return
+    
+    elif setting == "system_instructions":
+        server_config.system_instructions = value
+        print(f"Set system instructions to: {value}")
+    
+    elif setting == "paginated_responses":
+        if value.lower() in ["enable", "enabled", "true", "yes", "1"]:
+            server_config.paginated_responses["enabled"] = True
+            print("Enabled paginated responses")
+        elif value.lower() in ["disable", "disabled", "false", "no", "0"]:
+            server_config.paginated_responses["enabled"] = False
+            print("Disabled paginated responses")
+        elif value.lower().startswith("pagesize="):
+            size_str = value.split('=')[1].strip()
+            size = int(size_str)
+            if 100 <= size <= 2000:
+                server_config.paginated_responses["page_size"] = size
+                print(f"Set paginated response page size to: {size} characters")
+            else:
+                print("Error: Page size must be between 100 and 2000")
+                return
+        else:
+            print("Error: Invalid value for paginated_responses. Use 'enable', 'disable', or 'pagesize=X'")
+            return
+    
+    else:
+        print(f"Error: Unknown setting '{setting}'")
+        print("Available settings: allowed_models, bot_nickname, random_replies, system_instructions, paginated_responses")
+        return
+    
+    # Save the updated configuration
+    config.save()
+    print(f"Configuration for server '{guild.name}' (ID: {server_id}) has been updated and saved.")
+
+
+def handle_terminal_delete_command(args):
+    """Handle the 'delete' terminal command to delete a server's configuration"""
+    if not args:
+        print("Error: Server ID is required. Usage: delete <server_id>")
+        return
+
+    server_id = args[0]
+    
+    # Check if the server ID is valid
+    guild = None
+    for g in bot.guilds:
+        if str(g.id) == server_id:
+            guild = g
+            break
+    
+    if not guild and server_id != "default":
+        print(f"Warning: Server with ID {server_id} not found or bot is not connected to it.")
+        confirmation = input("Do you still want to delete this configuration? (y/n): ")
+        if confirmation.lower() != 'y':
+            print("Operation cancelled.")
+            return
+    
+    # Check if the configuration exists
+    if server_id not in config.servers:
+        print(f"Error: No configuration exists for server ID {server_id}.")
+        return
+    
+    # Ask for confirmation
+    server_name = guild.name if guild else f"ID {server_id}"
+    confirmation = input(f"Are you sure you want to delete the configuration for server '{server_name}'? (y/n): ")
+    if confirmation.lower() != 'y':
+        print("Operation cancelled.")
+        return
+    
+    # Delete the configuration
+    del config.servers[server_id]
+    config.save()
+    print(f"Configuration for server '{server_name}' has been deleted.")
+    
+    if server_id == "default":
+        print("Note: The default configuration has been deleted. New servers will now get a fresh default configuration.")
+
+
+def handle_terminal_reset_command(args):
+    """Handle the 'reset' terminal command to reset a server's configuration to default"""
+    if not args:
+        print("Error: Server ID is required. Usage: reset <server_id>")
+        return
+
+    server_id = args[0]
+    
+    # Check if the server ID is valid
+    guild = None
+    for g in bot.guilds:
+        if str(g.id) == server_id:
+            guild = g
+            break
+    
+    if not guild:
+        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        return
+    
+    # Ask for confirmation
+    confirmation = input(f"Are you sure you want to reset the configuration for server '{guild.name}'? (y/n): ")
+    if confirmation.lower() != 'y':
+        print("Operation cancelled.")
+        return
+    
+    # Reset the configuration
+    config.servers[server_id] = ServerConfig()
+    config.save()
+    print(f"Configuration for server '{guild.name}' has been reset to default.")
+
+
+def handle_terminal_permissions_command(args):
+    """Handle the 'permissions' terminal command to manage server permissions"""
+    if len(args) < 3:
+        print("Error: Insufficient arguments.")
+        print("Usage: permissions <server_id> <action> <permission_type> [role_id1,role_id2,...]")
+        print("Actions: view, add, remove, reset")
+        print("Permission types: set_model, manage_config, reply_to")
+        return
+
+    server_id = args[0]
+    action = args[1].lower()
+    permission_type = args[2].lower()
+    
+    # Check if the server ID is valid
+    guild = None
+    for g in bot.guilds:
+        if str(g.id) == server_id:
+            guild = g
+            break
+    
+    if not guild:
+        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        return
+    
+    # Get or create the server config
+    server_config = config.get_server_config(guild.id)
+    
+    # Check if the permission type is valid
+    if permission_type not in ["set_model", "manage_config", "reply_to"]:
+        print(f"Error: Invalid permission type '{permission_type}'")
+        print("Valid permission types: set_model, manage_config, reply_to")
+        return
+    
+    # Handle the action
+    if action == "view":
+        role_ids = server_config.permissions[permission_type]
+        if not role_ids:
+            if permission_type in ["set_model", "manage_config"]:
+                print(f"Permission '{permission_type}': No roles assigned (only server owner and administrators)")
+            elif permission_type == "reply_to":
+                print(f"Permission '{permission_type}': No roles assigned (replies to everyone)")
+            else:
+                print(f"Permission '{permission_type}': No roles assigned")
+        else:
+            role_details = []
+            for role_id in role_ids:
+                role = guild.get_role(role_id)
+                if role:
+                    role_details.append(f"{role.name} (ID: {role.id})")
+                else:
+                    role_details.append(f"Unknown role (ID: {role_id})")
+            print(f"Permission '{permission_type}' roles: {', '.join(role_details)}")
+    
+    elif action == "add":
+        if len(args) < 4:
+            print("Error: Role IDs are required for the 'add' action.")
+            print("Usage: permissions <server_id> add <permission_type> <role_id1,role_id2,...>")
+            return
+        
+        role_ids_str = args[3]
+        role_ids = [int(role_id.strip()) for role_id in role_ids_str.split(',')]
+        
+        added_roles = []
+        for role_id in role_ids:
+            role = guild.get_role(role_id)
+            if role:
+                if role_id not in server_config.permissions[permission_type]:
+                    server_config.permissions[permission_type].append(role_id)
+                    added_roles.append(f"{role.name} (ID: {role.id})")
+                else:
+                    print(f"Role '{role.name}' (ID: {role.id}) already has '{permission_type}' permission.")
+            else:
+                print(f"Warning: Role with ID {role_id} not found in server '{guild.name}'")
+        
+        if added_roles:
+            config.save()
+            print(f"Added roles to '{permission_type}' permission: {', '.join(added_roles)}")
+        else:
+            print("No roles were added.")
+    
+    elif action == "remove":
+        if len(args) < 4:
+            print("Error: Role IDs are required for the 'remove' action.")
+            print("Usage: permissions <server_id> remove <permission_type> <role_id1,role_id2,...>")
+            return
+        
+        role_ids_str = args[3]
+        role_ids = [int(role_id.strip()) for role_id in role_ids_str.split(',')]
+        
+        removed_roles = []
+        for role_id in role_ids:
+            role = guild.get_role(role_id)
+            role_name = f"{role.name} (ID: {role.id})" if role else f"Unknown role (ID: {role_id})"
+            
+            if role_id in server_config.permissions[permission_type]:
+                server_config.permissions[permission_type].remove(role_id)
+                removed_roles.append(role_name)
+            else:
+                print(f"Role {role_name} does not have '{permission_type}' permission.")
+        
+        if removed_roles:
+            config.save()
+            print(f"Removed roles from '{permission_type}' permission: {', '.join(removed_roles)}")
+        else:
+            print("No roles were removed.")
+    
+    elif action == "reset":
+        # Ask for confirmation
+        confirmation = input(f"Are you sure you want to reset the '{permission_type}' permission for server '{guild.name}'? (y/n): ")
+        if confirmation.lower() != 'y':
+            print("Operation cancelled.")
+            return
+        
+        server_config.permissions[permission_type] = []
+        config.save()
+        
+        if permission_type in ["set_model", "manage_config"]:
+            print(f"Reset '{permission_type}' permission to default (only server owner and administrators)")
+        elif permission_type == "reply_to":
+            print(f"Reset '{permission_type}' permission to default (replies to everyone)")
+        else:
+            print(f"Reset '{permission_type}' permission to default")
+    
+    else:
+        print(f"Error: Invalid action '{action}'")
+        print("Valid actions: view, add, remove, reset")
+
+
 def terminal_input_handler():
     """Handle terminal input while the bot is running"""
-    print("Terminal commands are now active. Type 'RBND-NC' to display the license.")
+    print("Terminal commands are now active. Type 'help' to see available commands.")
     while True:
         try:
-            command = input().strip()
-            if command == "RBND-NC":
+            command_line = input("Silas Blue: ").strip()
+            if not command_line:
+                continue
+                
+            # Parse the command line with proper handling of quoted arguments
+            try:
+                args = shlex.split(command_line)
+            except ValueError as e:
+                print(f"Error parsing command: {e}")
+                continue
+                
+            command = args[0].lower()
+            args = args[1:] if len(args) > 1 else []
+            
+            if command == "help":
+                print("\nAvailable terminal commands:")
+                print("  help                                - Display this help message")
+                print("  RBND-NC                             - Display the RBND-NC license")
+                print("  servers                             - List all servers the bot is connected to")
+                print("  server <server_id>                  - View configuration for a specific server")
+                print("  edit <server_id> <setting> <value>  - Edit a server's configuration")
+                print("  delete <server_id>                  - Delete a server's configuration")
+                print("  reset <server_id>                   - Reset a server's configuration to default")
+                print("  permissions <server_id> <action> <permission_type> [role_ids] - Manage server permissions")
+                print("\nServer Configuration Settings:")
+                print("  allowed_models       - Comma-separated list of allowed models, or 'all'")
+                print("  bot_nickname         - Custom nickname for the bot, or 'default'")
+                print("  random_replies       - 'enable', 'disable', 'probability=X', or 'cooldown=X'")
+                print("  system_instructions  - System instructions for the model")
+                print("  paginated_responses  - 'enable', 'disable', or 'pagesize=X'")
+                print("\nPermission Actions:")
+                print("  view                 - View roles with a specific permission")
+                print("  add                  - Add roles to a permission")
+                print("  remove               - Remove roles from a permission")
+                print("  reset                - Reset a permission to default")
+                print("\nPermission Types:")
+                print("  set_model            - Can change the current model")
+                print("  manage_config        - Can manage allowed models and permissions")
+                print("  reply_to             - Bot will only reply to users with these roles")
+            
+            elif command == "rbnd-nc":
                 print("\nRBND-NC License\n")
                 print("Copyright (c) RobotsNeverDie")
                 print("All rights reserved.")
@@ -426,13 +879,29 @@ def terminal_input_handler():
                 print("\nNo Warranty")
                 print("The Software is provided \"as is\", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of the Software.")
                 print("\nBy using, modifying, or distributing the Software, you agree to the terms of this license.")
-            elif command.lower() == "help":
-                print("\nAvailable terminal commands:")
-                print("RBND-NC - Display the RBND-NC license")
-                print("help - Display this help message")
+            
+            elif command == "servers":
+                handle_terminal_servers_command()
+            
+            elif command == "server":
+                handle_terminal_server_command(args)
+            
+            elif command == "edit":
+                handle_terminal_edit_command(args)
+            
+            elif command == "delete":
+                handle_terminal_delete_command(args)
+            
+            elif command == "reset":
+                handle_terminal_reset_command(args)
+            
+            elif command == "permissions":
+                handle_terminal_permissions_command(args)
+            
             elif command:
                 print(f"Unknown command: {command}")
                 print("Type 'help' for a list of available commands")
+        
         except EOFError:
             # Handle Ctrl+D
             break
@@ -442,6 +911,7 @@ def terminal_input_handler():
             break
         except Exception as e:
             print(f"Error in terminal input: {e}")
+
 
 @bot.event
 async def on_ready():
@@ -1505,88 +1975,6 @@ async def handle_removerole_command(ctx, permission_type, role_names):
         error_msg = f"Error: {str(e)}"
         await ctx.send(error_msg)
         log_activity("ERROR", bot.user, f"removerole {permission_type} {role_names}", error_msg, guild_id=ctx.guild.id)
-
-    finally:
-        # Clear active command
-        clear_active_command(ctx.author.id)
-
-
-# Helper function to handle listroles command
-async def handle_listroles_command(ctx, permission_type=None):
-    log_activity("COMMAND", ctx.author, f"listroles {permission_type if permission_type else 'all'}",
-                 guild_id=ctx.guild.id)
-
-    # Set active command
-    set_active_command(ctx.author.id)
-
-    try:
-        # Get server-specific config
-        server_config = config.get_server_config(ctx.guild.id)
-
-        if permission_type and permission_type not in server_config.permissions:
-            await ctx.send(f"Invalid permission type. Valid types: {', '.join(server_config.permissions.keys())}")
-            return
-
-        response = []
-
-        if permission_type:
-            # List roles for specific permission type
-            role_ids = server_config.permissions[permission_type]
-            roles = []
-            for role_id in role_ids:
-                role = ctx.guild.get_role(role_id)
-                if role:
-                    roles.append(role.name)
-                else:
-                    # Role no longer exists, remove it from config
-                    server_config.permissions[permission_type].remove(role_id)
-                    config.save()
-
-            if roles:
-                response.append(f"**{permission_type}** permission roles: {', '.join(roles)}")
-            else:
-                if permission_type in ["set_model", "manage_config"]:
-                    response.append(
-                        f"**{permission_type}** permission: No roles assigned (only server owner and administrators)")
-                elif permission_type == "reply_to":
-                    response.append(f"**{permission_type}** permission: No roles assigned (replies to everyone)")
-                else:
-                    response.append(f"**{permission_type}** permission: No roles assigned")
-        else:
-            # List roles for all permission types
-            for perm_type, role_ids in server_config.permissions.items():
-                roles = []
-                for role_id in role_ids:
-                    role = ctx.guild.get_role(role_id)
-                    if role:
-                        roles.append(role.name)
-                    else:
-                        # Role no longer exists, remove it from config
-                        server_config.permissions[perm_type].remove(role_id)
-                        config.save()
-
-                if roles:
-                    response.append(f"**{perm_type}** permission roles: {', '.join(roles)}")
-                else:
-                    if perm_type in ["set_model", "manage_config"]:
-                        response.append(
-                            f"**{perm_type}** permission: No roles assigned (only server owner and administrators)")
-                    elif perm_type == "reply_to":
-                        response.append(f"**{perm_type}** permission: No roles assigned (replies to everyone)")
-                    else:
-                        response.append(f"**{perm_type}** permission: No roles assigned")
-
-        # Send paginated response
-        await send_paginated_response(ctx, "\n".join(response), ctx.author.id)
-
-        log_activity("COMMAND RESPONSE", bot.user, f"listroles {permission_type if permission_type else 'all'}",
-                     "\n".join(response), guild_id=ctx.guild.id)
-
-    except Exception as e:
-        error_msg = f"Error: {str(e)}"
-        await ctx.send(error_msg)
-        log_activity("ERROR", bot.user, f"listroles {permission_type if permission_type else 'all'}", error_msg,
-                     guild_id=ctx.guild.id)
 
     finally:
         # Clear active command
