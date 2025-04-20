@@ -54,9 +54,10 @@ A discord bot that will allow users to send prompts to a locally run LLM via oll
   >\------
 
 ## Controlling the bot  
-  You can either use commands predicated with `!` or by tagging the bot's username. For example to get a list of all commands you can type `!help` or `@BotName help`. This allows you to interact with the bot even if you have other bots already using `!`.
+As of V1.1.0 you can issue commands in the terminal to configure settings on per server basis. Type `Help` in the terminal for a list of commands and how to use them.
 
-  You can reset the bots server configs by deleting the file `bot_config.pkl`. This file is automaticly generated after you run the bot.
+In Discord you can called the bot with either `!` or tagging it's username. For example both of these will pull up the help info to learn the bots discord commands: `!help` or `@BotName help`
+
 
 ## Contact
 You can contact RobotsNeverDie via the Mobile Repair Discord. https://discord.gg/HvM9thmd
