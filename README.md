@@ -1,5 +1,4 @@
-# Silas Blue 
-A discord bot that will allow users to send prompts to a locally run LLM via ollama through Discord messages.
+### Silas Blue 
 
 ## Requirements:
 - Python3 (https://www.python.org/downloads)
