@@ -1,7 +1,8 @@
-#Silas-Blue V1.1.0
+#Silas-Blue
 #Copyright (c) 2025 RobotsNeverDie 
 #You should have received a copy of the RBND-NC License along with this program.
 #If not, see https://github.com/RBND/Silus-Blue
+VERSION = "1.1.0"
 
 import discord
 import aiohttp
@@ -17,6 +18,42 @@ import sys
 import shlex
 from discord.ext import commands
 from discord import ui, ButtonStyle
+from colorama import Fore, Back, Style, init
+
+# Initialize colorama
+init(autoreset=True)
+
+# Define retrowave theme colors
+class RetroColors:
+    # Main colors
+    BLUE = Fore.BLUE + Style.BRIGHT
+    DEEP_BLUE = Fore.BLUE
+    MAGENTA = Fore.MAGENTA + Style.BRIGHT
+    PURPLE = Fore.MAGENTA
+    CYAN = Fore.CYAN + Style.BRIGHT
+    
+    # Backgrounds
+    BG_BLUE = Back.BLUE
+    BG_MAGENTA = Back.MAGENTA
+    
+    # Text styles
+    BOLD = Style.BRIGHT
+    NORMAL = Style.NORMAL
+    DIM = Style.DIM
+    
+    # Combinations
+    HEADER = MAGENTA + BOLD
+    TITLE = CYAN + BOLD
+    PROMPT = BLUE + BOLD
+    SUCCESS = CYAN + BOLD
+    ERROR = MAGENTA + BOLD
+    WARNING = PURPLE + BOLD
+    INFO = DEEP_BLUE + BOLD
+    COMMAND = BLUE
+    RESPONSE = PURPLE
+    
+    # Reset
+    RESET = Style.RESET_ALL
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -120,7 +157,7 @@ class BotConfig:
                         # Store this as a default config that will be copied for new servers
                         config.servers['default'] = default_server
 
-                        print("Migrated old configuration to new server-specific format")
+                        print(f"{RetroColors.INFO}Migrated old configuration to new server-specific format")
 
                     # Add new fields if they don't exist
                     for server_id, server_config in config.servers.items():
@@ -135,7 +172,7 @@ class BotConfig:
 
                     return config
             except Exception as e:
-                print(f"Error loading configuration: {e}")
+                print(f"{RetroColors.ERROR}Error loading configuration: {e}")
         return BotConfig()  # Return default config if file doesn't exist or error occurs
 
 
@@ -211,10 +248,23 @@ class PaginationView(ui.View):
 def log_activity(activity_type, user, content, response=None, guild_id=None):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     guild_info = f"Guild: {guild_id} | " if guild_id else ""
-    print(f"[{timestamp}] {guild_info}{activity_type} | User: {user} | Content: {content}")
+    
+    # Color-code different activity types
+    if activity_type == "ERROR":
+        activity_color = RetroColors.ERROR
+    elif activity_type == "COMMAND":
+        activity_color = RetroColors.COMMAND
+    elif activity_type == "RESPONSE":
+        activity_color = RetroColors.RESPONSE
+    elif activity_type == "PERMISSION DENIED":
+        activity_color = RetroColors.WARNING
+    else:
+        activity_color = RetroColors.INFO
+    
+    print(f"{RetroColors.CYAN}[{timestamp}] {RetroColors.PURPLE}{guild_info}{activity_color}{activity_type} {RetroColors.BLUE}| User: {user} | Content: {content}")
     if response:
-        print(f"[{timestamp}] RESPONSE | {response[:100]}{'...' if len(response) > 100 else ''}")
-    print("-" * 50)
+        print(f"{RetroColors.CYAN}[{timestamp}] {RetroColors.RESPONSE}RESPONSE | {response[:100]}{'...' if len(response) > 100 else ''}")
+    print(f"{RetroColors.MAGENTA}{'-' * 50}")
 
 
 # Permission checking function
@@ -409,25 +459,25 @@ async def send_paginated_response(ctx, content, author_id):
 def handle_terminal_servers_command():
     """Handle the 'servers' terminal command to list all servers"""
     if not bot.guilds:
-        print("Bot is not connected to any servers.")
+        print(f"{RetroColors.WARNING}Bot is not connected to any servers.")
         return
 
-    print("\nServers the bot is connected to:")
-    print("-" * 50)
+    print(f"\n{RetroColors.TITLE}Servers the bot is connected to:")
+    print(f"{RetroColors.MAGENTA}{'-' * 50}")
     for i, guild in enumerate(bot.guilds, 1):
-        print(f"{i}. {guild.name} (ID: {guild.id})")
+        print(f"{RetroColors.CYAN}{i}. {RetroColors.BLUE}{guild.name} {RetroColors.PURPLE}(ID: {guild.id})")
         # Check if we have a config for this server
         if str(guild.id) in config.servers:
-            print(f"   Config: Yes")
+            print(f"{RetroColors.INFO}   Config: {RetroColors.SUCCESS}Yes")
         else:
-            print(f"   Config: No (will be created on first interaction)")
-    print("-" * 50)
+            print(f"{RetroColors.INFO}   Config: {RetroColors.WARNING}No (will be created on first interaction)")
+    print(f"{RetroColors.MAGENTA}{'-' * 50}")
 
 
 def handle_terminal_server_command(args):
     """Handle the 'server' terminal command to view a specific server's configuration"""
     if not args:
-        print("Error: Server ID is required. Usage: server <server_id>")
+        print(f"{RetroColors.ERROR}Error: Server ID is required. Usage: server <server_id>")
         return
 
     server_id = args[0]
@@ -440,25 +490,25 @@ def handle_terminal_server_command(args):
             break
     
     if not guild:
-        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        print(f"{RetroColors.ERROR}Error: Server with ID {server_id} not found or bot is not connected to it.")
         return
     
     # Get the server config
     if server_id not in config.servers:
-        print(f"No configuration exists for server {guild.name} (ID: {server_id}).")
-        print("A default configuration will be created on first interaction.")
+        print(f"{RetroColors.WARNING}No configuration exists for server {guild.name} (ID: {server_id}).")
+        print(f"{RetroColors.INFO}A default configuration will be created on first interaction.")
         return
     
     server_config = config.servers[server_id]
     
-    print(f"\nConfiguration for server: {guild.name} (ID: {server_id})")
-    print("-" * 50)
+    print(f"\n{RetroColors.TITLE}Configuration for server: {RetroColors.BLUE}{guild.name} {RetroColors.PURPLE}(ID: {server_id})")
+    print(f"{RetroColors.MAGENTA}{'-' * 50}")
     
     # Display allowed models
-    print(f"Allowed Models: {'All' if not server_config.allowed_models else ', '.join(server_config.allowed_models)}")
+    print(f"{RetroColors.CYAN}Allowed Models: {RetroColors.BLUE}{'All' if not server_config.allowed_models else ', '.join(server_config.allowed_models)}")
     
     # Display permissions
-    print("\nPermissions:")
+    print(f"\n{RetroColors.TITLE}Permissions:")
     for perm_type, role_ids in server_config.permissions.items():
         role_names = []
         for role_id in role_ids:
@@ -467,45 +517,45 @@ def handle_terminal_server_command(args):
                 role_names.append(f"{role.name} (ID: {role.id})")
         
         if role_names:
-            print(f"  {perm_type}: {', '.join(role_names)}")
+            print(f"{RetroColors.CYAN}  {perm_type}: {RetroColors.BLUE}{', '.join(role_names)}")
         else:
             if perm_type in ["set_model", "manage_config"]:
-                print(f"  {perm_type}: No roles assigned (only server owner and administrators)")
+                print(f"{RetroColors.CYAN}  {perm_type}: {RetroColors.PURPLE}No roles assigned (only server owner and administrators)")
             elif perm_type == "reply_to":
-                print(f"  {perm_type}: No roles assigned (replies to everyone)")
+                print(f"{RetroColors.CYAN}  {perm_type}: {RetroColors.PURPLE}No roles assigned (replies to everyone)")
             else:
-                print(f"  {perm_type}: No roles assigned")
+                print(f"{RetroColors.CYAN}  {perm_type}: {RetroColors.PURPLE}No roles assigned")
     
     # Display bot nickname
-    print(f"\nBot Nickname: {server_config.bot_nickname if server_config.bot_nickname else 'Default'}")
+    print(f"\n{RetroColors.CYAN}Bot Nickname: {RetroColors.BLUE}{server_config.bot_nickname if server_config.bot_nickname else 'Default'}")
     
     # Display random replies settings
-    print("\nRandom Replies:")
-    print(f"  Enabled: {server_config.random_replies['enabled']}")
-    print(f"  Probability: {server_config.random_replies['probability'] * 100}%")
-    print(f"  Cooldown: {server_config.random_replies['cooldown']} seconds")
-    print(f"  Last Reply: {datetime.datetime.fromtimestamp(server_config.last_random_reply).strftime('%Y-%m-%d %H:%M:%S') if server_config.last_random_reply > 0 else 'Never'}")
+    print(f"\n{RetroColors.TITLE}Random Replies:")
+    print(f"{RetroColors.CYAN}  Enabled: {RetroColors.BLUE if server_config.random_replies['enabled'] else RetroColors.PURPLE}{server_config.random_replies['enabled']}")
+    print(f"{RetroColors.CYAN}  Probability: {RetroColors.BLUE}{server_config.random_replies['probability'] * 100}%")
+    print(f"{RetroColors.CYAN}  Cooldown: {RetroColors.BLUE}{server_config.random_replies['cooldown']} seconds")
+    print(f"{RetroColors.CYAN}  Last Reply: {RetroColors.BLUE}{datetime.datetime.fromtimestamp(server_config.last_random_reply).strftime('%Y-%m-%d %H:%M:%S') if server_config.last_random_reply > 0 else 'Never'}")
     
     # Display system instructions
-    print("\nSystem Instructions:")
+    print(f"\n{RetroColors.TITLE}System Instructions:")
     if server_config.system_instructions:
-        print(f"  {server_config.system_instructions}")
+        print(f"{RetroColors.BLUE}  {server_config.system_instructions}")
     else:
-        print("  None")
+        print(f"{RetroColors.PURPLE}  None")
     
     # Display paginated responses settings
-    print("\nPaginated Responses:")
-    print(f"  Enabled: {server_config.paginated_responses['enabled']}")
-    print(f"  Page Size: {server_config.paginated_responses['page_size']} characters")
+    print(f"\n{RetroColors.TITLE}Paginated Responses:")
+    print(f"{RetroColors.CYAN}  Enabled: {RetroColors.BLUE if server_config.paginated_responses['enabled'] else RetroColors.PURPLE}{server_config.paginated_responses['enabled']}")
+    print(f"{RetroColors.CYAN}  Page Size: {RetroColors.BLUE}{server_config.paginated_responses['page_size']} characters")
     
-    print("-" * 50)
+    print(f"{RetroColors.MAGENTA}{'-' * 50}")
 
 
 def handle_terminal_edit_command(args):
     """Handle the 'edit' terminal command to edit a server's configuration"""
     if len(args) < 3:
-        print("Error: Insufficient arguments. Usage: edit <server_id> <setting> <value>")
-        print("Available settings: allowed_models, bot_nickname, random_replies, system_instructions, paginated_responses")
+        print(f"{RetroColors.ERROR}Error: Insufficient arguments. Usage: edit <server_id> <setting> <value>")
+        print(f"{RetroColors.INFO}Available settings: allowed_models, bot_nickname, random_replies, system_instructions, paginated_responses")
         return
 
     server_id = args[0]
@@ -520,7 +570,7 @@ def handle_terminal_edit_command(args):
             break
     
     if not guild:
-        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        print(f"{RetroColors.ERROR}Error: Server with ID {server_id} not found or bot is not connected to it.")
         return
     
     # Get or create the server config
@@ -530,21 +580,21 @@ def handle_terminal_edit_command(args):
     if setting == "allowed_models":
         if value.lower() == "all":
             server_config.allowed_models = []
-            print(f"Set allowed models to: All models")
+            print(f"{RetroColors.SUCCESS}Set allowed models to: All models")
         else:
             models = [model.strip() for model in value.split(',')]
             server_config.allowed_models = models
-            print(f"Set allowed models to: {', '.join(models)}")
+            print(f"{RetroColors.SUCCESS}Set allowed models to: {RetroColors.BLUE}{', '.join(models)}")
     
     elif setting == "bot_nickname":
         if value.lower() == "default" or value.lower() == "none":
             server_config.bot_nickname = None
-            print("Reset bot nickname to default")
+            print(f"{RetroColors.SUCCESS}Reset bot nickname to default")
             # Update the bot's nickname in the guild
             asyncio.run_coroutine_threadsafe(guild.me.edit(nick=None), bot.loop)
         else:
             server_config.bot_nickname = value
-            print(f"Set bot nickname to: {value}")
+            print(f"{RetroColors.SUCCESS}Set bot nickname to: {RetroColors.BLUE}{value}")
             # Update the bot's nickname in the guild
             asyncio.run_coroutine_threadsafe(guild.me.edit(nick=value), bot.loop)
     
@@ -553,73 +603,73 @@ def handle_terminal_edit_command(args):
         try:
             if value.lower() in ["enable", "enabled", "true", "yes", "1"]:
                 server_config.random_replies["enabled"] = True
-                print("Enabled random replies")
+                print(f"{RetroColors.SUCCESS}Enabled random replies")
             elif value.lower() in ["disable", "disabled", "false", "no", "0"]:
                 server_config.random_replies["enabled"] = False
-                print("Disabled random replies")
+                print(f"{RetroColors.SUCCESS}Disabled random replies")
             elif value.lower().startswith("probability="):
                 prob_str = value.split('=')[1].strip()
                 prob = float(prob_str)
                 if 0 <= prob <= 1:
                     server_config.random_replies["probability"] = prob
-                    print(f"Set random reply probability to: {prob * 100}%")
+                    print(f"{RetroColors.SUCCESS}Set random reply probability to: {RetroColors.BLUE}{prob * 100}%")
                 else:
-                    print("Error: Probability must be between 0 and 1")
+                    print(f"{RetroColors.ERROR}Error: Probability must be between 0 and 1")
                     return
             elif value.lower().startswith("cooldown="):
                 cooldown_str = value.split('=')[1].strip()
                 cooldown = int(cooldown_str)
                 if cooldown >= 0:
                     server_config.random_replies["cooldown"] = cooldown
-                    print(f"Set random reply cooldown to: {cooldown} seconds")
+                    print(f"{RetroColors.SUCCESS}Set random reply cooldown to: {RetroColors.BLUE}{cooldown} seconds")
                 else:
-                    print("Error: Cooldown must be a non-negative integer")
+                    print(f"{RetroColors.ERROR}Error: Cooldown must be a non-negative integer")
                     return
             else:
-                print("Error: Invalid value for random_replies. Use 'enable', 'disable', 'probability=X', or 'cooldown=X'")
+                print(f"{RetroColors.ERROR}Error: Invalid value for random_replies. Use 'enable', 'disable', 'probability=X', or 'cooldown=X'")
                 return
         except Exception as e:
-            print(f"Error parsing random_replies value: {e}")
+            print(f"{RetroColors.ERROR}Error parsing random_replies value: {e}")
             return
     
     elif setting == "system_instructions":
         server_config.system_instructions = value
-        print(f"Set system instructions to: {value}")
+        print(f"{RetroColors.SUCCESS}Set system instructions to: {RetroColors.BLUE}{value}")
     
     elif setting == "paginated_responses":
         if value.lower() in ["enable", "enabled", "true", "yes", "1"]:
             server_config.paginated_responses["enabled"] = True
-            print("Enabled paginated responses")
+            print(f"{RetroColors.SUCCESS}Enabled paginated responses")
         elif value.lower() in ["disable", "disabled", "false", "no", "0"]:
             server_config.paginated_responses["enabled"] = False
-            print("Disabled paginated responses")
+            print(f"{RetroColors.SUCCESS}Disabled paginated responses")
         elif value.lower().startswith("pagesize="):
             size_str = value.split('=')[1].strip()
             size = int(size_str)
             if 100 <= size <= 2000:
                 server_config.paginated_responses["page_size"] = size
-                print(f"Set paginated response page size to: {size} characters")
+                print(f"{RetroColors.SUCCESS}Set paginated response page size to: {RetroColors.BLUE}{size} characters")
             else:
-                print("Error: Page size must be between 100 and 2000")
+                print(f"{RetroColors.ERROR}Error: Page size must be between 100 and 2000")
                 return
         else:
-            print("Error: Invalid value for paginated_responses. Use 'enable', 'disable', or 'pagesize=X'")
+            print(f"{RetroColors.ERROR}Error: Invalid value for paginated_responses. Use 'enable', 'disable', or 'pagesize=X'")
             return
     
     else:
-        print(f"Error: Unknown setting '{setting}'")
-        print("Available settings: allowed_models, bot_nickname, random_replies, system_instructions, paginated_responses")
+        print(f"{RetroColors.ERROR}Error: Unknown setting '{setting}'")
+        print(f"{RetroColors.INFO}Available settings: allowed_models, bot_nickname, random_replies, system_instructions, paginated_responses")
         return
     
     # Save the updated configuration
     config.save()
-    print(f"Configuration for server '{guild.name}' (ID: {server_id}) has been updated and saved.")
+    print(f"{RetroColors.SUCCESS}Configuration for server '{RetroColors.BLUE}{guild.name}{RetroColors.SUCCESS}' (ID: {server_id}) has been updated and saved.")
 
 
 def handle_terminal_delete_command(args):
     """Handle the 'delete' terminal command to delete a server's configuration"""
     if not args:
-        print("Error: Server ID is required. Usage: delete <server_id>")
+        print(f"{RetroColors.ERROR}Error: Server ID is required. Usage: delete <server_id>")
         return
 
     server_id = args[0]
@@ -632,37 +682,37 @@ def handle_terminal_delete_command(args):
             break
     
     if not guild and server_id != "default":
-        print(f"Warning: Server with ID {server_id} not found or bot is not connected to it.")
-        confirmation = input("Do you still want to delete this configuration? (y/n): ")
+        print(f"{RetroColors.WARNING}Warning: Server with ID {server_id} not found or bot is not connected to it.")
+        confirmation = input(f"{RetroColors.PROMPT}Do you still want to delete this configuration? (y/n): ")
         if confirmation.lower() != 'y':
-            print("Operation cancelled.")
+            print(f"{RetroColors.INFO}Operation cancelled.")
             return
     
     # Check if the configuration exists
     if server_id not in config.servers:
-        print(f"Error: No configuration exists for server ID {server_id}.")
+        print(f"{RetroColors.ERROR}Error: No configuration exists for server ID {server_id}.")
         return
     
     # Ask for confirmation
     server_name = guild.name if guild else f"ID {server_id}"
-    confirmation = input(f"Are you sure you want to delete the configuration for server '{server_name}'? (y/n): ")
+    confirmation = input(f"{RetroColors.PROMPT}Are you sure you want to delete the configuration for server '{server_name}'? (y/n): ")
     if confirmation.lower() != 'y':
-        print("Operation cancelled.")
+        print(f"{RetroColors.INFO}Operation cancelled.")
         return
     
     # Delete the configuration
     del config.servers[server_id]
     config.save()
-    print(f"Configuration for server '{server_name}' has been deleted.")
+    print(f"{RetroColors.SUCCESS}Configuration for server '{server_name}' has been deleted.")
     
     if server_id == "default":
-        print("Note: The default configuration has been deleted. New servers will now get a fresh default configuration.")
+        print(f"{RetroColors.INFO}Note: The default configuration has been deleted. New servers will now get a fresh default configuration.")
 
 
 def handle_terminal_reset_command(args):
     """Handle the 'reset' terminal command to reset a server's configuration to default"""
     if not args:
-        print("Error: Server ID is required. Usage: reset <server_id>")
+        print(f"{RetroColors.ERROR}Error: Server ID is required. Usage: reset <server_id>")
         return
 
     server_id = args[0]
@@ -675,28 +725,28 @@ def handle_terminal_reset_command(args):
             break
     
     if not guild:
-        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        print(f"{RetroColors.ERROR}Error: Server with ID {server_id} not found or bot is not connected to it.")
         return
     
     # Ask for confirmation
-    confirmation = input(f"Are you sure you want to reset the configuration for server '{guild.name}'? (y/n): ")
+    confirmation = input(f"{RetroColors.PROMPT}Are you sure you want to reset the configuration for server '{guild.name}'? (y/n): ")
     if confirmation.lower() != 'y':
-        print("Operation cancelled.")
+        print(f"{RetroColors.INFO}Operation cancelled.")
         return
     
     # Reset the configuration
     config.servers[server_id] = ServerConfig()
     config.save()
-    print(f"Configuration for server '{guild.name}' has been reset to default.")
+    print(f"{RetroColors.SUCCESS}Configuration for server '{guild.name}' has been reset to default.")
 
 
 def handle_terminal_permissions_command(args):
     """Handle the 'permissions' terminal command to manage server permissions"""
     if len(args) < 3:
-        print("Error: Insufficient arguments.")
-        print("Usage: permissions <server_id> <action> <permission_type> [role_id1,role_id2,...]")
-        print("Actions: view, add, remove, reset")
-        print("Permission types: set_model, manage_config, reply_to")
+        print(f"{RetroColors.ERROR}Error: Insufficient arguments.")
+        print(f"{RetroColors.INFO}Usage: permissions <server_id> <action> <permission_type> [role_id1,role_id2,...]")
+        print(f"{RetroColors.INFO}Actions: view, add, remove, reset")
+        print(f"{RetroColors.INFO}Permission types: set_model, manage_config, reply_to")
         return
 
     server_id = args[0]
@@ -711,7 +761,7 @@ def handle_terminal_permissions_command(args):
             break
     
     if not guild:
-        print(f"Error: Server with ID {server_id} not found or bot is not connected to it.")
+        print(f"{RetroColors.ERROR}Error: Server with ID {server_id} not found or bot is not connected to it.")
         return
     
     # Get or create the server config
@@ -719,8 +769,8 @@ def handle_terminal_permissions_command(args):
     
     # Check if the permission type is valid
     if permission_type not in ["set_model", "manage_config", "reply_to"]:
-        print(f"Error: Invalid permission type '{permission_type}'")
-        print("Valid permission types: set_model, manage_config, reply_to")
+        print(f"{RetroColors.ERROR}Error: Invalid permission type '{permission_type}'")
+        print(f"{RetroColors.INFO}Valid permission types: set_model, manage_config, reply_to")
         return
     
     # Handle the action
@@ -728,11 +778,11 @@ def handle_terminal_permissions_command(args):
         role_ids = server_config.permissions[permission_type]
         if not role_ids:
             if permission_type in ["set_model", "manage_config"]:
-                print(f"Permission '{permission_type}': No roles assigned (only server owner and administrators)")
+                print(f"{RetroColors.INFO}Permission '{permission_type}': No roles assigned (only server owner and administrators)")
             elif permission_type == "reply_to":
-                print(f"Permission '{permission_type}': No roles assigned (replies to everyone)")
+                print(f"{RetroColors.INFO}Permission '{permission_type}': No roles assigned (replies to everyone)")
             else:
-                print(f"Permission '{permission_type}': No roles assigned")
+                print(f"{RetroColors.INFO}Permission '{permission_type}': No roles assigned")
         else:
             role_details = []
             for role_id in role_ids:
@@ -741,12 +791,12 @@ def handle_terminal_permissions_command(args):
                     role_details.append(f"{role.name} (ID: {role.id})")
                 else:
                     role_details.append(f"Unknown role (ID: {role_id})")
-            print(f"Permission '{permission_type}' roles: {', '.join(role_details)}")
+            print(f"{RetroColors.INFO}Permission '{permission_type}' roles: {RetroColors.BLUE}{', '.join(role_details)}")
     
     elif action == "add":
         if len(args) < 4:
-            print("Error: Role IDs are required for the 'add' action.")
-            print("Usage: permissions <server_id> add <permission_type> <role_id1,role_id2,...>")
+            print(f"{RetroColors.ERROR}Error: Role IDs are required for the 'add' action.")
+            print(f"{RetroColors.INFO}Usage: permissions <server_id> add <permission_type> <role_id1,role_id2,...>")
             return
         
         role_ids_str = args[3]
@@ -760,20 +810,20 @@ def handle_terminal_permissions_command(args):
                     server_config.permissions[permission_type].append(role_id)
                     added_roles.append(f"{role.name} (ID: {role.id})")
                 else:
-                    print(f"Role '{role.name}' (ID: {role.id}) already has '{permission_type}' permission.")
+                    print(f"{RetroColors.WARNING}Role '{role.name}' (ID: {role.id}) already has '{permission_type}' permission.")
             else:
-                print(f"Warning: Role with ID {role_id} not found in server '{guild.name}'")
+                print(f"{RetroColors.WARNING}Warning: Role with ID {role_id} not found in server '{guild.name}'")
         
         if added_roles:
             config.save()
-            print(f"Added roles to '{permission_type}' permission: {', '.join(added_roles)}")
+            print(f"{RetroColors.SUCCESS}Added roles to '{permission_type}' permission: {RetroColors.BLUE}{', '.join(added_roles)}")
         else:
-            print("No roles were added.")
+            print(f"{RetroColors.INFO}No roles were added.")
     
     elif action == "remove":
         if len(args) < 4:
-            print("Error: Role IDs are required for the 'remove' action.")
-            print("Usage: permissions <server_id> remove <permission_type> <role_id1,role_id2,...>")
+            print(f"{RetroColors.ERROR}Error: Role IDs are required for the 'remove' action.")
+            print(f"{RetroColors.INFO}Usage: permissions <server_id> remove <permission_type> <role_id1,role_id2,...>")
             return
         
         role_ids_str = args[3]
@@ -788,42 +838,42 @@ def handle_terminal_permissions_command(args):
                 server_config.permissions[permission_type].remove(role_id)
                 removed_roles.append(role_name)
             else:
-                print(f"Role {role_name} does not have '{permission_type}' permission.")
+                print(f"{RetroColors.WARNING}Role {role_name} does not have '{permission_type}' permission.")
         
         if removed_roles:
             config.save()
-            print(f"Removed roles from '{permission_type}' permission: {', '.join(removed_roles)}")
+            print(f"{RetroColors.SUCCESS}Removed roles from '{permission_type}' permission: {RetroColors.BLUE}{', '.join(removed_roles)}")
         else:
-            print("No roles were removed.")
+            print(f"{RetroColors.INFO}No roles were removed.")
     
     elif action == "reset":
         # Ask for confirmation
-        confirmation = input(f"Are you sure you want to reset the '{permission_type}' permission for server '{guild.name}'? (y/n): ")
+        confirmation = input(f"{RetroColors.PROMPT}Are you sure you want to reset the '{permission_type}' permission for server '{guild.name}'? (y/n): ")
         if confirmation.lower() != 'y':
-            print("Operation cancelled.")
+            print(f"{RetroColors.INFO}Operation cancelled.")
             return
         
         server_config.permissions[permission_type] = []
         config.save()
         
         if permission_type in ["set_model", "manage_config"]:
-            print(f"Reset '{permission_type}' permission to default (only server owner and administrators)")
+            print(f"{RetroColors.SUCCESS}Reset '{permission_type}' permission to default (only server owner and administrators)")
         elif permission_type == "reply_to":
-            print(f"Reset '{permission_type}' permission to default (replies to everyone)")
+            print(f"{RetroColors.SUCCESS}Reset '{permission_type}' permission to default (replies to everyone)")
         else:
-            print(f"Reset '{permission_type}' permission to default")
+            print(f"{RetroColors.SUCCESS}Reset '{permission_type}' permission to default")
     
     else:
-        print(f"Error: Invalid action '{action}'")
-        print("Valid actions: view, add, remove, reset")
+        print(f"{RetroColors.ERROR}Error: Invalid action '{action}'")
+        print(f"{RetroColors.INFO}Valid actions: view, add, remove, reset")
 
 
 def terminal_input_handler():
     """Handle terminal input while the bot is running"""
-    print("Terminal commands are now active. Type 'help' to see available commands.")
+    print(f"{RetroColors.TITLE}Terminal commands are now active. Type 'help' to see available commands.")
     while True:
         try:
-            command_line = input("Silas Blue: ").strip()
+            command_line = input(f"{RetroColors.PROMPT}Silas Blue: ").strip()
             if not command_line:
                 continue
                 
@@ -831,54 +881,54 @@ def terminal_input_handler():
             try:
                 args = shlex.split(command_line)
             except ValueError as e:
-                print(f"Error parsing command: {e}")
+                print(f"{RetroColors.ERROR}Error parsing command: {e}")
                 continue
                 
             command = args[0].lower()
             args = args[1:] if len(args) > 1 else []
             
             if command == "help":
-                print("\nAvailable terminal commands:")
-                print("  help                                - Display this help message")
-                print("  RBND-NC                             - Display the RBND-NC license")
-                print("  servers                             - List all servers the bot is connected to")
-                print("  server <server_id>                  - View configuration for a specific server")
-                print("  edit <server_id> <setting> <value>  - Edit a server's configuration")
-                print("  delete <server_id>                  - Delete a server's configuration")
-                print("  reset <server_id>                   - Reset a server's configuration to default")
-                print("  permissions <server_id> <action> <permission_type> [role_ids] - Manage server permissions")
-                print("\nServer Configuration Settings:")
-                print("  allowed_models       - Comma-separated list of allowed models, or 'all'")
-                print("  bot_nickname         - Custom nickname for the bot, or 'default'")
-                print("  random_replies       - 'enable', 'disable', 'probability=X', or 'cooldown=X'")
-                print("  system_instructions  - System instructions for the model")
-                print("  paginated_responses  - 'enable', 'disable', or 'pagesize=X'")
-                print("\nPermission Actions:")
-                print("  view                 - View roles with a specific permission")
-                print("  add                  - Add roles to a permission")
-                print("  remove               - Remove roles from a permission")
-                print("  reset                - Reset a permission to default")
-                print("\nPermission Types:")
-                print("  set_model            - Can change the current model")
-                print("  manage_config        - Can manage allowed models and permissions")
-                print("  reply_to             - Bot will only reply to users with these roles")
+                print(f"\n{RetroColors.HEADER}Available terminal commands:")
+                print(f"{RetroColors.COMMAND}  help                                {RetroColors.INFO}- Display this help message")
+                print(f"{RetroColors.COMMAND}  RBND-NC                             {RetroColors.INFO}- Display the RBND-NC license")
+                print(f"{RetroColors.COMMAND}  servers                             {RetroColors.INFO}- List all servers the bot is connected to")
+                print(f"{RetroColors.COMMAND}  server <server_id>                  {RetroColors.INFO}- View configuration for a specific server")
+                print(f"{RetroColors.COMMAND}  edit <server_id> <setting> <value>  {RetroColors.INFO}- Edit a server's configuration")
+                print(f"{RetroColors.COMMAND}  delete <server_id>                  {RetroColors.INFO}- Delete a server's configuration")
+                print(f"{RetroColors.COMMAND}  reset <server_id>                   {RetroColors.INFO}- Reset a server's configuration to default")
+                print(f"{RetroColors.COMMAND}  permissions <server_id> <action> <permission_type> [role_ids] {RetroColors.INFO}- Manage server permissions")
+                print(f"\n{RetroColors.HEADER}Server Configuration Settings:")
+                print(f"{RetroColors.COMMAND}  allowed_models       {RetroColors.INFO}- Comma-separated list of allowed models, or 'all'")
+                print(f"{RetroColors.COMMAND}  bot_nickname         {RetroColors.INFO}- Custom nickname for the bot, or 'default'")
+                print(f"{RetroColors.COMMAND}  random_replies       {RetroColors.INFO}- 'enable', 'disable', 'probability=X', or 'cooldown=X'")
+                print(f"{RetroColors.COMMAND}  system_instructions  {RetroColors.INFO}- System instructions for the model")
+                print(f"{RetroColors.COMMAND}  paginated_responses  {RetroColors.INFO}- 'enable', 'disable', or 'pagesize=X'")
+                print(f"\n{RetroColors.HEADER}Permission Actions:")
+                print(f"{RetroColors.COMMAND}  view                 {RetroColors.INFO}- View roles with a specific permission")
+                print(f"{RetroColors.COMMAND}  add                  {RetroColors.INFO}- Add roles to a permission")
+                print(f"{RetroColors.COMMAND}  remove               {RetroColors.INFO}- Remove roles from a permission")
+                print(f"{RetroColors.COMMAND}  reset                {RetroColors.INFO}- Reset a permission to default")
+                print(f"\n{RetroColors.HEADER}Permission Types:")
+                print(f"{RetroColors.COMMAND}  set_model            {RetroColors.INFO}- Can change the current model")
+                print(f"{RetroColors.COMMAND}  manage_config        {RetroColors.INFO}- Can manage allowed models and permissions")
+                print(f"{RetroColors.COMMAND}  reply_to             {RetroColors.INFO}- Bot will only reply to users with these roles")
             
             elif command == "rbnd-nc":
-                print("\nRBND-NC License\n")
-                print("Copyright (c) RobotsNeverDie")
-                print("All rights reserved.")
-                print("\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to use, copy, modify, and merge copies of the Software, subject to the following conditions:")
-                print("\nNon-Commercial Use Only")
-                print("The Software may not be used, either in whole or in part, for any commercial purposes. Commercial purposes include, but are not limited to, selling, licensing, or offering the Software or derivative works for a fee, using it as part of a service for which payment is received, or using it within a product offered commercially.")
-                print("\nAttribution and Source Linking")
-                print("Any redistribution or sharing of this Software, modified or unmodified, must include clear and visible attribution to the original author(s) and a working link to the original source repository or website: [Your Website or Repository URL].")
-                print("\nNo Sublicensing")
-                print("You may not sublicense the Software. Any person who receives a copy must also comply with this license directly.")
-                print("\nRevocation of Rights")
-                print("The licensor reserves the right to revoke this license and any associated permissions to use, modify, or distribute the Software at any time, for any reason or no reason, at their sole discretion. Upon revocation, all use, modification, and distribution of the Software must cease immediately.")
-                print("\nNo Warranty")
-                print("The Software is provided \"as is\", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of the Software.")
-                print("\nBy using, modifying, or distributing the Software, you agree to the terms of this license.")
+                print(f"\n{RetroColors.HEADER}RBND-NC License\n")
+                print(f"{RetroColors.CYAN}Copyright (c) RobotsNeverDie")
+                print(f"{RetroColors.CYAN}All rights reserved.")
+                print(f"\n{RetroColors.BLUE}Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to use, copy, modify, and merge copies of the Software, subject to the following conditions:")
+                print(f"\n{RetroColors.MAGENTA}Non-Commercial Use Only")
+                print(f"{RetroColors.BLUE}The Software may not be used, either in whole or in part, for any commercial purposes. Commercial purposes include, but are not limited to, selling, licensing, or offering the Software or derivative works for a fee, using it as part of a service for which payment is received, or using it within a product offered commercially.")
+                print(f"\n{RetroColors.MAGENTA}Attribution and Source Linking")
+                print(f"{RetroColors.BLUE}Any redistribution or sharing of this Software, modified or unmodified, must include clear and visible attribution to the original author(s) and a working link to the original source repository or website: [Your Website or Repository URL].")
+                print(f"\n{RetroColors.MAGENTA}No Sublicensing")
+                print(f"{RetroColors.BLUE}You may not sublicense the Software. Any person who receives a copy must also comply with this license directly.")
+                print(f"\n{RetroColors.MAGENTA}Revocation of Rights")
+                print(f"{RetroColors.BLUE}The licensor reserves the right to revoke this license and any associated permissions to use, modify, or distribute the Software at any time, for any reason or no reason, at their sole discretion. Upon revocation, all use, modification, and distribution of the Software must cease immediately.")
+                print(f"\n{RetroColors.MAGENTA}No Warranty")
+                print(f"{RetroColors.BLUE}The Software is provided \"as is\", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of the Software.")
+                print(f"\n{RetroColors.CYAN}By using, modifying, or distributing the Software, you agree to the terms of this license.")
             
             elif command == "servers":
                 handle_terminal_servers_command()
@@ -899,65 +949,65 @@ def terminal_input_handler():
                 handle_terminal_permissions_command(args)
             
             elif command:
-                print(f"Unknown command: {command}")
-                print("Type 'help' for a list of available commands")
+                print(f"{RetroColors.ERROR}Unknown command: {command}")
+                print(f"{RetroColors.INFO}Type 'help' for a list of available commands")
         
         except EOFError:
             # Handle Ctrl+D
             break
         except KeyboardInterrupt:
             # Handle Ctrl+C
-            print("\nTerminal input handler stopped.")
+            print(f"\n{RetroColors.WARNING}Terminal input handler stopped.")
             break
         except Exception as e:
-            print(f"Error in terminal input: {e}")
+            print(f"{RetroColors.ERROR}Error in terminal input: {e}")
 
 
 @bot.event
 async def on_ready():
     global session
     # Print startup text
-    print("Silas Blue V1.1.0")
-    print("Copyright (C) 2025 RobotsNeverDie")
-    print("This program comes with ABSOLUTELY NO WARRANTY")
-    print("You may only run this software under the RBND-NC license.")
-    print("\n------")
+    print(f"{RetroColors.HEADER}Silas Blue V{VERSION}")
+    print(f"{RetroColors.CYAN}Copyright (C) 2025 RobotsNeverDie")
+    print(f"{RetroColors.BLUE}This program comes with ABSOLUTELY NO WARRANTY")
+    print(f"{RetroColors.BLUE}You may only run this software under the RBND-NC license.")
+    print(f"\n{RetroColors.MAGENTA}------")
     # Create aiohttp session
     session = aiohttp.ClientSession()
 
-    print(f'Logged in as {bot.user.name} ({bot.user.id})')
-    print(f'Connected to {len(bot.guilds)} servers:')
+    print(f"{RetroColors.SUCCESS}Logged in as {RetroColors.BLUE}{bot.user.name} {RetroColors.PURPLE}({bot.user.id})")
+    print(f"{RetroColors.INFO}Connected to {RetroColors.BLUE}{len(bot.guilds)} servers:")
 
     for guild in bot.guilds:
         # Get or create server config
         server_config = config.get_server_config(guild.id)
 
-        print(f'\nServer: {guild.name} (ID: {guild.id})')
+        print(f"\n{RetroColors.CYAN}Server: {RetroColors.BLUE}{guild.name} {RetroColors.PURPLE}(ID: {guild.id})")
         print(
-            f'- Allowed Models: {"All" if not server_config.allowed_models else ", ".join(server_config.allowed_models)}')
-        print(f'- Set Model Permission: {len(server_config.permissions["set_model"])} roles')
-        print(f'- Manage Config Permission: {len(server_config.permissions["manage_config"])} roles')
+            f"{RetroColors.CYAN}- Allowed Models: {RetroColors.BLUE}{'All' if not server_config.allowed_models else ', '.join(server_config.allowed_models)}")
+        print(f"{RetroColors.CYAN}- Set Model Permission: {RetroColors.BLUE}{len(server_config.permissions['set_model'])} roles")
+        print(f"{RetroColors.CYAN}- Manage Config Permission: {RetroColors.BLUE}{len(server_config.permissions['manage_config'])} roles")
         print(
-            f'- Reply To Permission: {"Everyone" if not server_config.permissions["reply_to"] else f"{len(server_config.permissions["reply_to"])} roles"}')
-        print(f'- Bot Nickname: {server_config.bot_nickname if server_config.bot_nickname else "Default"}')
-        print(f'- Random Replies: {"Enabled" if server_config.random_replies["enabled"] else "Disabled"}')
+            f"{RetroColors.CYAN}- Reply To Permission: {RetroColors.BLUE}{'Everyone' if not server_config.permissions['reply_to'] else f'{len(server_config.permissions['reply_to'])} roles'}")
+        print(f"{RetroColors.CYAN}- Bot Nickname: {RetroColors.BLUE}{server_config.bot_nickname if server_config.bot_nickname else 'Default'}")
+        print(f"{RetroColors.CYAN}- Random Replies: {RetroColors.BLUE}{'Enabled' if server_config.random_replies['enabled'] else 'Disabled'}")
         if server_config.random_replies["enabled"]:
-            print(f'  - Probability: {server_config.random_replies["probability"] * 100}%')
-            print(f'  - Cooldown: {server_config.random_replies["cooldown"]} seconds')
-        print(f'- System Instructions: {"Set" if server_config.system_instructions else "None"}')
-        print(f'- Paginated Responses: {"Enabled" if server_config.paginated_responses["enabled"] else "Disabled"}')
+            print(f"{RetroColors.CYAN}  - Probability: {RetroColors.BLUE}{server_config.random_replies['probability'] * 100}%")
+            print(f"{RetroColors.CYAN}  - Cooldown: {RetroColors.BLUE}{server_config.random_replies['cooldown']} seconds")
+        print(f"{RetroColors.CYAN}- System Instructions: {RetroColors.BLUE}{'Set' if server_config.system_instructions else 'None'}")
+        print(f"{RetroColors.CYAN}- Paginated Responses: {RetroColors.BLUE}{'Enabled' if server_config.paginated_responses['enabled'] else 'Disabled'}")
         if server_config.paginated_responses["enabled"]:
-            print(f'  - Page Size: {server_config.paginated_responses["page_size"]} characters')
+            print(f"{RetroColors.CYAN}  - Page Size: {RetroColors.BLUE}{server_config.paginated_responses['page_size']} characters")
 
         # Set custom nickname in guild if configured
         if server_config.bot_nickname:
             try:
                 await guild.me.edit(nick=server_config.bot_nickname)
-                print(f"Set nickname to '{server_config.bot_nickname}' in guild: {guild.name}")
+                print(f"{RetroColors.SUCCESS}Set nickname to '{RetroColors.BLUE}{server_config.bot_nickname}{RetroColors.SUCCESS}' in guild: {guild.name}")
             except Exception as e:
-                print(f"Failed to set nickname in guild {guild.name}: {e}")
+                print(f"{RetroColors.ERROR}Failed to set nickname in guild {guild.name}: {e}")
 
-    print('\n------')
+    print(f"\n{RetroColors.MAGENTA}------")
     
     # Start terminal input handler in a separate thread
     input_thread = threading.Thread(target=terminal_input_handler, daemon=True)
@@ -967,7 +1017,7 @@ async def on_ready():
 @bot.event
 async def on_guild_join(guild):
     """Handle joining a new server"""
-    print(f"Joined new server: {guild.name} (ID: {guild.id})")
+    print(f"{RetroColors.SUCCESS}Joined new server: {RetroColors.BLUE}{guild.name} {RetroColors.PURPLE}(ID: {guild.id})")
 
     # Get or create server config
     server_config = config.get_server_config(guild.id)
@@ -985,7 +1035,7 @@ async def on_guild_join(guild):
     # Save the updated config
     config.save()
 
-    print(f"Created configuration for new server: {guild.name}")
+    print(f"{RetroColors.SUCCESS}Created configuration for new server: {RetroColors.BLUE}{guild.name}")
 
 
 @bot.event
@@ -2626,7 +2676,7 @@ async def on_command_error(ctx, error):
 async def on_close():
     if session:
         await session.close()
-        print("Closed aiohttp session")
+        print(f"{RetroColors.INFO}Closed aiohttp session")
 
 
 # Replace 'YOUR_DISCORD_BOT_TOKEN' with your actual bot token
