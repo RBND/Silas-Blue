@@ -6,12 +6,12 @@ A discord bot that will allow users to send prompts to a locally run LLM via oll
 - Ollama (https://ollama.com/download)
 
 ## Getting Started:
-- **Start Ollama**
+ - **Start Ollama**
 
   Verify that Ollama is running by opening a terminal and typing `ollama --version`.  
   Ollama will return "ollama version is x.x.x". If it is not running you can start it with the command `ollama serve`.
 
-- **Verify required Python3 libraries are installed.** </ins> (Discord, aiohttp, asyncio)
+ - **Verify required Python3 libraries are installed.** </ins> (Discord, aiohttp, asyncio)
   
     Open a terminal and type:
 
@@ -21,12 +21,15 @@ A discord bot that will allow users to send prompts to a locally run LLM via oll
   Linux  
   > sudo python3 -m pip install -U discord.py aiohttp asyncio
 
-- Insert your Discord private bot token into bot.py
+ - Insert your Discord private bot token into bot.py
   Open bot.py in your IDE or text editor and on the very last line of code look for
   >\# Replace 'YOUR_DISCORD_BOT_TOKEN' with your actual bot token  
   >bot.run(os.environ.get('DISCORD_TOKEN', 'INSERT_YOUR_PRIVATE_DISCORD_TOKEN_HERE'))
 
   Replace `'INSERT_YOUR_PRIVATE_DISCORD_TOKEN_HERE'` with your private key. Make sure you keep the single `'` before and after the key.
+
+## Adding Models
+  In your terminal use the command `ollama pull` followed by the model name. For example to download Gemma3:1b you would type `ollama pull gemma3:1b`. You can find more models at https://ollama.com/search
 
 ## Running the bot  
   To launch the bot open a terminal and `cd` to the folder you downloaded bot.py into. If you're on windows and have it saved to your desktop this would look like `cd "C:\Users\YOUR_USERNAME\Desktop"`
