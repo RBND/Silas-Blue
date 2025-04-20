@@ -1,8 +1,3 @@
-#Silas-Blue V1.0
-#Copyright (c) 2025 RobotsNeverDie 
-#You should have received a copy of the RBND-NC License along with this program.
-#If not, see https://github.com/RBND/Silus-Blue
-
 import discord
 import aiohttp
 import json
@@ -14,6 +9,8 @@ import random
 import re
 from discord.ext import commands
 from discord import ui, ButtonStyle
+import threading
+import sys
 
 # Discord bot setup
 intents = discord.Intents.default()
@@ -402,9 +399,54 @@ async def send_paginated_response(ctx, content, author_id):
     view.message = message
 
 
+def terminal_input_handler():
+    """Handle terminal input while the bot is running"""
+    print("Terminal commands are now active. Type 'RBND-NC' to display the license.")
+    while True:
+        try:
+            command = input().strip()
+            if command == "RBND-NC":
+                print("\nRBND-NC License\n")
+                print("Copyright (c) RobotsNeverDie")
+                print("All rights reserved.")
+                print("\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to use, copy, modify, and merge copies of the Software, subject to the following conditions:")
+                print("\nNon-Commercial Use Only")
+                print("The Software may not be used, either in whole or in part, for any commercial purposes. Commercial purposes include, but are not limited to, selling, licensing, or offering the Software or derivative works for a fee, using it as part of a service for which payment is received, or using it within a product offered commercially.")
+                print("\nAttribution and Source Linking")
+                print("Any redistribution or sharing of this Software, modified or unmodified, must include clear and visible attribution to the original author(s) and a working link to the original source repository or website: [Your Website or Repository URL].")
+                print("\nNo Sublicensing")
+                print("You may not sublicense the Software. Any person who receives a copy must also comply with this license directly.")
+                print("\nRevocation of Rights")
+                print("The licensor reserves the right to revoke this license and any associated permissions to use, modify, or distribute the Software at any time, for any reason or no reason, at their sole discretion. Upon revocation, all use, modification, and distribution of the Software must cease immediately.")
+                print("\nNo Warranty")
+                print("The Software is provided \"as is\", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of the Software.")
+                print("\nBy using, modifying, or distributing the Software, you agree to the terms of this license.")
+            elif command.lower() == "help":
+                print("\nAvailable terminal commands:")
+                print("RBND-NC - Display the RBND-NC license")
+                print("help - Display this help message")
+            elif command:
+                print(f"Unknown command: {command}")
+                print("Type 'help' for a list of available commands")
+        except EOFError:
+            # Handle Ctrl+D
+            break
+        except KeyboardInterrupt:
+            # Handle Ctrl+C
+            print("\nTerminal input handler stopped.")
+            break
+        except Exception as e:
+            print(f"Error in terminal input: {e}")
+
 @bot.event
 async def on_ready():
     global session
+    # Print startup text
+    print("Silas Blue V1.0")
+    print("Copyright (C) 2025 RobotsNeverDie")
+    print("This program comes with ABSOLUTELY NO WARRANTY")
+    print("You may only run this software under the RBND-NC license.")
+    print("\n------")
     # Create aiohttp session
     session = aiohttp.ClientSession()
 
@@ -441,6 +483,10 @@ async def on_ready():
                 print(f"Failed to set nickname in guild {guild.name}: {e}")
 
     print('\n------')
+    
+    # Start terminal input handler in a separate thread
+    input_thread = threading.Thread(target=terminal_input_handler, daemon=True)
+    input_thread.start()
 
 
 @bot.event
@@ -605,6 +651,9 @@ async def on_message(message):
                 else:
                     await message.reply(
                         "Please provide at least one parameter (enable/disable/status/pagesize) after 'pagination'.")
+                return
+            elif command in ['RBND-NC', '!RBND-NC']:
+                await handle_rbnd_nc_command(ctx)
                 return
 
         # If no command was recognized, treat as a regular question
@@ -1531,7 +1580,8 @@ async def handle_listroles_command(ctx, permission_type=None):
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         await ctx.send(error_msg)
-        log_activity("ERROR", bot.user, f"removerole {permission_type} {role_names}", error_msg, guild_id=ctx.guild.id)
+        log_activity("ERROR", bot.user, f"listroles {permission_type if permission_type else 'all'}", error_msg,
+                     guild_id=ctx.guild.id)
 
     finally:
         # Clear active command
@@ -1975,6 +2025,37 @@ async def handle_pagination_command(ctx, args):
         clear_active_command(ctx.author.id)
 
 
+# Helper function to handle RBND-NC license command
+async def handle_rbnd_nc_command(ctx):
+    """Display the RBND-NC license text"""
+    license_text = """RBND-NC License
+
+Copyright (c) RobotsNeverDie
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, modify, and merge copies of the Software, subject to the following conditions:
+
+Non-Commercial Use Only
+The Software may not be used, either in whole or in part, for any commercial purposes. Commercial purposes include, but are not limited to, selling, licensing, or offering the Software or derivative works for a fee, using it as part of a service for which payment is received, or using it within a product offered commercially.
+
+Attribution and Source Linking
+Any redistribution or sharing of this Software, modified or unmodified, must include clear and visible attribution to the original author(s) and a working link to the original source repository or website: [Your Website or Repository URL].
+
+No Sublicensing
+You may not sublicense the Software. Any person who receives a copy must also comply with this license directly.
+
+Revocation of Rights
+The licensor reserves the right to revoke this license and any associated permissions to use, modify, or distribute the Software at any time, for any reason or no reason, at their sole discretion. Upon revocation, all use, modification, and distribution of the Software must cease immediately.
+
+No Warranty
+The Software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and noninfringement. In no event shall the authors be liable for any claim, damages, or other liability arising from the use of the Software.
+
+By using, modifying, or distributing the Software, you agree to the terms of this license."""
+    
+    # Send paginated response
+    await send_paginated_response(ctx, license_text, ctx.author.id)
+    log_activity("COMMAND RESPONSE", bot.user, "RBND-NC", "License text displayed", guild_id=ctx.guild.id)
+
 # Command decorator to check for active commands
 def cooldown():
     async def predicate(ctx):
@@ -2122,6 +2203,11 @@ async def help_command(ctx):
     """Show help information for all commands"""
     await handle_help_command(ctx.message)
 
+@bot.command(name="RBND-NC")
+@cooldown()
+async def rbnd_nc_license(ctx):
+    """Display the RBND-NC license"""
+    await handle_rbnd_nc_command(ctx)
 
 # Error handler for commands
 @bot.event
