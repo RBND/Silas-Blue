@@ -19,7 +19,7 @@ A discord bot that will allow users to send prompts to a locally run LLM via oll
   > py -3 -m pip install -U discord.py aiohttp asyncio colorama
 
   Linux  
-  > sudo python3 -m pip install -U discord.py aiohttp asyncio
+  > sudo python3 -m pip install -U discord.py aiohttp asyncio colorama
 
  - Insert your Discord private bot token into bot.py
   Open bot.py in your IDE or text editor and on the very last line of code look for
