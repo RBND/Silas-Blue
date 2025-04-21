@@ -8,7 +8,7 @@
  - **Start Ollama**
 
   Verify that Ollama is running by opening a terminal and typing `ollama --version`.  
-  Ollama will return "ollama version is x.x.x". If it is not running you can start it with the command `ollama serve`.
+  Ollama will return "ollama version is x.x.x". If it is not running you can start it with the command `ollama serve`. If this doesn't start the Ollama service for you can also do `ollama run` and then put your model name after. For example to load gemma3:1b you would type `ollama run gemma3:1b`.
 
  - **Verify required Python3 libraries are installed.** </ins> (Discord, aiohttp, asyncio)
   
