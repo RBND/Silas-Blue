@@ -988,7 +988,7 @@ async def on_ready():
         print(f"{RetroColors.CYAN}- Set Model Permission: {RetroColors.BLUE}{len(server_config.permissions['set_model'])} roles")
         print(f"{RetroColors.CYAN}- Manage Config Permission: {RetroColors.BLUE}{len(server_config.permissions['manage_config'])} roles")
         print(
-            f"{RetroColors.CYAN}- Reply To Permission: {RetroColors.BLUE}{'Everyone' if not server_config.permissions['reply_to'] else f'{len(server_config.permissions['reply_to'])} roles'}")
+            f"{RetroColors.CYAN}- Reply To Permission: {RetroColors.BLUE}{'Everyone' if not server_config.permissions['reply_to'] else str(len(server_config.permissions['reply_to'])) + ' roles'}")
         print(f"{RetroColors.CYAN}- Bot Nickname: {RetroColors.BLUE}{server_config.bot_nickname if server_config.bot_nickname else 'Default'}")
         print(f"{RetroColors.CYAN}- Random Replies: {RetroColors.BLUE}{'Enabled' if server_config.random_replies['enabled'] else 'Disabled'}")
         if server_config.random_replies["enabled"]:
