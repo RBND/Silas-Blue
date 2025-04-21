@@ -2,7 +2,7 @@
 #Copyright (c) 2025 RobotsNeverDie 
 #You should have received a copy of the RBND-NC License along with this program.
 #If not, see https://github.com/RBND/Silus-Blue
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 import discord
 import aiohttp
