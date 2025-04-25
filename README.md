@@ -23,7 +23,7 @@
 ## Running the bot  
   To launch the bot open a terminal and `cd` to the folder you downloaded bot.py into. If you're on windows and have it saved to your desktop this would look like `cd "C:\Users\YOUR_USERNAME\Desktop"`
 
-  If you want your bot to automatically restart every 24 hours then run 'python starter.py'. If you dont want it to restart automatically run 'python bot.py'.
+  If you want your bot to automatically restart every 24 hours then run `python starter.py`. If you dont want it to restart automatically run `python bot.py`.
 
   On first run the bot will prompt you for your private discord token. Past your token into the terminal and hit enter.
   
