@@ -4,7 +4,7 @@ import os
 import signal
 
 # Path to your target script
-TARGET_SCRIPT = "bot.py"
+TARGET_SCRIPT = "SilasBlue.py"
 
 def start_target():
     return subprocess.Popen(["python", TARGET_SCRIPT])
