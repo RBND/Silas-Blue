@@ -1,5 +1,10 @@
 from colorama import Fore, Style, Back
 
+# Available Colorama constants if you want to modify your theme.
+# Fore: BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, RESET.
+# Back: BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE, RESET.
+# Style: DIM, NORMAL, BRIGHT, RESET_ALL
+
 # Define retrowave theme colors
 class RetroColors:
     # Main colors
@@ -8,10 +13,6 @@ class RetroColors:
     MAGENTA = Fore.MAGENTA + Style.BRIGHT
     PURPLE = Fore.MAGENTA
     CYAN = Fore.CYAN + Style.BRIGHT
-
-    # Backgrounds
-    BG_BLUE = Back.BLUE
-    BG_MAGENTA = Back.MAGENTA
 
     # Text styles
     BOLD = Style.BRIGHT

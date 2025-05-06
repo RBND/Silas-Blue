@@ -16,7 +16,8 @@ def main():
     while True:
         print("Starting target app...")
         process = start_target()
-        time.sleep(86400)  #Time to wait in seconds between restarts
+        # Time to wait before restarts in seconds.
+        time.sleep(86400)
         print("Restarting target app...")
         stop_target(process)
 
