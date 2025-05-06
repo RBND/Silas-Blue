@@ -18,7 +18,7 @@ from theme import RetroColors
 # Import configuration from config module
 from config import (
     VERSION, config,
-    force_close_sessions, get_discord_token, active_commands, DEFAULT_MODEL
+    force_close_sessions, get_discord_token, active_commands, DEFAULT_MODEL, OLLAMA_API_URL, OLLAMA_TAGS_URL
 )
 
 # Initialize colorama
@@ -36,10 +36,6 @@ config_module.bot = bot
 
 # Remove the default help command so we can create our own
 bot.remove_command('help')
-
-# Ollama API endpoint (default for local installation)
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
 
 # Pagination view for long messages
 class PaginationView(ui.View):

@@ -17,6 +17,10 @@ DEFAULT_MODEL = "llama3"
 CONFIG_FILE = "bot_config.pkl"
 TOKEN_FILE = "token.txt"
 
+# Ollama API endpoint (default for local installation)
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
+OLLAMA_TAGS_URL = "http://localhost:11434/api/tags"
+
 # Track active commands per user to implement cooldowns
 active_commands = {}
 
