@@ -3,3 +3,6 @@
 .idea/Silus-Blue.iml
 .idea/vcs.xml
 /token.txt
+/.idea
+/__pycache__
+/handlers/__pycache__
