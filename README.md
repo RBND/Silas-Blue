@@ -58,4 +58,4 @@ When you update your bot and want to keep your existing server settings and toke
 Then replace all the files in the folder with the updated release.
 
 ## Contact
-You can contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074).
+You can contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) \(preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/).
