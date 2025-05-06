@@ -24,10 +24,6 @@ from theme import RetroColors
 # Initialize colorama
 init(autoreset=True)
 
-
-# Define retrowave theme colors
-
-
 # Discord bot setup
 intents = discord.Intents.default()
 intents.message_content = True

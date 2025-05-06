@@ -1,6 +1,6 @@
 from colorama import Fore, Style, Back
 
-
+# Define retrowave theme colors
 class RetroColors:
     # Main colors
     BLUE = Fore.BLUE + Style.BRIGHT
