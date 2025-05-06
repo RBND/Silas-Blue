@@ -1,61 +1,159 @@
-### Silas Blue 
+# About Silas Blue
 
-## Requirements:
-- Python3 (https://www.python.org/downloads)
-- Ollama (https://ollama.com/download)
+## What is Silas Blue?
 
-## Getting Started:
- - **Start Ollama**
+Silas Blue is a versatile Discord bot powered by local AI models through Ollama. It allows you to bring powerful AI capabilities directly to your Discord server without relying on external API services, ensuring privacy and control over your data.
 
-  Verify that Ollama is running by opening a terminal and typing `ollama --version`.  
-  Ollama will return "ollama version is x.x.x" if it is not running you can start it with the command `ollama serve`.
-  If this doesn't start the Ollama service for you can also do `ollama run` and then put your model name after. 
-  For example, to load gemma3:1b you would type `ollama run gemma3:1b`.
+## Key Features
 
- - **Verify required Python3 libraries are installed.** </ins> (Discord, aiohttp, asyncio)
-  
-    Open a terminal and type:
+- **Local AI Processing**: Runs AI models locally through Ollama for privacy and control
+- **Multi-Model Support**: Compatible with various Ollama models (Gemma, Llama, etc.)
+- **Discord Integration**: Seamless interaction within your server channels
+- **Server-Specific Configuration**: Customize settings per Discord server
+- **Permission Management**: Control who can use which features
+- **Automatic Restart Option**: Optional scheduled restarts for stability
+- **Paginated Responses**: Clean formatting for longer AI responses
+- **Terminal Control Interface**: Manage your bot settings via terminal commands
+- **Simple Command Structure**: Interact using `!` prefix or by tagging the bot
 
-  Windows (Open as Admin)
-  > py -3 -m pip install -U discord.py aiohttp asyncio colorama
+## Requirements
 
-## Adding Models
-  In your terminal use the command `ollama pull` followed by the model name. For example, to download Gemma3:1b you would type `ollama pull gemma3:1b`. You can find more models at https://ollama.com/search
+- **Python 3**: [Download from python.org](https://www.python.org/downloads)
+- **Ollama**: [Download from ollama.com](https://ollama.com/download)
+- **Python Libraries**: Discord.py, aiohttp, asyncio, colorama
+- **Discord Developer Account**: You'll need to create an application in the [Discord Developer Portal](https://discord.com/developers/applications)
+- **Discord Bot Token**: Generate a private token for your bot through the Developer Portal
 
-## Running the bot  
-  To launch the bot, open a terminal to the folder you downloaded bot.py into. If you're on windows and have it saved to your desktop, this would look like `cd "C:\Users\YOUR_USERNAME\Desktop"`
+## Detailed Setup Instructions
 
-  If you want your bot to automatically restart every 24 hours then run `python starter.py`. If you don't want it to restart automatically run `python SilasBlue.py`.
+### Installing Python and Required Libraries
 
-  On the first run, the bot will prompt you for your private discord token. Past your token into the terminal and hit entering.
-  
-  Once the bot is running, you will have a few lines in your terminal about the bot connecting.
-  >INFO discord.client logging in using static token  
-  >INFO discord.gateway Shard ID None has connected to Gateway (Session ID: xxxxxxxxxxxxxxxxx).  
-  >Logged in as YOUR_BOT_USERNAME (xxxxxxxxxx)
+1. **Install Python 3**:
+   - Visit [python.org/downloads](https://www.python.org/downloads)
+   - Download the latest version for your operating system
+   - During installation, **make sure to check the box** "Add Python to PATH"
+   - Complete the installation wizard
 
-  After you have your bot join a server, it will also display information about the settings saved in the config file for any servers It's connected to.
-  >Server: YOUR_SERVER_NAME (ID: xxxxxxxxxxxxxxxx)  
-  >\- Allowed Models: All  
-  >\- Set Model Permission: 2 roles  
-  >\- Manage Config Permission: 1 roles  
-  >\- Reply To Permission: Everyone  
-  >\- Bot Nickname: Default  
-  >\- Random Replies: Disabled  
-  >\- System Instructions: None  
-  >\- Paginated Responses: Enabled  
-  >\- Page Size: 750 characters  
-  >  
-  >\------
+2. **Install Required Python Libraries**:
+   - Open a command prompt or terminal
+   - For Windows (Run as Administrator):
+     ```
+     py -3 -m pip install -U discord.py aiohttp asyncio colorama
+     ```
+   - For macOS/Linux:
+     ```
+     python3 -m pip install -U discord.py aiohttp asyncio colorama
+     ```
+   - Wait for the installation to complete
 
-## Controlling the bot  
-As of V1.1.0 you can issue commands in the terminal to configure settings on a per-server basis. Type `Help` in the terminal for a list of commands and how to use them.
+### Setting Up Ollama and Models
 
-In Discord, you can call the bot with either `!` or tagging its username. For example, both of these will pull up the help info to learn the bot discord commands: `!help` or `@BotName help`
+1. **Install Ollama**:
+   - Visit [ollama.com/download](https://ollama.com/download)
+   - Download and install the version for your operating system
+   - Follow the installation prompts
 
-## Updating the bot
-When you update your bot and want to keep your existing server settings and token all you need to do is keep your `bot_config.pkl` and `token.txt`.  
-Then replace all the files in the folder with the updated release.
+2. **Verify Ollama Installation**:
+   - Open a terminal or command prompt
+   - Type: `ollama --version`
+   - You should see the version number displayed
 
-## Contact
-You can contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) \(preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/).
+3. **Start Ollama Service**:
+   - In your terminal, run: `ollama serve`
+   - This starts the Ollama service in the background
+
+4. **Download AI Models**:
+   - In a new terminal window, download your preferred models:
+   - For example: `ollama pull gemma3:1b`
+   - You can find more models at [ollama.com/search](https://ollama.com/search)
+
+### Creating a Discord Bot
+
+1. **Create a Discord Account** (skip if you already have one):
+   - Visit [discord.com/register](https://discord.com/register)
+   - Complete the registration process
+
+2. **Access the Discord Developer Portal**:
+   - Go to [discord.com/developers/applications](https://discord.com/developers/applications)
+   - Log in with your Discord account
+
+3. **Create a New Application**:
+   - Click the "New Application" button in the top-right corner
+   - Enter a name for your bot (e.g., "Silas Blue")
+   - Accept the terms and click "Create"
+
+4. **Configure Bot Settings**:
+   - In the left sidebar, click "Bot"
+   - Click "Add Bot" and confirm with "Yes, do it!"
+   - Under the username section, you'll see your bot's profile
+   - Toggle on these recommended settings:
+     - "PUBLIC BOT" (if you want others to invite it)
+     - "MESSAGE CONTENT INTENT" (required for the bot to read messages)
+     - "PRESENCE INTENT"
+     - "SERVER MEMBERS INTENT"
+
+5. **Get Your Bot Token**:
+   - In the "Bot" section, click "Reset Token" and confirm
+   - Copy the displayed token (this is your private bot token)
+   - **IMPORTANT**: Never share this token publicly - it grants control of your bot
+
+6. **Generate Invite Link**:
+   - In the left sidebar, click "OAuth2" then "URL Generator"
+   - Under "SCOPES", select "bot"
+   - Under "BOT PERMISSIONS", select:
+     - "Read Messages/View Channels"
+     - "Send Messages"
+     - "Embed Links"
+     - "Attach Files"
+     - "Read Message History"
+     - "Add Reactions"
+   - Copy the generated URL from the bottom of the page
+
+7. **Invite Bot to Your Server**:
+   - Paste the URL in your browser
+   - Select your server from the dropdown
+   - Click "Authorize" and complete any verification
+   - Your bot will now appear in your server member list (likely offline until you run it)
+
+## Running Silas Blue
+
+1. **Download Silas Blue**:
+   - Download and extract the [Silas Blue files](https://github.com/RBND/Silus-Blue/releases/latest) to a folder on your computer
+
+2. **Launch the Bot**:
+   - Open a terminal in the folder containing the bot files
+   - To run with auto-restart: `python starter.py`
+   - To run without auto-restart: `python SilasBlue.py`
+
+3. **First-Time Setup**:
+   - When prompted, paste your Discord bot token
+   - The bot will connect to Discord and display connection information
+   - You'll see configuration information for any servers the bot has joined
+
+4. **Using the Bot**:
+   - Interact with the bot in Discord using `!command` or by tagging `@SilasBlue command`
+   - Type `!help` or `@SilasBlue help` to see available commands
+   - Use terminal commands for advanced configuration (type `Help` in the terminal)
+
+## Terminal Commands
+
+Silas Blue offers a powerful terminal interface for configuration:
+
+- `help` - Display all available commands
+- `servers` - List all connected servers
+- `server <server_id>` - View configuration for a specific server
+- `edit <server_id> <setting> <value>` - Edit server settings
+- `permissions <server_id> <action> <permission_type>` - Manage permissions
+- `token [new_token|show]` - Change or view the Discord token
+- `restart` - Restart the bot
+- `shutdown` - Shut down the bot
+
+## Keeping Your Bot Updated
+
+When updating to a new version of Silas Blue:
+- Keep your `bot_config.pkl` and `token.txt` files
+- Replace all other files with the new version
+
+## Need Help?
+
+Contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) (preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)
