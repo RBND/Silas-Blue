@@ -1,8 +1,6 @@
-.idea/inspectionProfiles/profiles_settings.xml
-.idea/modules.xml
-.idea/Silus-Blue.iml
-.idea/vcs.xml
-/token.txt
 /.idea
 /__pycache__
-/handlers/__pycache__
+/gui/__pycache__
+config/295767175426473984.json
+config/bot_token.txt
+config/gui_log.txt
