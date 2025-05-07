@@ -126,6 +126,8 @@ class PaginatedView(discord.ui.View):
 async def on_ready():
     logging.info(f"Silas Blue is online as {bot.user} (ID: {bot.user.id})")
     logger.info("Bot started and ready.")
+    # Set status to always show the new URL as Playing
+    await bot.change_presence(activity=discord.Game(name="git.new/silasblue"))
     # Load configs for all guilds
     for guild in bot.guilds:
         config = load_config(guild.id)
@@ -418,6 +420,8 @@ def create_bot():
     async def on_ready():
         logging.info(f"Silas Blue is online as {bot.user} (ID: {bot.user.id})")
         logger.info("Bot started and ready.")
+        # Set status to always show the new URL as Playing
+        await bot.change_presence(activity=discord.Game(name="git.new/silasblue"))
         # Load configs for all guilds
         for guild in bot.guilds:
             config = load_config(guild.id)
