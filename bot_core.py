@@ -247,7 +247,7 @@ def log_to_gui(event_type, data):
 
 async def handle_ollama_prompt(message, config, ollama):
     """
-    Sends a message to Ollama and replies with the result.
+    Sends a message to Ollama and replies with the result, showing a cycling 'Thinking...' message while waiting.
     """
     prompt = message.content
     model = config.get("default_model", "llama2")
@@ -256,7 +256,37 @@ async def handle_ollama_prompt(message, config, ollama):
         "user": str(message.author),
         "prompt": prompt
     })
-    response = ollama.send_prompt(prompt, model)
+
+    # Send initial 'Thinking' message
+    thinking_states = ["Thinking", "Thinking.", "Thinking..", "Thinking..."]
+    thinking_idx = 0
+    thinking_msg = await message.channel.send(thinking_states[thinking_idx])
+    cycling = True
+
+    async def cycle_thinking():
+        nonlocal thinking_idx
+        while cycling:
+            thinking_idx = (thinking_idx + 1) % len(thinking_states)
+            try:
+                await thinking_msg.edit(content=thinking_states[thinking_idx])
+            except Exception:
+                pass  # Ignore edit errors
+            await asyncio.sleep(0.33)
+
+    # Start cycling task
+    cycling_task = asyncio.create_task(cycle_thinking())
+
+    # Run ollama.send_prompt in a thread
+    response = await asyncio.to_thread(ollama.send_prompt, prompt, model)
+
+    # Stop cycling and clean up
+    cycling = False
+    await cycling_task
+    try:
+        await thinking_msg.delete()
+    except Exception:
+        pass  # Ignore delete errors
+
     log_to_gui("reply", {
         "guild_id": message.guild.id if message.guild else None,
         "user": str(message.author),
