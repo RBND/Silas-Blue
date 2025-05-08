@@ -13,3 +13,4 @@ gui/silasblue.png
 *.tar
 *.gz
 *.bz2
+/.venv
