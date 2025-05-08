@@ -1,0 +1,14 @@
+{
+  "name": "OLED Dark",
+  "base": "#000000",
+  "accent1": "#0a84ff",
+  "accent2": "#30d158",
+  "accent3": "#ff375f",
+  "text": "#ffffff",
+  "button": "#1a1a1a",
+  "button_hover": "#0a84ff",
+  "scrollbar": "#222222",
+  "titlebar": "#000000",
+  "input_bg": "#111111",
+  "input_fg": "#ffffff"
+} 

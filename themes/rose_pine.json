@@ -1,0 +1,14 @@
+{
+  "name": "Rose Pine",
+  "base": "#191724",
+  "accent1": "#eb6f92",
+  "accent2": "#9ccfd8",
+  "accent3": "#f6c177",
+  "text": "#e0def4",
+  "button": "#26233a",
+  "button_hover": "#eb6f92",
+  "scrollbar": "#26233a",
+  "titlebar": "#191724",
+  "input_bg": "#232136",
+  "input_fg": "#e0def4"
+} 

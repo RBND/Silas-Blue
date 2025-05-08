@@ -41,4 +41,24 @@ def save_config(guild_id, config):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     path = get_config_path(guild_id)
     with open(path, "w") as f:
+        json.dump(config, f, indent=2)
+
+def get_app_config_path():
+    return os.path.join(CONFIG_DIR, "app_config.json")
+
+def load_app_config():
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    path = get_app_config_path()
+    if not os.path.exists(path):
+        # Default app config
+        config = {"theme": "retrowave"}
+        save_app_config(config)
+        return config
+    with open(path, "r") as f:
+        return json.load(f)
+
+def save_app_config(config):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    path = get_app_config_path()
+    with open(path, "w") as f:
         json.dump(config, f, indent=2) 

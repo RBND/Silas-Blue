@@ -16,6 +16,7 @@ from .server_config_page import ServerConfigPage
 from ollama_api import OllamaClient
 from bot_core import bot
 import config
+import utils  # Add this import
 
 def debug_print(msg):
     if config.DEBUG:
@@ -92,8 +93,16 @@ class MainWindow(QMainWindow):
 
             debug_print("[DEBUG] Creating ThemeManager")
             self.theme_manager = ThemeManager()
-            debug_print("[DEBUG] Applying theme")
-            self.theme_manager.apply_theme(self, "themes/retrowave.json")
+
+            # --- Load theme from app config ---
+            app_config = utils.load_app_config()
+            theme_name = app_config.get("theme", "retrowave")
+            theme_file = f"themes/{theme_name.lower()}.json"
+            if not os.path.exists(theme_file):
+                theme_file = "themes/retrowave.json"
+                theme_name = "retrowave"
+            debug_print(f"[DEBUG] Applying theme: {theme_file}")
+            self.theme_manager.apply_theme(self, theme_file)
 
             debug_print("[DEBUG] Creating OllamaClient")
             self.ollama = OllamaClient()
@@ -195,8 +204,16 @@ class MainWindow(QMainWindow):
             theme_label = QLabel("Theme:")
             servers_theme_row.addWidget(theme_label)
             self.theme_select = QComboBox()
+            self._theme_name_map = {}  # Map display name to actual theme name
             for theme in self.theme_manager.available_themes():
-                self.theme_select.addItem(theme.capitalize())
+                display = theme.capitalize()
+                self.theme_select.addItem(display)
+                self._theme_name_map[display] = theme
+            # Set current theme in dropdown
+            current_display = theme_name.capitalize()
+            idx = self.theme_select.findText(current_display)
+            if idx != -1:
+                self.theme_select.setCurrentIndex(idx)
             self.theme_select.currentTextChanged.connect(self.change_theme)
             servers_theme_row.addWidget(self.theme_select, 1)
             status_layout.addLayout(servers_theme_row)
@@ -407,13 +424,18 @@ class MainWindow(QMainWindow):
         self.model_download_progress.setVisible(False)
         self.refresh_models_async()
 
-    def change_theme(self, theme_name):
+    def change_theme(self, display_name):
         """
-        Change the GUI theme.
+        Change the GUI theme and save to app config.
         """
+        theme_name = self._theme_name_map.get(display_name, "retrowave")
         theme_file = f"themes/{theme_name.lower()}.json"
         if os.path.exists(theme_file):
             self.theme_manager.apply_theme(self, theme_file)
+            # Save to app config
+            app_config = utils.load_app_config()
+            app_config["theme"] = theme_name
+            utils.save_app_config(app_config)
 
     def update_servers_list(self):
         """Update the list of connected servers."""

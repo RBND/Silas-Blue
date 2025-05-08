@@ -1,0 +1,14 @@
+{
+  "name": "Solarized Light",
+  "base": "#fdf6e3",
+  "accent1": "#268bd2",
+  "accent2": "#2aa198",
+  "accent3": "#b58900",
+  "text": "#657b83",
+  "button": "#eee8d5",
+  "button_hover": "#268bd2",
+  "scrollbar": "#eee8d5",
+  "titlebar": "#fdf6e3",
+  "input_bg": "#eee8d5",
+  "input_fg": "#657b83"
+} 

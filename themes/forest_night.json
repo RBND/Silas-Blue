@@ -1,0 +1,14 @@
+{
+  "name": "Forest Night",
+  "base": "#232a2e",
+  "accent1": "#2ec27e",
+  "accent2": "#26a269",
+  "accent3": "#8ff0a4",
+  "text": "#e5e9f0",
+  "button": "#2d353b",
+  "button_hover": "#2ec27e",
+  "scrollbar": "#2d353b",
+  "titlebar": "#232a2e",
+  "input_bg": "#273136",
+  "input_fg": "#e5e9f0"
+} 
