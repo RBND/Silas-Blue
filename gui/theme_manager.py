@@ -17,6 +17,10 @@ class ThemeManager:
             theme = json.load(f)
         self.current_theme = theme
 
+        tab_text_selected = theme.get('tab_text_selected', theme.get('tab_text', theme['text']))
+        tab_text_unselected = theme.get('tab_text_unselected', theme.get('tab_text', theme['text']))
+        label_text = theme.get('label_text', theme['text'])
+        checkbox_text = theme.get('checkbox_text', theme['text'])
         # Build a stylesheet string from the theme
         stylesheet = f"""
             QWidget {{
@@ -45,9 +49,20 @@ class ThemeManager:
             }}
             QTabBar::tab:selected {{
                 background: {theme['accent3']};
+                color: {tab_text_selected};
             }}
             QTabBar::tab:!selected {{
                 background: {theme['base']};
+                color: {tab_text_unselected};
+            }}
+            QTabWidget::pane {{
+                color: {tab_text_selected};
+            }}
+            QLabel {{
+                color: {label_text};
+            }}
+            QCheckBox {{
+                color: {checkbox_text};
             }}
         """
         window.setStyleSheet(stylesheet)

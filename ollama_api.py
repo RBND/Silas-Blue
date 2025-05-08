@@ -77,6 +77,17 @@ class OllamaClient:
         """
         logger.info(f"Starting download for model: {model_name}")
         start_time = time.time()
+        # --- NEW: Get model size in bytes from Ollama API ---
+        model_size_bytes = None
+        try:
+            resp = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            if resp.status_code == 200:
+                for m in resp.json().get('models', []):
+                    if m['name'] == model_name and 'size' in m:
+                        model_size_bytes = m['size']
+                        break
+        except Exception as e:
+            logger.warning(f"Could not fetch model size for {model_name}: {e}")
         try:
             process = subprocess.Popen(
                 ["ollama", "pull", model_name],
@@ -94,7 +105,12 @@ class OllamaClient:
                     if match:
                         percent = int(match.group(1))
                         elapsed = time.time() - start_time
-                        speed = f"{percent / elapsed:.2f}%/s" if elapsed > 0 else ""
+                        if model_size_bytes and elapsed > 0:
+                            downloaded_bytes = model_size_bytes * percent / 100
+                            mbps = downloaded_bytes / (1024 * 1024) / elapsed
+                            speed = f"{mbps:.2f} MB/s"
+                        else:
+                            speed = ""
                         progress_callback(percent, speed)
             process.wait()
             if process.returncode == 0:
