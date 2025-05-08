@@ -17,6 +17,21 @@ from bot_core import start_bot, stop_bot, restart_bot
 from ollama_api import OllamaClient
 import config  # Changed from 'from config import DEBUG'
 
+# Ensure logs directory exists
+os.makedirs('logs', exist_ok=True)
+
+# Set up logging to file
+logging.basicConfig(
+    filename='logs/silasblue.log',
+    filemode='a',
+    format='%(asctime)s %(levelname)s:%(message)s',
+    level=logging.DEBUG  # or INFO, as needed
+)
+
+# Redirect stdout and stderr to log files
+sys.stdout = open('logs/stdout.log', 'a')
+sys.stderr = open('logs/stderr.log', 'a')
+
 # Force the root logger's level based on config.DEBUG
 logging.getLogger().setLevel(logging.DEBUG if getattr(config, 'DEBUG', False) else logging.INFO)
 

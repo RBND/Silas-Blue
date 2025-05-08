@@ -11,6 +11,7 @@ import time
 import re
 import json
 import config
+import sys  # Add this import for platform check
 
 logger = logging.getLogger("silasblue")
 
@@ -137,10 +138,14 @@ class OllamaClient:
             return True  # Already running
         try:
             # Start Ollama in server mode
+            creationflags = 0
+            if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
             self.ollama_process = subprocess.Popen(
                 ["ollama", "serve"],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags
             )
             return True
         except Exception as e:

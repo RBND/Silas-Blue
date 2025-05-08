@@ -1,0 +1,18 @@
+2025-05-08 15:54:37,560 INFO:logging in using static token
+2025-05-08 15:54:38,424 INFO:Ollama is not running. Attempting to start Ollama service...
+2025-05-08 15:54:38,428 INFO:Shard ID None has connected to Gateway (Session ID: 6f772e7c2e694d39dc96d39466c2dd9f).
+2025-05-08 15:54:40,454 INFO:Silas Blue is online as Silas Red#6211 (ID: 1361883752363720816)
+2025-05-08 15:54:40,455 INFO:Loaded all server configs.
+2025-05-08 15:54:42,528 INFO:Ollama service started successfully.
+2025-05-08 15:55:45,562 INFO:logging in using static token
+2025-05-08 15:55:46,450 INFO:Ollama is not running. Attempting to start Ollama service...
+2025-05-08 15:55:47,423 INFO:Shard ID None has connected to Gateway (Session ID: f12488a8119fed0f4a26dbf8b8e8ed49).
+2025-05-08 15:55:49,444 INFO:Silas Blue is online as Silas Red#6211 (ID: 1361883752363720816)
+2025-05-08 15:55:49,447 INFO:Loaded all server configs.
+2025-05-08 15:55:50,532 INFO:Ollama service started successfully.
+2025-05-08 15:57:17,686 INFO:logging in using static token
+2025-05-08 15:57:18,596 INFO:Ollama is not running. Attempting to start Ollama service...
+2025-05-08 15:57:18,790 INFO:Shard ID None has connected to Gateway (Session ID: 8a2d9184dd49cf19069aa5ea30c5cbc6).
+2025-05-08 15:57:20,807 INFO:Silas Blue is online as Silas Red#6211 (ID: 1361883752363720816)
+2025-05-08 15:57:20,808 INFO:Loaded all server configs.
+2025-05-08 15:57:22,690 INFO:Ollama service started successfully.
