@@ -12,6 +12,7 @@ import re
 import json
 import config
 import sys  # Add this import for platform check
+import aiohttp
 
 logger = logging.getLogger("silasblue")
 
@@ -185,4 +186,26 @@ class OllamaClient:
         Restarts Ollama subprocess.
         """
         self.stop()
-        return self.start() 
+        return self.start()
+
+    async def async_stream_prompt(self, prompt, model):
+        """
+        Asynchronously streams a prompt to Ollama and yields response chunks as they arrive.
+        """
+        url = f"{self.base_url}/api/generate"
+        data = {"model": model, "prompt": prompt}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=data, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    async for line in resp.content:
+                        line = line.decode('utf-8').strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            if 'response' in obj:
+                                yield obj['response']
+                        except Exception:
+                            continue
+        except Exception as e:
+            yield f"Error: {e}" 

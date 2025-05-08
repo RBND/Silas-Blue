@@ -247,7 +247,7 @@ def log_to_gui(event_type, data):
 
 async def handle_ollama_prompt(message, config, ollama):
     """
-    Sends a message to Ollama and replies with the result.
+    Sends a message to Ollama and replies with the result, showing typing while waiting and streaming the reply.
     """
     prompt = message.content
     model = config.get("default_model", "llama2")
@@ -256,19 +256,42 @@ async def handle_ollama_prompt(message, config, ollama):
         "user": str(message.author),
         "prompt": prompt
     })
-    response = ollama.send_prompt(prompt, model)
-    log_to_gui("reply", {
-        "guild_id": message.guild.id if message.guild else None,
-        "user": str(message.author),
-        "reply": response
-    })
     max_chars = config.get("pagination_max_chars", 2000)
-    pages = paginate_text(response, max_chars)
-    if len(pages) == 1:
-        await message.channel.send(pages[0])
-    else:
-        view = PaginatedView(pages, message.author.id)
-        view.message = await message.channel.send(f"Page 1/{len(pages)}\n{pages[0]}", view=view)
+    response_accum = ""
+    sent_message = None
+    try:
+        async with message.channel.typing():
+            async for chunk in ollama.async_stream_prompt(prompt, model):
+                response_accum += chunk
+                # Only send or edit message if enough new content or first chunk
+                if not sent_message and response_accum.strip():
+                    # Send first chunk
+                    to_send = response_accum[-max_chars:]
+                    sent_message = await message.channel.send(to_send)
+                elif sent_message and len(response_accum) - len(sent_message.content) > 50:
+                    # Edit message with new content if at least 50 new chars
+                    to_send = response_accum[-max_chars:]
+                    await sent_message.edit(content=to_send)
+        # After streaming, paginate if needed
+        log_to_gui("reply", {
+            "guild_id": message.guild.id if message.guild else None,
+            "user": str(message.author),
+            "reply": response_accum
+        })
+        pages = paginate_text(response_accum, max_chars)
+        if len(pages) == 1:
+            if sent_message:
+                await sent_message.edit(content=pages[0])
+            else:
+                await message.channel.send(pages[0])
+        else:
+            view = PaginatedView(pages, message.author.id)
+            if sent_message:
+                await sent_message.edit(content=f"Page 1/{len(pages)}\n{pages[0]}", view=view)
+            else:
+                view.message = await message.channel.send(f"Page 1/{len(pages)}\n{pages[0]}", view=view)
+    except Exception as e:
+        await message.channel.send(f"Error: {e}")
 
 @bot.command(name="ping")
 async def ping(ctx):

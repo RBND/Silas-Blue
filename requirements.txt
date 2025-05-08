@@ -1,3 +1,4 @@
 PySide6
 requests
 discord.py
+aiohttp>=3.8.0
