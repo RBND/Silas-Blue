@@ -10,12 +10,13 @@ import logging
 import time
 import re
 import json
+import config
 
 logger = logging.getLogger("silasblue")
 
 class OllamaClient:
-    def __init__(self, base_url="http://localhost:11434"):
-        self.base_url = base_url
+    def __init__(self, base_url=None):
+        self.base_url = base_url or "http://localhost:11434"
         self.ollama_process = None
 
     def send_prompt(self, prompt, model):
@@ -46,12 +47,23 @@ class OllamaClient:
         Returns a list of available models.
         """
         url = f"{self.base_url}/api/tags"
+        if config.DEBUG:
+            print(f"[DEBUG] OllamaClient.list_models() requesting: {url}")
         try:
-            resp = requests.get(url, timeout=10)
-            resp.raise_for_status()
-            return [m["name"] for m in resp.json().get("models", [])]
+            resp = requests.get(url, timeout=5)
+            if config.DEBUG:
+                print(f"[DEBUG] OllamaClient.list_models() response status: {resp.status_code}")
+            if resp.status_code == 200:
+                if config.DEBUG:
+                    print(f"[DEBUG] OllamaClient.list_models() response text: {resp.text[:200]}")
+                return [m['name'] for m in resp.json().get('models', [])]
+            else:
+                if config.DEBUG:
+                    print(f"[DEBUG] OllamaClient.list_models() error: {resp.text}")
+                return []
         except Exception as e:
-            logging.error(f"Failed to fetch models from Ollama: {e}")
+            if config.DEBUG:
+                print(f"[DEBUG] OllamaClient.list_models() error: {e}")
             return []
 
     def download_model(self, model_name, progress_callback=None):
@@ -98,10 +110,17 @@ class OllamaClient:
         """
         Returns True if Ollama is running (by checking /api/tags), False otherwise.
         """
+        url = f"{self.base_url}/api/tags"
+        if config.DEBUG:
+            print(f"[DEBUG] OllamaClient.status() requesting: {url}")
         try:
-            resp = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            resp = requests.get(url, timeout=5)
+            if config.DEBUG:
+                print(f"[DEBUG] OllamaClient.status() response status: {resp.status_code}")
             return resp.status_code == 200
-        except Exception:
+        except Exception as e:
+            if config.DEBUG:
+                print(f"[DEBUG] OllamaClient.status() error: {e}")
             return False
 
     def start(self):

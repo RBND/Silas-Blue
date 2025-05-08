@@ -33,41 +33,58 @@ class ServerConfigPage(QWidget):
         gui_layout = QVBoxLayout()
         self.gui_tab.setLayout(gui_layout)
 
-        # Dynamic role selectors
-        gui_layout.addWidget(QLabel("Who can the bot reply to?"))
+        # --- Permission selections in a row ---
+        permissions_row = QHBoxLayout()
+
+        # Reply roles
+        reply_col = QVBoxLayout()
+        reply_col.addWidget(QLabel("Who can the bot reply to?"))
         self.reply_roles_list = QListWidget()
         self.reply_roles_list.setSelectionMode(QListWidget.MultiSelection)
-        gui_layout.addWidget(self.reply_roles_list)
+        reply_col.addWidget(self.reply_roles_list)
+        permissions_row.addLayout(reply_col)
 
-        gui_layout.addWidget(QLabel("Who can change the current model?"))
+        # Change model roles
+        model_col = QVBoxLayout()
+        model_col.addWidget(QLabel("Who can change the current model?"))
         self.change_model_roles_list = QListWidget()
         self.change_model_roles_list.setSelectionMode(QListWidget.MultiSelection)
-        gui_layout.addWidget(self.change_model_roles_list)
+        model_col.addWidget(self.change_model_roles_list)
+        permissions_row.addLayout(model_col)
 
-        gui_layout.addWidget(QLabel("Who can change permission settings?"))
+        # Change permission roles
+        perm_col = QVBoxLayout()
+        perm_col.addWidget(QLabel("Who can change permission settings?"))
         self.change_permission_roles_list = QListWidget()
         self.change_permission_roles_list.setSelectionMode(QListWidget.MultiSelection)
-        gui_layout.addWidget(self.change_permission_roles_list)
+        perm_col.addWidget(self.change_permission_roles_list)
+        permissions_row.addLayout(perm_col)
 
-        # Pagination
+        gui_layout.addLayout(permissions_row)
+
+        # Pagination and random prompt controls in a row with stretch
+        pag_rand_row = QHBoxLayout()
         self.pagination_enabled = QCheckBox("Enable Pagination")
+        pag_rand_row.addWidget(self.pagination_enabled, 1)
+        pag_rand_row.addWidget(QLabel("Max characters per page:"))
         self.pagination_max_chars = QSpinBox()
         self.pagination_max_chars.setRange(500, 4000)
         self.pagination_max_chars.setValue(2000)
-        gui_layout.addWidget(self.pagination_enabled)
-        gui_layout.addWidget(QLabel("Max characters per page:"))
-        gui_layout.addWidget(self.pagination_max_chars)
-
-        # Random prompt
+        pag_rand_row.addWidget(self.pagination_max_chars, 2)
         self.random_prompt_enabled = QCheckBox("Enable random prompt mode")
+        pag_rand_row.addWidget(self.random_prompt_enabled, 1)
+        pag_rand_row.addWidget(QLabel("Probability:"))
         self.random_prompt_probability = QComboBox()
         self.random_prompt_probability.addItems([f"{x}%" for x in range(0, 101, 5)])
-        gui_layout.addWidget(self.random_prompt_enabled)
-        gui_layout.addWidget(QLabel("Probability:"))
-        gui_layout.addWidget(self.random_prompt_probability)
+        pag_rand_row.addWidget(self.random_prompt_probability, 2)
+        gui_layout.addLayout(pag_rand_row)
 
         self.save_btn = QPushButton("Save Config")
-        gui_layout.addWidget(self.save_btn)
+        save_btn_row = QHBoxLayout()
+        save_btn_row.addStretch(2)
+        save_btn_row.addWidget(self.save_btn, 1)
+        save_btn_row.addStretch(2)
+        gui_layout.addLayout(save_btn_row)
 
         self.tabs.addTab(self.gui_tab, "GUI Editor")
 
@@ -85,14 +102,14 @@ class ServerConfigPage(QWidget):
         self.guild_select.currentIndexChanged.connect(self.load_config)
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
+        # Connect itemChanged signals for role lists
+        self.reply_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
+        self.change_model_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
+        self.change_permission_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
+
         # Initial population
         self.update_guilds()
         self.load_config()
-
-        # Timer to periodically reload config from disk
-        self.config_reload_timer = QTimer(self)
-        self.config_reload_timer.timeout.connect(self.reload_config_from_disk)
-        self.config_reload_timer.start(2000)  # Every 2 seconds
 
     def update_guilds(self):
         """Populate the guild selection box with connected servers."""
@@ -139,6 +156,8 @@ class ServerConfigPage(QWidget):
         self.raw_config.setPlainText(json.dumps(config, indent=2))
 
     def set_roles_list(self, list_widget, guild, selected_roles):
+        # Block signals to prevent unwanted itemChanged events
+        list_widget.blockSignals(True)
         list_widget.clear()
         for role in guild.roles:
             if role.is_default():
@@ -152,6 +171,8 @@ class ServerConfigPage(QWidget):
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked if "everyone" in selected_roles else Qt.Unchecked)
         list_widget.addItem(item)
+        # Unblock signals after update
+        list_widget.blockSignals(False)
 
     def get_selected_roles(self, list_widget):
         roles = []
@@ -229,6 +250,7 @@ class ServerConfigPage(QWidget):
         self.raw_config.setPlainText(json.dumps(config, indent=2))
         logging.getLogger("silasblue").info(f"Config for server {guild_id} saved via GUI.")
         self.show_feedback(self.save_btn, "Saved!")
+        self.reload_config_from_disk()  # Ensure UI is in sync after save
 
     def show_feedback(self, button, message):
         """Show a temporary color change and log message for button feedback."""
@@ -247,4 +269,11 @@ class ServerConfigPage(QWidget):
         if not self.raw_config.hasFocus():
             self.raw_config.setPlainText(json.dumps(config, indent=2))
         if self.tabs.currentIndex() == 0:
-            self.set_widgets_from_config(config) 
+            self.set_widgets_from_config(config)
+
+    def on_roles_checkbox_changed(self):
+        """
+        Update the raw JSON view when a role checkbox is checked/unchecked.
+        """
+        config = self.get_config_from_widgets()
+        self.raw_config.setPlainText(json.dumps(config, indent=2)) 
