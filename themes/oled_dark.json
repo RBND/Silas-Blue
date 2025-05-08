@@ -10,10 +10,5 @@
   "scrollbar": "#222222",
   "titlebar": "#000000",
   "input_bg": "#111111",
-  "input_fg": "#ffffff",
-  "tab_text": "#ffffff",
-  "tab_text_selected": "#ffffff",
-  "tab_text_unselected": "#888888",
-  "label_text": "#ffffff",
-  "checkbox_text": "#ffffff"
+  "input_fg": "#ffffff"
 } 
