@@ -17,6 +17,14 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 - **Terminal Control Interface**: Manage your bot settings via terminal commands
 - **Simple Command Structure**: Interact using `!` prefix or by tagging the bot
 
+
+## Quick Links ##  
+* [Requirements](https://github.com/RBND/Silas-Blue/edit/V2-Alpha/README.md#requirements)
+* [Installing Requirements](https://github.com/RBND/Silas-Blue/edit/V2-Alpha/README.md#installing-requirements) <--- Start here if you're new
+* [Installing into an existing venv](https://github.com/RBND/Silas-Blue/edit/V2-Alpha/README.md#-installing-into-an-existing-virtual-environment)
+* [Creating a Discord Bot / Get your private token](https://github.com/RBND/Silas-Blue/edit/V2-Alpha/README.md#creating-a-discord-bot)
+* [Running the bot](https://github.com/RBND/Silas-Blue/edit/V2-Alpha/README.md#running-the-bot)
+
 ## Requirements
 
 - **Python 3**: [Download from python.org](https://www.python.org/downloads)
@@ -25,9 +33,9 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 - **Discord Developer Account**: You'll need to create an application in the [Discord Developer Portal](https://discord.com/developers/applications)
 - **Discord Bot Token**: Generate a private token for your bot through the Developer Portal
 
-## Detailed Setup Instructions
+# Detailed Setup Instructions
 
-### Installing Requirements
+## Installing Requirements
 
 1. **Download Silas Blue**:
    - Download and extract the Silas Blue V2 files to a folder on your computer
@@ -38,17 +46,107 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
    - During installation, **make sure to check the box** "Add Python to PATH"
    - Complete the installation wizard
 
-3. **Install Required Python Libraries**:
-   - Open a command prompt or terminal pointed to Silas Blue folder.
-   - For Windows (Run as Administrator):
-     ```
-     py -3 -m pip install -r requirements.txt
-     ```
-   - For macOS/Linux:
-     ```
-     python3 -m pip install -r requirements.txt
-     ```
-   - Wait for the installation to complete
+
+3. **Installing Python Packages in a Virtual Environment**
+
+This guide provides step-by-step instructions for setting up a virtual environment and installing the following Python packages:
+
+- `discord.py`
+- `PySide6`
+- `requests`
+
+---
+
+If you already have a venv setup skip to: [Installing to an existing virtual environment](https://github.com/RBND/Silas-Blue/edit/V2-Alpha/README.md#-installing-into-an-existing-virtual-environment)
+
+### 🪟 Windows
+
+1. Create a virtual environment
+```cmd
+python -m venv .venv
+```
+
+2. Activate the virtual environment
+```cmd
+venv\Scripts\activate
+```
+
+3. Install packages
+```cmd
+pip install discord.py PySide6 requests
+```
+
+---
+
+### 🐧 Linux
+
+1. Create a virtual environment
+```bash
+python3 -m venv .venv
+```
+
+2. Activate the virtual environment
+```bash
+source venv/bin/activate
+```
+
+3. Install packages
+```bash
+pip install discord.py PySide6 requests
+```
+
+---
+
+### 🍎 macOS
+
+1. Create a virtual environment
+```bash
+python3 -m venv .venv
+```
+
+2. Activate the virtual environment
+```bash
+source venv/bin/activate
+```
+
+3. Install packages
+```bash
+pip install discord.py PySide6 requests
+```
+
+---
+
+### 🔁 Installing into an Existing Virtual Environment
+
+If you already have a virtual environment set up, simply activate it:
+
+- **Windows**:
+  ```cmd
+  venv\Scripts\activate
+  ```
+
+- **Linux/macOS**:
+  ```bash
+  source venv/bin/activate
+  ```
+
+Then install the packages:
+```bash
+pip install discord.py PySide6 requests
+```
+
+---
+
+### ✅ Verification
+
+After installation, you can verify by running:
+```bash
+python -m pip show discord.py PySide6 requests
+```
+
+This will display version info for each installed package.
+
+---
   
 4. **Install Ollama**:
    - Visit [ollama.com/download](https://ollama.com/download)
@@ -121,6 +219,6 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
    - Type `!help` or `@BotName help` to see available commands
 
 
-## Need Help?
+### Need Help?
 
 Contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) (preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)
