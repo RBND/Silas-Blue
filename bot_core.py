@@ -15,7 +15,7 @@ import threading
 
 from ollama_api import OllamaClient
 from permissions import PermissionManager
-from utils import load_config, save_config, get_config_path
+from utils import load_config, save_config, get_config_path, set_default_model
 
 logger = logging.getLogger("silasblue")
 
@@ -128,9 +128,9 @@ async def on_ready():
     logger.info("Bot started and ready.")
     # Set status to always show the new URL as Playing
     await bot.change_presence(activity=discord.Game(name="git.new/silasblue"))
-    # Load configs for all guilds
+    # Load configs for all guilds and ensure default_model is set
     for guild in bot.guilds:
-        config = load_config(guild.id)
+        config = load_config(guild.id)  # utils.load_config ensures default_model is set
         server_configs[guild.id] = config
     logging.info("Loaded all server configs.")
 
@@ -138,7 +138,7 @@ async def on_ready():
 async def on_guild_join(guild):
     logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
     logger.info(f"Joined server: {guild.name} ({guild.id})")
-    config = load_config(guild.id)
+    config = load_config(guild.id)  # utils.load_config ensures default_model is set
     server_configs[guild.id] = config
 
 @bot.event
@@ -452,9 +452,9 @@ def create_bot():
         logger.info("Bot started and ready.")
         # Set status to always show the new URL as Playing
         await bot.change_presence(activity=discord.Game(name="git.new/silasblue"))
-        # Load configs for all guilds
+        # Load configs for all guilds and ensure default_model is set
         for guild in bot.guilds:
-            config = load_config(guild.id)
+            config = load_config(guild.id)  # utils.load_config ensures default_model is set
             server_configs[guild.id] = config
         logging.info("Loaded all server configs.")
 
@@ -462,7 +462,7 @@ def create_bot():
     async def on_guild_join(guild):
         logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
         logger.info(f"Joined server: {guild.name} ({guild.id})")
-        config = load_config(guild.id)
+        config = load_config(guild.id)  # utils.load_config ensures default_model is set
         server_configs[guild.id] = config
 
     @bot.event
@@ -699,4 +699,9 @@ async def _run_bot(shutdown_event, bot_instance):
 # For compatibility with SilasBlue.py
 
 def run_discord_bot():
-    start_bot() 
+    start_bot()
+
+# Utility to reload a server's config from disk (for GUI live updates)
+def reload_server_config(guild_id):
+    config = load_config(guild_id)
+    server_configs[guild_id] = config 

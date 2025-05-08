@@ -10,5 +10,14 @@
   "scrollbar": "#eee8d5",
   "titlebar": "#fdf6e3",
   "input_bg": "#eee8d5",
-  "input_fg": "#657b83"
+  "input_fg": "#657b83",
+  "checkbox_bg": "#fdf6e3",
+  "checkbox_border": "#268bd2",
+  "checkbox_checkmark": "#2aa198",
+  "checkbox_hover": "#b58900",
+  "checkbox_checked_bg": "#b58900",
+  "checkbox_checked_border": "#268bd2",
+  "checkbox_disabled_bg": "#eee8d5",
+  "checkbox_disabled_border": "#eee8d5",
+  "checkbox_checkmark_disabled": "#b2b2aa"
 } 

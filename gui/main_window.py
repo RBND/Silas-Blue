@@ -3,13 +3,14 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QLineEdit, QProgressBar, QCheckBox, QTabWidget, QTextEdit, QSpinBox
 )
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QFontMetrics
 import os
 import logging
 import concurrent.futures
 import json
 import traceback
+import webbrowser
 
 from .theme_manager import ThemeManager
 from .server_config_page import ServerConfigPage
@@ -17,6 +18,7 @@ from ollama_api import OllamaClient
 from bot_core import bot
 import config
 import utils  # Add this import
+from .animated_checkbox import AnimatedCheckBox
 
 def debug_print(msg):
     if config.DEBUG:
@@ -79,6 +81,7 @@ class MainWindow(QMainWindow):
             debug_print("[DEBUG] MainWindow.__init__ starting...")
             super().__init__()
             debug_print("[DEBUG] QMainWindow super().__init__ done")
+            self.signals = WorkerSignals()
             self.setWindowTitle("Silas Blue Control Panel")
             self.setMinimumSize(600, 600)
 
@@ -103,6 +106,13 @@ class MainWindow(QMainWindow):
                 theme_name = "retrowave"
             debug_print(f"[DEBUG] Applying theme: {theme_file}")
             self.theme_manager.apply_theme(self, theme_file)
+            self._checkbox_colors = self.theme_manager.get_checkbox_colors()
+
+            # --- Load persistent checkbox states ---
+            self._app_config = app_config
+            system_log_to_file = app_config.get("system_log_to_file", False)
+            bot_log_to_file = app_config.get("bot_log_to_file", False)
+            debug_mode = app_config.get("debug_mode", config.DEBUG)
 
             debug_print("[DEBUG] Creating OllamaClient")
             self.ollama = OllamaClient()
@@ -154,7 +164,7 @@ class MainWindow(QMainWindow):
 
             # Auto-restart controls in the same row
             auto_restart_col = QVBoxLayout()
-            self.auto_restart_checkbox = QCheckBox("Enable Auto-Restart")
+            self.auto_restart_checkbox = AnimatedCheckBox("Enable Auto-Restart", colors=self._checkbox_colors)
             self.auto_restart_interval = QComboBox()
             # Use '30 Min' for 0.5h, and 'Hour(s)' for others
             interval_labels = []
@@ -187,7 +197,7 @@ class MainWindow(QMainWindow):
             self.model_download_progress = QProgressBar()
             self.model_download_progress.setVisible(False)
 
-            model_row_layout.addWidget(QLabel("Default Model:"))
+            model_row_layout.addWidget(QLabel("Model:"))
             model_row_layout.addWidget(self.model_select, 2)
             model_row_layout.addWidget(self.model_download_input, 2)
             model_row_layout.addWidget(self.model_download_btn, 1)
@@ -245,10 +255,12 @@ class MainWindow(QMainWindow):
             status_layout.addLayout(log_layout)
             status_layout.addLayout(clear_log_layout)
             # Checkboxes for file logging and debug mode (now in a row)
-            self.system_log_to_file_checkbox = QCheckBox("Write System Log to File")
-            self.bot_log_to_file_checkbox = QCheckBox("Write Bot Log to File")
-            self.debug_checkbox = QCheckBox("Enable Debug Mode")
-            self.debug_checkbox.setChecked(config.DEBUG)
+            self.system_log_to_file_checkbox = AnimatedCheckBox("Write System Log to File", colors=self._checkbox_colors)
+            self.bot_log_to_file_checkbox = AnimatedCheckBox("Write Bot Log to File", colors=self._checkbox_colors)
+            self.debug_checkbox = AnimatedCheckBox("Enable Debug Mode", colors=self._checkbox_colors)
+            self.system_log_to_file_checkbox.setChecked(system_log_to_file)
+            self.bot_log_to_file_checkbox.setChecked(bot_log_to_file)
+            self.debug_checkbox.setChecked(debug_mode)
             checkboxes_layout = QHBoxLayout()
             checkboxes_layout.addWidget(self.system_log_to_file_checkbox)
             checkboxes_layout.addWidget(self.bot_log_to_file_checkbox)
@@ -303,7 +315,6 @@ class MainWindow(QMainWindow):
             self.update_bot_status()
 
             debug_print("[DEBUG] Setting up WorkerSignals and lazy loading")
-            self.signals = WorkerSignals()
             self.signals.models_loaded.connect(self.on_models_loaded)
             self.signals.ollama_status_checked.connect(self.on_ollama_status_checked)
             self.signals.model_download_progress.connect(self.on_model_download_progress)
@@ -338,6 +349,14 @@ class MainWindow(QMainWindow):
             self.model_select.currentIndexChanged.connect(lambda: adjust_combobox_width(self.model_select))
             self.servers_list.currentIndexChanged.connect(lambda: adjust_combobox_width(self.servers_list))
             self.theme_select.currentIndexChanged.connect(lambda: adjust_combobox_width(self.theme_select))
+
+            # Connect signals to update model on selection
+            self.model_select.currentIndexChanged.connect(self.on_model_selected)
+
+            # --- Save checkbox state on change ---
+            self.system_log_to_file_checkbox.stateChanged.connect(self.save_checkbox_states)
+            self.bot_log_to_file_checkbox.stateChanged.connect(self.save_checkbox_states)
+            self.debug_checkbox.stateChanged.connect(self.save_checkbox_states)
 
             debug_print("[DEBUG] MainWindow.__init__ finished!")
         except Exception as e:
@@ -374,6 +393,49 @@ class MainWindow(QMainWindow):
         else:
             for model in models:
                 self.model_select.addItem(model)
+            # Set the current model in the dropdown to match the config for the selected server
+            guild_id = None
+            if self.servers_list.count() > 0:
+                guild_id = self.servers_list.currentData()
+            if guild_id:
+                import utils
+                config = utils.load_config(guild_id)
+                current_model = config.get("default_model", "")
+                if current_model and current_model in models:
+                    idx = self.model_select.findText(current_model)
+                    if idx != -1:
+                        self.model_select.blockSignals(True)
+                        self.model_select.setCurrentIndex(idx)
+                        self.model_select.blockSignals(False)
+                elif models:
+                    # If no model set or model missing, set to first available
+                    utils.set_default_model(guild_id, models[0])
+                    self.model_select.setCurrentIndex(0)
+
+    def on_model_selected(self, idx):
+        # When the user selects a model, update the config for the selected server
+        if self.servers_list.count() == 0:
+            return
+        guild_id = self.servers_list.currentData()
+        if not guild_id:
+            return
+        model_name = self.model_select.currentText()
+        if model_name and model_name not in ("No models found", "Ollama not running"):
+            def do_model_change():
+                import utils
+                try:
+                    utils.set_default_model(guild_id, model_name)
+                    import bot_core
+                    bot_core.reload_server_config(guild_id)
+                    return None  # Success
+                except Exception as e:
+                    return str(e)
+            def on_done(future):
+                error = future.result()
+                if error:
+                    self.system_log_output.append(f"[ERROR] Could not notify bot to reload config: {error}")
+            future = self.executor.submit(do_model_change)
+            future.add_done_callback(lambda f: QTimer.singleShot(0, lambda: on_done(f)))
 
     def update_ollama_status(self):
         future = self.executor.submit(self.ollama.status)
@@ -396,6 +458,8 @@ class MainWindow(QMainWindow):
     def download_model(self):
         model_name = self.model_download_input.text().strip()
         if not model_name:
+            # Open Ollama model search page in browser
+            webbrowser.open("https://ollama.com/search")
             return
         self.model_download_progress.setVisible(True)
         self.model_download_progress.setValue(0)
@@ -432,6 +496,11 @@ class MainWindow(QMainWindow):
         theme_file = f"themes/{theme_name.lower()}.json"
         if os.path.exists(theme_file):
             self.theme_manager.apply_theme(self, theme_file)
+            # Update checkbox colors for custom widgets
+            colors = self.theme_manager.get_checkbox_colors()
+            # (No set_colors for QCheckBox)
+            if hasattr(self, "server_config_tab"):
+                self.server_config_tab.update_checkbox_colors(colors)
             # Save to app config
             app_config = utils.load_app_config()
             app_config["theme"] = theme_name
@@ -477,6 +546,17 @@ class MainWindow(QMainWindow):
                     if event == "config_change":
                         msg = f"[Config Change] Guild: {data.get('guild_id')} User: {data.get('user')} Field: {data.get('field')} -> {data.get('value')}"
                         self.system_log_output.append(msg)
+                        # If the config change is for default_model and the current server is affected, update the dropbox
+                        if data.get("field") == "default_model":
+                            current_guild = self.servers_list.currentData()
+                            if str(current_guild) == str(data.get("guild_id")):
+                                # Update the model_select dropbox to match the new value
+                                model_name = data.get("value")
+                                idx = self.model_select.findText(model_name)
+                                if idx != -1:
+                                    self.model_select.blockSignals(True)
+                                    self.model_select.setCurrentIndex(idx)
+                                    self.model_select.blockSignals(False)
                     elif event == "prompt":
                         msg = f"[Prompt] Guild: {data.get('guild_id')} User: {data.get('user')} Prompt: {data.get('prompt')}"
                         self.bot_log_output.append(msg)
@@ -660,9 +740,18 @@ class MainWindow(QMainWindow):
             self.system_log_output.append("[INFO] Debug mode auto-enabled due to repeated crashes.")
             set_crash_counter(0)  # Reset after enabling
 
+    def save_checkbox_states(self):
+        """Save the state of log and debug checkboxes to app_config.json."""
+        app_config = utils.load_app_config()
+        app_config["system_log_to_file"] = self.system_log_to_file_checkbox.isChecked()
+        app_config["bot_log_to_file"] = self.bot_log_to_file_checkbox.isChecked()
+        app_config["debug_mode"] = self.debug_checkbox.isChecked()
+        utils.save_app_config(app_config)
+
     # --- On successful close, reset crash counter ---
     def closeEvent(self, event):
         set_crash_counter(0)
+        self.save_checkbox_states()  # Save on close
         super().closeEvent(event)
 
 # Entry point for running the GUI standalone (for testing)
