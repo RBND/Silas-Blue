@@ -14,6 +14,10 @@ import config
 
 logger = logging.getLogger("silasblue")
 
+ANSI_ESCAPE = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+def strip_ansi(text):
+    return ANSI_ESCAPE.sub('', text)
+
 class OllamaClient:
     def __init__(self, base_url=None):
         self.base_url = base_url or "http://localhost:11434"
@@ -77,13 +81,15 @@ class OllamaClient:
                 ["ollama", "pull", model_name],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True
+                text=True,
+                encoding="utf-8"  # Ensure UTF-8 decoding for output
             )
             for line in process.stdout:
-                logger.info(line.strip())
+                clean_line = strip_ansi(line)
+                logger.info(clean_line.strip())
                 if progress_callback:
                     # Try to parse percentage from line, e.g. "pulling manifest:  50% ..."
-                    match = re.search(r'(\d+)%', line)
+                    match = re.search(r'(\d+)%', clean_line)
                     if match:
                         percent = int(match.group(1))
                         elapsed = time.time() - start_time

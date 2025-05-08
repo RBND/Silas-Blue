@@ -251,8 +251,8 @@ class MainWindow(QMainWindow):
             for h in [self.bot_log_handler, self.bot_file_handler]:
                 if h not in bot_logger.handlers:
                     bot_logger.addHandler(h)
-            root_logger.setLevel(logging.DEBUG if config.DEBUG else logging.INFO)
             bot_logger.setLevel(logging.DEBUG if config.DEBUG else logging.INFO)
+            bot_logger.propagate = False  # Prevent duplicate logs in root logger
             # --- New: Debug checkbox logic ---
             self.debug_checkbox.stateChanged.connect(self.on_debug_checkbox_changed)
             # --- New: Crash counter logic ---
@@ -382,12 +382,15 @@ class MainWindow(QMainWindow):
             return
         self.model_download_progress.setVisible(True)
         self.model_download_progress.setValue(0)
+        self._last_progress_percent = None  # Track last percent for deduplication
+        # NOTE: All Qt object usage must be in the main thread. Worker threads must only use signals/slots to communicate with the GUI.
         def progress_callback(percent, speed):
-            self.signals.model_download_progress.emit(percent, speed)
+            if percent != self._last_progress_percent:
+                self._last_progress_percent = percent
+                self.signals.model_download_progress.emit(percent, speed)
         def do_download():
             self.ollama.download_model(model_name, progress_callback)
             self.signals.model_download_finished.emit()
-            self.refresh_models_async()
         self.executor.submit(do_download)
 
     @Slot(int, str)
@@ -402,6 +405,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_model_download_finished(self):
         self.model_download_progress.setVisible(False)
+        self.refresh_models_async()
 
     def change_theme(self, theme_name):
         """
@@ -618,7 +622,7 @@ class MainWindow(QMainWindow):
         config.DEBUG = debug_enabled
         # Overwrite config.py
         try:
-            with open('config.py', 'w') as f:
+            with open('config.py', 'w', encoding='utf-8') as f:
                 f.write(f'DEBUG = {str(debug_enabled)}\n')
         except Exception as e:
             self.system_log_output.append(f"[ERROR] Failed to update config.py: {e}")
@@ -628,13 +632,11 @@ class MainWindow(QMainWindow):
 
     def handle_crash_counter(self):
         count = get_crash_counter()
-        count += 1
         if count >= 2:
             # Auto-enable debug
             self.debug_checkbox.setChecked(True)
             self.system_log_output.append("[INFO] Debug mode auto-enabled due to repeated crashes.")
-            count = 0  # Reset after enabling
-        set_crash_counter(count)
+            set_crash_counter(0)  # Reset after enabling
 
     # --- On successful close, reset crash counter ---
     def closeEvent(self, event):
