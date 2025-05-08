@@ -11,9 +11,13 @@
   "titlebar": "#000000",
   "input_bg": "#111111",
   "input_fg": "#ffffff",
-  "tab_text": "#ffffff",
-  "tab_text_selected": "#ffffff",
-  "tab_text_unselected": "#888888",
-  "label_text": "#ffffff",
-  "checkbox_text": "#ffffff"
+  "checkbox_bg": "#000000",
+  "checkbox_border": "#0a84ff",
+  "checkbox_checkmark": "#30d158",
+  "checkbox_hover": "#ff375f",
+  "checkbox_checked_bg": "#ff375f",
+  "checkbox_checked_border": "#0a84ff",
+  "checkbox_disabled_bg": "#111111",
+  "checkbox_disabled_border": "#222222",
+  "checkbox_checkmark_disabled": "#444444"
 } 

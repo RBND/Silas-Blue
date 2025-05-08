@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, QTextEdit, QPushButton, QTabWidget, QListWidget, QListWidgetItem, QCheckBox, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, QTextEdit, QPushButton, QTabWidget, QListWidget, QListWidgetItem, QHBoxLayout
 )
 from PySide6.QtCore import QTimer, Qt
 import os
@@ -8,6 +8,7 @@ import logging
 
 from utils import load_config, save_config
 from bot_core import bot
+from .animated_checkbox import AnimatedCheckBox
 
 class ServerConfigPage(QWidget):
     """
@@ -64,14 +65,14 @@ class ServerConfigPage(QWidget):
 
         # Pagination and random prompt controls in a row with stretch
         pag_rand_row = QHBoxLayout()
-        self.pagination_enabled = QCheckBox("Enable Pagination")
+        self.pagination_enabled = AnimatedCheckBox("Enable Pagination", colors=main_window.theme_manager.get_checkbox_colors())
         pag_rand_row.addWidget(self.pagination_enabled, 1)
         pag_rand_row.addWidget(QLabel("Max characters per page:"))
         self.pagination_max_chars = QSpinBox()
         self.pagination_max_chars.setRange(500, 4000)
         self.pagination_max_chars.setValue(2000)
         pag_rand_row.addWidget(self.pagination_max_chars, 2)
-        self.random_prompt_enabled = QCheckBox("Enable random prompt mode")
+        self.random_prompt_enabled = AnimatedCheckBox("Enable random prompt mode", colors=main_window.theme_manager.get_checkbox_colors())
         pag_rand_row.addWidget(self.random_prompt_enabled, 1)
         pag_rand_row.addWidget(QLabel("Probability:"))
         self.random_prompt_probability = QComboBox()
@@ -107,9 +108,9 @@ class ServerConfigPage(QWidget):
         self.change_model_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
         self.change_permission_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
 
-        # Initial population
-        self.update_guilds()
-        self.load_config()
+        # Initial population (deferred to avoid blocking UI)
+        QTimer.singleShot(0, self.update_guilds)
+        QTimer.singleShot(0, self.load_config)
 
     def update_guilds(self):
         """Populate the guild selection box with connected servers."""
@@ -159,7 +160,7 @@ class ServerConfigPage(QWidget):
         # Block signals to prevent unwanted itemChanged events
         list_widget.blockSignals(True)
         list_widget.clear()
-        for role in guild.roles:
+        for role in reversed(guild.roles):
             if role.is_default():
                 continue  # Skip @everyone for selection, handle separately if needed
             item = QListWidgetItem(role.name)
@@ -276,4 +277,8 @@ class ServerConfigPage(QWidget):
         Update the raw JSON view when a role checkbox is checked/unchecked.
         """
         config = self.get_config_from_widgets()
-        self.raw_config.setPlainText(json.dumps(config, indent=2)) 
+        self.raw_config.setPlainText(json.dumps(config, indent=2))
+
+    def update_checkbox_colors(self, colors):
+        self.pagination_enabled.set_colors(colors)
+        self.random_prompt_enabled.set_colors(colors) 

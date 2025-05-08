@@ -15,7 +15,7 @@ import threading
 
 from ollama_api import OllamaClient
 from permissions import PermissionManager
-from utils import load_config, save_config, get_config_path
+from utils import load_config, save_config, get_config_path, set_default_model
 
 logger = logging.getLogger("silasblue")
 
@@ -128,9 +128,9 @@ async def on_ready():
     logger.info("Bot started and ready.")
     # Set status to always show the new URL as Playing
     await bot.change_presence(activity=discord.Game(name="git.new/silasblue"))
-    # Load configs for all guilds
+    # Load configs for all guilds and ensure default_model is set
     for guild in bot.guilds:
-        config = load_config(guild.id)
+        config = load_config(guild.id)  # utils.load_config ensures default_model is set
         server_configs[guild.id] = config
     logging.info("Loaded all server configs.")
 
@@ -138,7 +138,7 @@ async def on_ready():
 async def on_guild_join(guild):
     logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
     logger.info(f"Joined server: {guild.name} ({guild.id})")
-    config = load_config(guild.id)
+    config = load_config(guild.id)  # utils.load_config ensures default_model is set
     server_configs[guild.id] = config
 
 @bot.event
@@ -247,7 +247,7 @@ def log_to_gui(event_type, data):
 
 async def handle_ollama_prompt(message, config, ollama):
     """
-    Sends a message to Ollama and replies with the result.
+    Sends a message to Ollama and replies with the result, showing a cycling 'Thinking...' message while waiting.
     """
     prompt = message.content
     model = config.get("default_model", "llama2")
@@ -256,7 +256,37 @@ async def handle_ollama_prompt(message, config, ollama):
         "user": str(message.author),
         "prompt": prompt
     })
-    response = ollama.send_prompt(prompt, model)
+
+    # Send initial 'Thinking' message
+    thinking_states = ["Thinking", "Thinking.", "Thinking..", "Thinking..."]
+    thinking_idx = 0
+    thinking_msg = await message.channel.send(thinking_states[thinking_idx])
+    cycling = True
+
+    async def cycle_thinking():
+        nonlocal thinking_idx
+        while cycling:
+            thinking_idx = (thinking_idx + 1) % len(thinking_states)
+            try:
+                await thinking_msg.edit(content=thinking_states[thinking_idx])
+            except Exception:
+                pass  # Ignore edit errors
+            await asyncio.sleep(0.33)
+
+    # Start cycling task
+    cycling_task = asyncio.create_task(cycle_thinking())
+
+    # Run ollama.send_prompt in a thread
+    response = await asyncio.to_thread(ollama.send_prompt, prompt, model)
+
+    # Stop cycling and clean up
+    cycling = False
+    await cycling_task
+    try:
+        await thinking_msg.delete()
+    except Exception:
+        pass  # Ignore delete errors
+
     log_to_gui("reply", {
         "guild_id": message.guild.id if message.guild else None,
         "user": str(message.author),
@@ -422,9 +452,9 @@ def create_bot():
         logger.info("Bot started and ready.")
         # Set status to always show the new URL as Playing
         await bot.change_presence(activity=discord.Game(name="git.new/silasblue"))
-        # Load configs for all guilds
+        # Load configs for all guilds and ensure default_model is set
         for guild in bot.guilds:
-            config = load_config(guild.id)
+            config = load_config(guild.id)  # utils.load_config ensures default_model is set
             server_configs[guild.id] = config
         logging.info("Loaded all server configs.")
 
@@ -432,7 +462,7 @@ def create_bot():
     async def on_guild_join(guild):
         logging.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
         logger.info(f"Joined server: {guild.name} ({guild.id})")
-        config = load_config(guild.id)
+        config = load_config(guild.id)  # utils.load_config ensures default_model is set
         server_configs[guild.id] = config
 
     @bot.event
@@ -669,4 +699,9 @@ async def _run_bot(shutdown_event, bot_instance):
 # For compatibility with SilasBlue.py
 
 def run_discord_bot():
-    start_bot() 
+    start_bot()
+
+# Utility to reload a server's config from disk (for GUI live updates)
+def reload_server_config(guild_id):
+    config = load_config(guild_id)
+    server_configs[guild_id] = config 

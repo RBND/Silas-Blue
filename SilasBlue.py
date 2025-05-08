@@ -66,28 +66,39 @@ def start_gui_and_bot():
     """
     Starts the PySide6 GUI in the main thread and starts the bot after the event loop starts.
     """
+    print("[DEBUG] Creating QApplication...")
     logging.debug("Creating QApplication...")
     app = QApplication(sys.argv)
+    print("[DEBUG] QApplication created.")
     logging.debug("QApplication created.")
     # --- Splash Screen ---
+    print("[DEBUG] Loading splash image...")
     splash_pix = QPixmap("gui/splash.png")
     splash = QSplashScreen(splash_pix)
+    print("[DEBUG] Showing splash screen...")
     splash.show()
     app.processEvents()  # Ensure splash screen is shown
+    print("[DEBUG] Splash screen shown.")
 
     def show_main_window():
+        print("[DEBUG] Creating MainWindow...")
         logging.debug("Creating MainWindow...")
         window = MainWindow(start_bot=start_bot, stop_bot=stop_bot, restart_bot=restart_bot)
+        print("[DEBUG] MainWindow created.")
         logging.debug("MainWindow created.")
         window.show()
+        print("[DEBUG] MainWindow shown.")
         splash.finish(window)  # Hide splash when main window is ready
+        print("[DEBUG] Splash screen finished.")
         logging.debug("MainWindow shown.")
         window.redirect_output_to_log()
         # Start the bot after the event loop starts
         QTimer.singleShot(100, lambda: logging.debug("Starting bot...") or start_bot())
 
     # Show the main window after 3 seconds (3000 ms)
+    print("[DEBUG] Scheduling main window to show in 3 seconds...")
     QTimer.singleShot(3000, show_main_window)
+    print("[DEBUG] Entering Qt event loop...")
     logging.debug("Entering Qt event loop...")
     sys.exit(app.exec())
 
