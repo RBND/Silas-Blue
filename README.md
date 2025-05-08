@@ -1,4 +1,4 @@
-# About Silas Blue
+# About Silas Blue V2 Alpha
 
 ## What is Silas Blue?
 
@@ -6,6 +6,7 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 
 ## Key Features
 
+- **Easy To Use Gui**: Modern gui with custom themes. (RetroWave theme included)
 - **Local AI Processing**: Runs AI models locally through Ollama for privacy and control
 - **Multi-Model Support**: Compatible with various Ollama models (Gemma, Llama, etc.)
 - **Discord Integration**: Seamless interaction within your server channels
@@ -20,52 +21,39 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 
 - **Python 3**: [Download from python.org](https://www.python.org/downloads)
 - **Ollama**: [Download from ollama.com](https://ollama.com/download)
-- **Python Libraries**: Discord.py, aiohttp, asyncio, colorama
+- **Python Libraries**: Discord.py, PySide6, requests
 - **Discord Developer Account**: You'll need to create an application in the [Discord Developer Portal](https://discord.com/developers/applications)
 - **Discord Bot Token**: Generate a private token for your bot through the Developer Portal
 
 ## Detailed Setup Instructions
 
-### Installing Python and Required Libraries
+### Installing Requirements
 
-1. **Install Python 3**:
+1. **Download Silas Blue**:
+   - Download and extract the Silas Blue V2 files to a folder on your computer
+
+2. **Install Python 3**:
    - Visit [python.org/downloads](https://www.python.org/downloads)
    - Download the latest version for your operating system
    - During installation, **make sure to check the box** "Add Python to PATH"
    - Complete the installation wizard
 
-2. **Install Required Python Libraries**:
-   - Open a command prompt or terminal
+3. **Install Required Python Libraries**:
+   - Open a command prompt or terminal pointed to Silas Blue folder.
    - For Windows (Run as Administrator):
      ```
-     py -3 -m pip install -U discord.py aiohttp asyncio colorama
+     py -3 -m pip install -r requirements.txt
      ```
    - For macOS/Linux:
      ```
-     python3 -m pip install -U discord.py aiohttp asyncio colorama
+     python3 -m pip install -r requirements.txt
      ```
    - Wait for the installation to complete
-
-### Setting Up Ollama and Models
-
-1. **Install Ollama**:
+  
+4. **Install Ollama**:
    - Visit [ollama.com/download](https://ollama.com/download)
    - Download and install the version for your operating system
    - Follow the installation prompts
-
-2. **Verify Ollama Installation**:
-   - Open a terminal or command prompt
-   - Type: `ollama --version`
-   - You should see the version number displayed
-
-3. **Start Ollama Service**:
-   - In your terminal, run: `ollama serve`
-   - This starts the Ollama service in the background
-
-4. **Download AI Models**:
-   - In a new terminal window, download your preferred models:
-   - For example: `ollama pull gemma3:1b`
-   - You can find more models at [ollama.com/search](https://ollama.com/search)
 
 ### Creating a Discord Bot
 
@@ -115,44 +103,23 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
    - Click "Authorize" and complete any verification
    - Your bot will now appear in your server member list (likely offline until you run it)
 
-## Running Silas Blue
+### Running the bot
 
-1. **Download Silas Blue**:
-   - Download and extract the [Silas Blue files](https://github.com/RBND/Silus-Blue/releases/latest) to a folder on your computer
-
-2. **Launch the Bot**:
+1. **Launch the Bot**:
    - Open a terminal in the folder containing the bot files
-   - To run with auto-restart: `python starter.py`
-   - To run without auto-restart: `python SilasBlue.py`
+   - To run: `python SilasBlue.py`
 
 3. **First-Time Setup**:
-   - When prompted, paste your Discord bot token
+   - When prompted, paste your Discord bot token into the terminal
+   - or can create a `bot_token.txt` file with your token in it inside the folder  `Config`
    - The bot will connect to Discord and display connection information
    - You'll see configuration information for any servers the bot has joined
 
 4. **Using the Bot**:
-   - Interact with the bot in Discord using `!command` or by tagging `@SilasBlue command`
-   - Type `!help` or `@SilasBlue help` to see available commands
-   - Use terminal commands for advanced configuration (type `Help` in the terminal)
+   - You can configure the bot via the gui including downloading new models
+   - or interact with the bot in Discord using `!command` or by tagging `@BotName command`
+   - Type `!help` or `@BotName help` to see available commands
 
-## Terminal Commands
-
-Silas Blue offers a powerful terminal interface for configuration:
-
-- `help` - Display all available commands
-- `servers` - List all connected servers
-- `server <server_id>` - View configuration for a specific server
-- `edit <server_id> <setting> <value>` - Edit server settings
-- `permissions <server_id> <action> <permission_type>` - Manage permissions
-- `token [new_token|show]` - Change or view the Discord token
-- `restart` - Restart the bot
-- `shutdown` - Shut down the bot
-
-## Keeping Your Bot Updated
-
-When updating to a new version of Silas Blue:
-- Keep your `bot_config.pkl` and `token.txt` files
-- Replace all other files with the new version
 
 ## Need Help?
 

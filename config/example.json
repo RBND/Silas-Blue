@@ -1,0 +1,16 @@
+{
+  "default_model": "llama2",
+  "reply_roles": [
+    "everyone"
+  ],
+  "change_model_roles": [
+    "admin",
+  ],
+  "change_permission_roles": [
+    "admin",
+  ],
+  "pagination_enabled": true,
+  "pagination_max_chars": 500,
+  "random_prompt_enabled": false,
+  "random_prompt_probability": 0
+}
