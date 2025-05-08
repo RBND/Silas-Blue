@@ -1,9 +1,15 @@
 /.idea
 /__pycache__
 /gui/__pycache__
-config/295767175426473984.json
+config/*.json
+!config/example.json
 config/bot_token.txt
 config/gui_log.txt
-/Silas Blue V2.rar
-/Silas Blue V2.zip
 gui/silasblue.png
+*.log
+*.rar
+*.zip
+*.7z
+*.tar
+*.gz
+*.bz2
