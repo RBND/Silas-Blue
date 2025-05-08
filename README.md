@@ -107,7 +107,7 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 
 1. **Launch the Bot**:
    - Open a terminal in the folder containing the bot files
-   - To run: `python SilasBlue.py`
+   - To run: `pythonw SilasBlue.py`
 
 3. **First-Time Setup**:
    - When prompted, paste your Discord bot token into the terminal
