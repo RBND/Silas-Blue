@@ -1,4 +1,4 @@
-# About Silas Blue V2 Alpha
+# About Silas Blue V2
 
 ## What is Silas Blue?
 
