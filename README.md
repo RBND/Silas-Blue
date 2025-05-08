@@ -39,15 +39,46 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
    - Complete the installation wizard
 
 3. **Install Required Python Libraries**:
-   - Open a command prompt or terminal pointed to Silas Blue folder.
-   - For Windows (Run as Administrator):
+   - It is recommended to use a Python virtual environment (venv) to avoid conflicts with other Python projects.
+   
+   **To create a new virtual environment and install requirements:**
+   - For Windows:
      ```
-     py -3 -m pip install -r requirements.txt
+     py -3 -m venv .venv
+     .venv\Scripts\activate
+     pip install -r requirements.txt
      ```
    - For macOS/Linux:
      ```
-     python3 -m pip install -r requirements.txt
+     python3 -m venv .venv
+     source .venv/bin/activate
+     pip install -r requirements.txt
      ```
+   
+   **To install into an existing virtual environment:**
+   - Activate your venv first:
+     - On Windows:
+       ```
+       path\to\your\venv\Scripts\activate
+       ```
+     - On macOS/Linux:
+       ```
+       source path/to/your/venv/bin/activate
+       ```
+   - Then install the requirements:
+     ```
+     pip install -r requirements.txt
+     ```
+   
+   - Alternatively, you can install globally (not recommended):
+     - For Windows:
+       ```
+       py -3 -m pip install -r requirements.txt
+       ```
+     - For macOS/Linux:
+       ```
+       python3 -m pip install -r requirements.txt
+       ```
    - Wait for the installation to complete
   
 4. **Install Ollama**:
@@ -107,7 +138,7 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 
 1. **Launch the Bot**:
    - Open a terminal in the folder containing the bot files
-   - To run: `python SilasBlue.py`
+   - To run: `pythonw SilasBlue.py`
 
 3. **First-Time Setup**:
    - When prompted, paste your Discord bot token into the terminal
