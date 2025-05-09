@@ -1,3 +1,5 @@
 PySide6
 requests
 discord.py
+psutil
+pynvml
