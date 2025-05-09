@@ -19,13 +19,14 @@ from bot_core import bot
 import config
 import utils  # Add this import
 from .animated_checkbox import AnimatedCheckBox, AnimatedUsageSquares
+from utils import get_resource_path
 
 def debug_print(msg):
     if config.DEBUG:
         print(msg)
 
 # --- New: Persistent crash counter for auto-debug ---
-CRASH_COUNTER_FILE = os.path.join('config', 'crash_counter.txt')
+CRASH_COUNTER_FILE = get_resource_path(os.path.join('config', 'crash_counter.txt'))
 def get_crash_counter():
     try:
         with open(CRASH_COUNTER_FILE, 'r') as f:
@@ -197,9 +198,9 @@ class MainWindow(QMainWindow):
             debug_mode = app_config.get("debug_mode", config.DEBUG)
 
             theme_name = app_config.get("theme", "retrowave")
-            theme_file = f"themes/{theme_name.lower()}.json"
+            theme_file = get_resource_path(f"themes/{theme_name.lower()}.json")
             if not os.path.exists(theme_file):
-                theme_file = "themes/retrowave.json"
+                theme_file = get_resource_path("themes/retrowave.json")
                 theme_name = "retrowave"
             debug_print(f"[DEBUG] Applying theme: {theme_file}")
             self.theme_manager.apply_theme(self, theme_file)
@@ -690,7 +691,7 @@ class MainWindow(QMainWindow):
         Change the GUI theme and save to app config.
         """
         theme_name = self._theme_name_map.get(display_name, "retrowave")
-        theme_file = f"themes/{theme_name.lower()}.json"
+        theme_file = get_resource_path(f"themes/{theme_name.lower()}.json")
         if os.path.exists(theme_file):
             self.theme_manager.apply_theme(self, theme_file)
             colors = self.theme_manager.get_checkbox_colors()
@@ -743,7 +744,7 @@ class MainWindow(QMainWindow):
 
     def read_gui_log(self):
         """Read new lines from config/gui_log.txt and append to log_output."""
-        log_path = os.path.join("config", "gui_log.txt")
+        log_path = get_resource_path(os.path.join("config", "gui_log.txt"))
         if not os.path.exists(log_path):
             return
         try:

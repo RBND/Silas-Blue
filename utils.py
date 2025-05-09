@@ -8,6 +8,7 @@ import json
 from ollama_api import OllamaClient
 import psutil
 import logging
+import sys
 try:
     import pynvml
     pynvml.nvmlInit()
@@ -15,7 +16,16 @@ try:
 except Exception:
     _NVML_AVAILABLE = False
 
-CONFIG_DIR = "config"
+# --- Resource path utility for PyInstaller compatibility ---
+def get_resource_path(relative_path):
+    """
+    Get absolute path to resource, works for dev and for PyInstaller bundle.
+    """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.abspath(relative_path)
+
+CONFIG_DIR = get_resource_path("config")
 
 def get_config_path(guild_id):
     return os.path.join(CONFIG_DIR, f"{guild_id}.json")

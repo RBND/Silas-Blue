@@ -15,13 +15,13 @@ import threading
 
 from ollama_api import OllamaClient
 from permissions import PermissionManager
-from utils import load_config, save_config, get_config_path, set_default_model
+from utils import load_config, save_config, get_config_path, set_default_model, get_resource_path
 
 logger = logging.getLogger("silasblue")
 
 # Utility to get the discord_text color from the theme
 _THEME_CACHE = None
-_THEME_PATH = os.path.join("themes", "retrowave.json")  # You can make this configurable if needed
+_THEME_PATH = get_resource_path(os.path.join("themes", "retrowave.json"))  # PyInstaller compatible
 
 def get_discord_theme_color():
     global _THEME_CACHE
@@ -40,7 +40,7 @@ def get_discord_token():
     Loads the Discord bot token from config/bot_token.txt.
     If not found, prompts the user to enter it, then saves it for future use.
     """
-    config_dir = "config"
+    config_dir = get_resource_path("config")
     token_path = os.path.join(config_dir, "bot_token.txt")
     os.makedirs(config_dir, exist_ok=True)
 

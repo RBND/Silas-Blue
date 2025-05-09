@@ -16,6 +16,7 @@ from PySide6.QtGui import QPixmap
 from bot_core import start_bot, stop_bot, restart_bot
 from ollama_api import OllamaClient
 import config  # Changed from 'from config import DEBUG'
+from utils import get_resource_path
 
 # Ensure logs directory exists
 os.makedirs('logs', exist_ok=True)
@@ -36,7 +37,7 @@ sys.stderr = open('logs/stderr.log', 'a')
 logging.getLogger().setLevel(logging.DEBUG if getattr(config, 'DEBUG', False) else logging.INFO)
 
 # --- Crash counter logic for auto-debug ---
-CRASH_COUNTER_FILE = os.path.join('config', 'crash_counter.txt')
+CRASH_COUNTER_FILE = get_resource_path(os.path.join('config', 'crash_counter.txt'))
 def get_crash_counter():
     try:
         with open(CRASH_COUNTER_FILE, 'r', encoding='utf-8') as f:
@@ -73,7 +74,7 @@ def start_gui_and_bot():
     logging.debug("QApplication created.")
     # --- Splash Screen ---
     print("[DEBUG] Loading splash image...")
-    splash_pix = QPixmap("gui/splash.png")
+    splash_pix = QPixmap(get_resource_path("gui/splash.png"))
     splash = QSplashScreen(splash_pix)
     print("[DEBUG] Showing splash screen...")
     splash.show()
@@ -95,9 +96,8 @@ def start_gui_and_bot():
         # Start the bot after the event loop starts
         QTimer.singleShot(100, lambda: logging.debug("Starting bot...") or start_bot())
 
-    # Show the main window after 2 seconds (2000 ms)
-    print("[DEBUG] Scheduling main window to show in 2 seconds...")
-    QTimer.singleShot(2000, show_main_window)
+    # Show the main window as soon as possible (no fixed delay)
+    QTimer.singleShot(100, show_main_window)
     print("[DEBUG] Entering Qt event loop...")
     logging.debug("Entering Qt event loop...")
     sys.exit(app.exec())
