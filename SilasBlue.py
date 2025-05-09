@@ -95,9 +95,9 @@ def start_gui_and_bot():
         # Start the bot after the event loop starts
         QTimer.singleShot(100, lambda: logging.debug("Starting bot...") or start_bot())
 
-    # Show the main window after 3 seconds (3000 ms)
-    print("[DEBUG] Scheduling main window to show in 3 seconds...")
-    QTimer.singleShot(3000, show_main_window)
+    # Show the main window after 2 seconds (2000 ms)
+    print("[DEBUG] Scheduling main window to show in 2 seconds...")
+    QTimer.singleShot(2000, show_main_window)
     print("[DEBUG] Entering Qt event loop...")
     logging.debug("Entering Qt event loop...")
     sys.exit(app.exec())

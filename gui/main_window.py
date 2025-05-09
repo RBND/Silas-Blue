@@ -1,10 +1,10 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QLineEdit, QProgressBar, QCheckBox, QTabWidget, QTextEdit, QSpinBox
+    QPushButton, QComboBox, QLineEdit, QProgressBar, QCheckBox, QTabWidget, QTextEdit, QSpinBox, QFrame
 )
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QPropertyAnimation, QEasingCurve, QThread, QPoint
+from PySide6.QtGui import QFontMetrics, QMouseEvent
 import os
 import logging
 import concurrent.futures
@@ -18,7 +18,7 @@ from ollama_api import OllamaClient
 from bot_core import bot
 import config
 import utils  # Add this import
-from .animated_checkbox import AnimatedCheckBox
+from .animated_checkbox import AnimatedCheckBox, AnimatedUsageSquares
 
 def debug_print(msg):
     if config.DEBUG:
@@ -70,6 +70,102 @@ class WorkerSignals(QObject):
     model_download_progress = Signal(int, str)
     model_download_finished = Signal()
 
+class UsageWorker(QObject):
+    usage_updated = Signal(float, float, float, float, float, float, float, str, list)
+    def __init__(self):
+        super().__init__()
+        self._running = True
+    def stop(self):
+        self._running = False
+    def run(self):
+        import time
+        import utils
+        while self._running:
+            cpu = utils.get_cpu_usage()
+            used, total, percent = utils.get_memory_usage()
+            gpu_info = utils.get_gpu_usage()
+            gpu_list = utils.get_gpu_list()
+            if gpu_info:
+                gpu_percent, vram_used, vram_total, vram_percent, gpu_name = gpu_info
+            else:
+                gpu_percent = vram_used = vram_total = vram_percent = 0
+                gpu_name = None
+            self.usage_updated.emit(cpu, used, total, percent, gpu_percent, vram_used, vram_total, gpu_name or '', gpu_list)
+            time.sleep(1)
+
+class CustomTitleBar(QFrame):
+    def __init__(self, parent, theme_colors):
+        super().__init__(parent)
+        self.parent = parent
+        self.setFixedHeight(36)
+        self.setObjectName("CustomTitleBar")
+        self._theme_colors = theme_colors
+        self._mouse_pos = None
+        self._maximized = False
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(0)
+        self.title_label = QLabel("Silas Blue Control Panel", self)
+        self.title_label.setStyleSheet(f"color: {theme_colors.get('text', '#e5e9f0')}; font-weight: bold;")
+        layout.addWidget(self.title_label)
+        layout.addStretch(1)
+        self.min_btn = QPushButton("–", self)
+        self.max_btn = QPushButton("❐", self)
+        self.close_btn = QPushButton("✕", self)
+        for btn in (self.min_btn, self.max_btn, self.close_btn):
+            btn.setFixedSize(32, 28)
+            btn.setFlat(True)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.setStyleSheet(self._button_style())
+        self.min_btn.clicked.connect(self.parent.showMinimized)
+        self.max_btn.clicked.connect(self.toggle_max_restore)
+        self.close_btn.clicked.connect(self.parent.close)
+        layout.addWidget(self.min_btn)
+        layout.addWidget(self.max_btn)
+        layout.addWidget(self.close_btn)
+        self.setStyleSheet(self._bar_style())
+
+    def _bar_style(self):
+        bg = self._theme_colors.get('base', '#232a2e')
+        border = self._theme_colors.get('accent1', '#2ec27e')
+        return f"QFrame#CustomTitleBar {{ background: {bg}; border-bottom: 1.5px solid {border}; }}"
+
+    def _button_style(self):
+        btn_bg = self._theme_colors.get('button', '#232a2e')
+        btn_hover = self._theme_colors.get('button_hover', '#8ff0a4')
+        text = self._theme_colors.get('text', '#e5e9f0')
+        return (
+            f"QPushButton {{ background: {btn_bg}; color: {text}; border: none; border-radius: 4px; }}"
+            f"QPushButton:hover {{ background: {btn_hover}; }}"
+        )
+
+    def set_theme(self, theme_colors):
+        self._theme_colors = theme_colors
+        self.setStyleSheet(self._bar_style())
+        for btn in (self.min_btn, self.max_btn, self.close_btn):
+            btn.setStyleSheet(self._button_style())
+        self.title_label.setStyleSheet(f"color: {theme_colors.get('text', '#e5e9f0')}; font-weight: bold;")
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self._mouse_pos = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._mouse_pos is not None and event.buttons() & Qt.LeftButton:
+            self.parent.move(event.globalPosition().toPoint() - self._mouse_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        self._mouse_pos = None
+        event.accept()
+
+    def toggle_max_restore(self):
+        if self.parent.isMaximized():
+            self.parent.showNormal()
+        else:
+            self.parent.showMaximized()
+
 class MainWindow(QMainWindow):
     """
     Main GUI window for Silas Blue.
@@ -81,24 +177,25 @@ class MainWindow(QMainWindow):
             debug_print("[DEBUG] MainWindow.__init__ starting...")
             super().__init__()
             debug_print("[DEBUG] QMainWindow super().__init__ done")
+            self.setWindowFlag(Qt.FramelessWindowHint)
+            self.setAttribute(Qt.WA_TranslucentBackground, False)
+            # Initialize bot status attributes early
+            self._bot_status = "Unknown"
+            self._bot_status_error = None
             self.signals = WorkerSignals()
             self.setWindowTitle("Silas Blue Control Panel")
             self.setMinimumSize(600, 600)
-
-            debug_print("[DEBUG] Storing bot control functions")
-            self._start_bot_func = start_bot
-            self._stop_bot_func = stop_bot
-            self._restart_bot_func = restart_bot
-
-            debug_print("[DEBUG] Initializing bot status tracking")
-            self._bot_status = "Unknown"
-            self._bot_status_error = None
 
             debug_print("[DEBUG] Creating ThemeManager")
             self.theme_manager = ThemeManager()
 
             # --- Load theme from app config ---
             app_config = utils.load_app_config()
+            self._app_config = app_config
+            system_log_to_file = app_config.get("system_log_to_file", False)
+            bot_log_to_file = app_config.get("bot_log_to_file", False)
+            debug_mode = app_config.get("debug_mode", config.DEBUG)
+
             theme_name = app_config.get("theme", "retrowave")
             theme_file = f"themes/{theme_name.lower()}.json"
             if not os.path.exists(theme_file):
@@ -107,19 +204,30 @@ class MainWindow(QMainWindow):
             debug_print(f"[DEBUG] Applying theme: {theme_file}")
             self.theme_manager.apply_theme(self, theme_file)
             self._checkbox_colors = self.theme_manager.get_checkbox_colors()
-
-            # --- Load persistent checkbox states ---
-            self._app_config = app_config
-            system_log_to_file = app_config.get("system_log_to_file", False)
-            bot_log_to_file = app_config.get("bot_log_to_file", False)
-            debug_mode = app_config.get("debug_mode", config.DEBUG)
+            theme = self.theme_manager.current_theme
 
             debug_print("[DEBUG] Creating OllamaClient")
             self.ollama = OllamaClient()
 
-            debug_print("[DEBUG] Creating main layout")
+            # --- Custom Title Bar ---
+            self.title_bar = CustomTitleBar(self, self._checkbox_colors)
+            self.title_bar.set_theme(theme)  # Ensure correct theme on launch
+            # Add a bottom border line under the title bar (using a QFrame)
+            self.title_separator = QFrame(self)
+            self.title_separator.setFixedHeight(2)
+            self.title_separator.setFrameShape(QFrame.HLine)
+            self.title_separator.setFrameShadow(QFrame.Plain)
+            self.title_separator.setStyleSheet(f"background: {self.theme_manager.current_theme.get('tab_outline', '#ff5ecb')}; border: none;")
+            main_widget = QWidget(self)
+            main_layout = QVBoxLayout(main_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.setSpacing(0)
+            main_layout.addWidget(self.title_bar)
+            main_layout.addWidget(self.title_separator)
             self.tabs = QTabWidget()
-            self.setCentralWidget(self.tabs)
+            main_layout.addWidget(self.tabs)
+            self.setCentralWidget(main_widget)
+            self.update_tab_styles()
 
             debug_print("[DEBUG] Creating ThreadPoolExecutor")
             self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -130,6 +238,44 @@ class MainWindow(QMainWindow):
 
             status_layout = QVBoxLayout()
             self.status_tab.setLayout(status_layout)
+
+            # --- System Usage Indicators ---
+            usage_row = QHBoxLayout()
+            usage_row.addStretch(1)
+            theme = self.theme_manager.current_theme
+            # CPU
+            cpu_colors = {
+                'bg': theme.get('usage_meter_bg', '#232a2e'),
+                'border': theme.get('usage_meter_border', '#2ec27e'),
+                'fill': theme.get('usage_meter_cpu', '#2ec27e'),
+                'text': theme.get('usage_meter_text', '#e5e9f0'),
+            }
+            self.cpu_label = QLabel("CPU: 0%")
+            self.cpu_label.setStyleSheet(f"color: {cpu_colors['text']}")
+            self.cpu_squares = AnimatedUsageSquares(num_squares=10, colors=cpu_colors)
+            usage_row.addWidget(self.cpu_label)
+            usage_row.addWidget(self.cpu_squares)
+            # Memory
+            mem_colors = {
+                'bg': theme.get('usage_meter_bg', '#232a2e'),
+                'border': theme.get('usage_meter_border', '#2ec27e'),
+                'fill': theme.get('usage_meter_mem', '#8ff0a4'),
+                'text': theme.get('usage_meter_text', '#e5e9f0'),
+            }
+            self.mem_label = QLabel("Memory: 0% (0 MB / 0 MB)")
+            self.mem_label.setStyleSheet(f"color: {mem_colors['text']}")
+            self.mem_squares = AnimatedUsageSquares(num_squares=10, colors=mem_colors)
+            usage_row.addWidget(self.mem_label)
+            usage_row.addWidget(self.mem_squares)
+            status_layout.addLayout(usage_row)
+
+            # --- Usage Worker Thread ---
+            self.usage_worker = UsageWorker()
+            self.usage_thread = QThread()
+            self.usage_worker.moveToThread(self.usage_thread)
+            self.usage_worker.usage_updated.connect(self.update_usage_indicators)
+            self.usage_thread.started.connect(self.usage_worker.run)
+            self.usage_thread.start()
 
             # --- Bot, Ollama, and Auto-Restart in a single row ---
             status_row_layout = QHBoxLayout()
@@ -358,11 +504,62 @@ class MainWindow(QMainWindow):
             self.bot_log_to_file_checkbox.stateChanged.connect(self.save_checkbox_states)
             self.debug_checkbox.stateChanged.connect(self.save_checkbox_states)
 
+            # Save references to all AnimatedCheckBox widgets for theme updates
+            self._animated_checkboxes = [
+                self.auto_restart_checkbox,
+                self.system_log_to_file_checkbox,
+                self.bot_log_to_file_checkbox,
+                self.debug_checkbox
+            ]
+
             debug_print("[DEBUG] MainWindow.__init__ finished!")
         except Exception as e:
             import traceback
             debug_print(f"[DEBUG] Exception in MainWindow.__init__: {e}\n" + traceback.format_exc())
             raise
+
+    def update_tab_styles(self):
+        theme = self.theme_manager.current_theme
+        tab_selected_bg = theme.get('tab_selected_bg', '#181825')
+        tab_unselected_bg = theme.get('tab_unselected_bg', '#232136')
+        tab_selected_text = theme.get('tab_selected_text', '#ff5ecb')
+        tab_unselected_text = theme.get('tab_unselected_text', '#f8f8f2')
+        tab_outline = theme.get('tab_outline', '#ff5ecb')
+        self.tabs.setStyleSheet(f'''
+            QTabWidget::pane {{
+                border-top: 2px solid {tab_outline};
+                top: -0.5em;
+            }}
+            QTabBar::tab {{
+                background: {tab_unselected_bg};
+                color: {tab_unselected_text};
+                border: 2px solid {tab_outline};
+                border-bottom: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                min-width: 120px;
+                min-height: 28px;
+                margin-right: 2px;
+                padding: 0 16px;
+            }}
+            QTabBar::tab:selected {{
+                background: {tab_selected_bg};
+                color: {tab_selected_text};
+                border-bottom: 2px solid {tab_selected_bg};
+            }}
+            QTabBar::tab:!selected {{
+                background: {tab_unselected_bg};
+                color: {tab_unselected_text};
+            }}
+            QTabBar::tab:hover {{
+                background: {tab_selected_bg};
+                color: {tab_selected_text};
+            }}
+        ''')
+        # Make the title bar text background only as wide as the text
+        self.title_bar.title_label.setStyleSheet(f"color: {theme.get('text', '#e5e9f0')}; font-weight: bold; background: transparent; padding: 0 8px; border-radius: 6px;")
+        # Update the separator color
+        self.title_separator.setStyleSheet(f"background: {tab_outline}; border: none;")
 
     def refresh_models_async(self):
         # Only try to fetch models if Ollama is running
@@ -496,12 +693,30 @@ class MainWindow(QMainWindow):
         theme_file = f"themes/{theme_name.lower()}.json"
         if os.path.exists(theme_file):
             self.theme_manager.apply_theme(self, theme_file)
-            # Update checkbox colors for custom widgets
             colors = self.theme_manager.get_checkbox_colors()
-            # (No set_colors for QCheckBox)
+            for cb in getattr(self, '_animated_checkboxes', []):
+                cb.set_colors(colors)
             if hasattr(self, "server_config_tab"):
                 self.server_config_tab.update_checkbox_colors(colors)
-            # Save to app config
+            theme = self.theme_manager.current_theme
+            self.title_bar.set_theme(theme)
+            self.update_tab_styles()
+            cpu_colors = {
+                'bg': theme.get('usage_meter_bg', '#232a2e'),
+                'border': theme.get('usage_meter_border', '#2ec27e'),
+                'fill': theme.get('usage_meter_cpu', '#2ec27e'),
+                'text': theme.get('usage_meter_text', '#e5e9f0'),
+            }
+            self.cpu_squares.set_colors(cpu_colors)
+            self.cpu_label.setStyleSheet(f"color: {cpu_colors['text']}")
+            mem_colors = {
+                'bg': theme.get('usage_meter_bg', '#232a2e'),
+                'border': theme.get('usage_meter_border', '#2ec27e'),
+                'fill': theme.get('usage_meter_mem', '#8ff0a4'),
+                'text': theme.get('usage_meter_text', '#e5e9f0'),
+            }
+            self.mem_squares.set_colors(mem_colors)
+            self.mem_label.setStyleSheet(f"color: {mem_colors['text']}")
             app_config = utils.load_app_config()
             app_config["theme"] = theme_name
             utils.save_app_config(app_config)
@@ -750,9 +965,28 @@ class MainWindow(QMainWindow):
 
     # --- On successful close, reset crash counter ---
     def closeEvent(self, event):
+        if hasattr(self, 'usage_worker'):
+            self.usage_worker.stop()
+            self.usage_thread.quit()
+            self.usage_thread.wait()
         set_crash_counter(0)
         self.save_checkbox_states()  # Save on close
         super().closeEvent(event)
+
+    @Slot(float, float, float, float, float, float, float, str, list)
+    def update_usage_indicators(self, cpu, used, total, percent, *_):
+        # CPU
+        self.cpu_squares.set_usage(cpu)
+        self.cpu_label.setText(f"CPU: {cpu:.0f}%")
+        # Memory
+        self.mem_squares.set_usage(percent)
+        if total > 1024:
+            used_gb = used / 1024
+            total_gb = total / 1024
+            mem_str = f"{used_gb:.1f} GB / {total_gb:.1f} GB"
+        else:
+            mem_str = f"{used:.0f} MB / {total:.0f} MB"
+        self.mem_label.setText(f"Memory: {percent:.0f}% ({mem_str})")
 
 # Entry point for running the GUI standalone (for testing)
 if __name__ == "__main__":

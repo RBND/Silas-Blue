@@ -103,4 +103,49 @@ class AnimatedCheckBox(QCheckBox):
         if self.isEnabled() and event.button() == Qt.LeftButton:
             self.toggle()
             self.clicked.emit()
-        super().mousePressEvent(event) 
+        super().mousePressEvent(event)
+
+class AnimatedUsageSquares(QCheckBox):
+    def __init__(self, num_squares=10, colors=None, parent=None):
+        super().__init__(parent)
+        self.setTristate(False)
+        self.setCheckable(False)
+        self._usage = 0.0  # 0-1
+        self._num_squares = num_squares
+        self._colors = colors or {
+            'bg': '#232a2e',
+            'border': '#2ec27e',
+            'fill': '#2ec27e',
+            'text': '#e5e9f0',
+        }
+        self.setFixedHeight(20)
+        self.setFixedWidth(num_squares * 10)
+        self.setStyleSheet('QCheckBox::indicator { width: 0; height: 0; margin: 0; padding: 0; }')
+
+    def set_colors(self, colors):
+        self._colors = colors
+        self.update()
+
+    def set_usage(self, percent):
+        self._usage = max(0.0, min(1.0, percent/100.0))
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        c = self._colors
+        bg = QColor(c['bg'])
+        border = QColor(c['border'])
+        fill = QColor(c['fill'])
+        text = QColor(c['text'])
+        h = self.height() - 6
+        w = h // 2
+        margin = 2
+        filled = int(self._usage * self._num_squares + 0.5)
+        for i in range(self._num_squares):
+            x = margin + i * (w + 2)
+            rect = QRectF(x, margin, w, h)
+            painter.setPen(QPen(border, 1.5))
+            painter.setBrush(QBrush(fill if i < filled else bg))
+            painter.drawRect(rect)
+        painter.end() 

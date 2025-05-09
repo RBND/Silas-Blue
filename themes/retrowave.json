@@ -19,5 +19,17 @@
   "checkbox_checked_border": "#ff5ecb",
   "checkbox_disabled_bg": "#232136",
   "checkbox_disabled_border": "#282a36",
-  "checkbox_checkmark_disabled": "#5c5c6a"
+  "checkbox_checkmark_disabled": "#5c5c6a",
+  "usage_meter_bg": "#232136",
+  "usage_meter_border": "#ff5ecb",
+  "usage_meter_cpu": "#00f0ff",
+  "usage_meter_mem": "#a259ff",
+  "usage_meter_gpu": "#ff5ecb",
+  "usage_meter_vram": "#f8f8f2",
+  "usage_meter_text": "#f8f8f2",
+  "tab_selected_bg": "#181825",
+  "tab_unselected_bg": "#232136",
+  "tab_selected_text": "#ff5ecb",
+  "tab_unselected_text": "#f8f8f2",
+  "tab_outline": "#ff5ecb"
 } 

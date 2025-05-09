@@ -6,6 +6,14 @@ Handles config loading/saving and paths.
 import os
 import json
 from ollama_api import OllamaClient
+import psutil
+import logging
+try:
+    import pynvml
+    pynvml.nvmlInit()
+    _NVML_AVAILABLE = True
+except Exception:
+    _NVML_AVAILABLE = False
 
 CONFIG_DIR = "config"
 
@@ -78,4 +86,51 @@ def save_app_config(config):
 def set_default_model(guild_id, model_name):
     config = load_config(guild_id)
     config["default_model"] = model_name
-    save_config(guild_id, config) 
+    save_config(guild_id, config)
+
+# --- System Usage Utilities ---
+def get_cpu_usage():
+    """Returns CPU usage as a percentage (float)."""
+    return psutil.cpu_percent(interval=0.2)
+
+def get_memory_usage():
+    """Returns (used_MB, total_MB, percent) for system memory."""
+    mem = psutil.virtual_memory()
+    used = mem.used / (1024 * 1024)
+    total = mem.total / (1024 * 1024)
+    percent = mem.percent
+    return used, total, percent
+
+def get_gpu_list():
+    """Returns a list of GPU names if available, else empty list."""
+    if not _NVML_AVAILABLE:
+        return []
+    try:
+        count = pynvml.nvmlDeviceGetCount()
+        return [pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(i)).decode('utf-8') for i in range(count)]
+    except Exception as e:
+        logging.error(f"Error getting GPU list: {e}")
+        return []
+
+def get_gpu_usage():
+    """Returns (gpu_percent, vram_used_MB, vram_total_MB, vram_percent, gpu_name) for the most used NVIDIA GPU, or None if unavailable."""
+    if not _NVML_AVAILABLE:
+        return None
+    try:
+        count = pynvml.nvmlDeviceGetCount()
+        best = None
+        for i in range(count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            gpu_percent = util.gpu
+            vram_used = mem.used / (1024 * 1024)
+            vram_total = mem.total / (1024 * 1024)
+            vram_percent = (vram_used / vram_total) * 100 if vram_total else 0
+            name = pynvml.nvmlDeviceGetName(handle).decode('utf-8')
+            if best is None or gpu_percent > best[0]:
+                best = (gpu_percent, vram_used, vram_total, vram_percent, name)
+        return best if best else None
+    except Exception as e:
+        logging.error(f"Error getting GPU usage: {e}")
+        return None 
