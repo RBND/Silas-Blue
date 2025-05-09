@@ -116,6 +116,7 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
    - Go to "Bot" > "Add Bot"
    - Enable:
      - `PUBLIC BOT` (optional)
+       - _Allows anyone with the invite link to add your bot to their server. If disabled, only you (the owner) can add the bot to servers._
      - `MESSAGE CONTENT INTENT` (required)
      - `PRESENCE INTENT`
      - `SERVER MEMBERS INTENT`
