@@ -72,7 +72,7 @@ class WorkerSignals(QObject):
     model_download_finished = Signal()
 
 class UsageWorker(QObject):
-    usage_updated = Signal(float, float, float, float, float, float, float, str, list)
+    usage_updated = Signal(float, float, float, float)
     def __init__(self):
         super().__init__()
         self._running = True
@@ -84,14 +84,7 @@ class UsageWorker(QObject):
         while self._running:
             cpu = utils.get_cpu_usage()
             used, total, percent = utils.get_memory_usage()
-            gpu_info = utils.get_gpu_usage()
-            gpu_list = utils.get_gpu_list()
-            if gpu_info:
-                gpu_percent, vram_used, vram_total, vram_percent, gpu_name = gpu_info
-            else:
-                gpu_percent = vram_used = vram_total = vram_percent = 0
-                gpu_name = None
-            self.usage_updated.emit(cpu, used, total, percent, gpu_percent, vram_used, vram_total, gpu_name or '', gpu_list)
+            self.usage_updated.emit(cpu, used, total, percent)
             time.sleep(1)
 
 class CustomTitleBar(QFrame):
@@ -974,8 +967,8 @@ class MainWindow(QMainWindow):
         self.save_checkbox_states()  # Save on close
         super().closeEvent(event)
 
-    @Slot(float, float, float, float, float, float, float, str, list)
-    def update_usage_indicators(self, cpu, used, total, percent, *_):
+    @Slot(float, float, float, float)
+    def update_usage_indicators(self, cpu, used, total, percent):
         # CPU
         self.cpu_squares.set_usage(cpu)
         self.cpu_label.setText(f"CPU: {cpu:.0f}%")

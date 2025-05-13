@@ -9,12 +9,6 @@ from ollama_api import OllamaClient
 import psutil
 import logging
 import sys
-try:
-    import pynvml
-    pynvml.nvmlInit()
-    _NVML_AVAILABLE = True
-except Exception:
-    _NVML_AVAILABLE = False
 
 # --- Resource path utility for PyInstaller compatibility ---
 def get_resource_path(relative_path):
@@ -109,38 +103,4 @@ def get_memory_usage():
     used = mem.used / (1024 * 1024)
     total = mem.total / (1024 * 1024)
     percent = mem.percent
-    return used, total, percent
-
-def get_gpu_list():
-    """Returns a list of GPU names if available, else empty list."""
-    if not _NVML_AVAILABLE:
-        return []
-    try:
-        count = pynvml.nvmlDeviceGetCount()
-        return [pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(i)).decode('utf-8') for i in range(count)]
-    except Exception as e:
-        logging.error(f"Error getting GPU list: {e}")
-        return []
-
-def get_gpu_usage():
-    """Returns (gpu_percent, vram_used_MB, vram_total_MB, vram_percent, gpu_name) for the most used NVIDIA GPU, or None if unavailable."""
-    if not _NVML_AVAILABLE:
-        return None
-    try:
-        count = pynvml.nvmlDeviceGetCount()
-        best = None
-        for i in range(count):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            gpu_percent = util.gpu
-            vram_used = mem.used / (1024 * 1024)
-            vram_total = mem.total / (1024 * 1024)
-            vram_percent = (vram_used / vram_total) * 100 if vram_total else 0
-            name = pynvml.nvmlDeviceGetName(handle).decode('utf-8')
-            if best is None or gpu_percent > best[0]:
-                best = (gpu_percent, vram_used, vram_total, vram_percent, name)
-        return best if best else None
-    except Exception as e:
-        logging.error(f"Error getting GPU usage: {e}")
-        return None 
+    return used, total, percent 
