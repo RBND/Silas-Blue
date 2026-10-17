@@ -1,106 +1,123 @@
 """
 Utility functions for Silas Blue.
-Handles config loading/saving and paths.
+Handles atomic config loading/saving for guild configs and global app settings.
 """
 
 import os
 import json
-from ollama_api import OllamaClient
-import psutil
+import tempfile
 import logging
-import sys
 
-# --- Resource path utility for PyInstaller compatibility ---
-def get_resource_path(relative_path):
-    """
-    Get absolute path to resource, works for dev and for PyInstaller bundle.
-    """
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.abspath(relative_path)
+logger = logging.getLogger("silasblue")
+CONFIG_DIR = "config"
 
-CONFIG_DIR = get_resource_path("config")
+DEFAULT_APP_CONFIG = {
+    "backend_type": "ollama",
+    "ollama_url": "http://localhost:11434",
+    "llamacpp_url": "http://localhost:8080",
+    "llamacpp_binary_path": "",
+    "llamacpp_model_path": "",
+    "api_key": "",
+    "allow_dms": True,
+    "dm_default_model": "",
+    "dm_disabled_message": "Direct messages with the bot are currently disabled.",
+    "debug": False,
+    "theme": "retrowave"
+}
 
-def get_config_path(guild_id):
-    return os.path.join(CONFIG_DIR, f"{guild_id}.json")
+DEFAULT_GUILD_CONFIG = {
+    "default_model": "llama2",
+    "reply_roles": ["everyone"],
+    "change_model_roles": ["admin", "owner"],
+    "change_permission_roles": ["admin", "owner"],
+    "pagination_enabled": True,
+    "pagination_max_chars": 1900,
+    "random_prompt_enabled": False,
+    "random_prompt_probability": 0
+}
 
-def load_config(guild_id):
-    """
-    Loads the config for a given guild/server.
-    Ensures default_model is set to an available model if possible.
-    """
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    path = get_config_path(guild_id)
-    ollama = OllamaClient()
-    available_models = ollama.list_models()
-    config = None
-    if not os.path.exists(path):
-        # Default config
-        config = {
-            "default_model": available_models[0] if available_models else "",
-            "reply_roles": ["everyone"],
-            "change_model_roles": ["admin", "owner"],
-            "change_permission_roles": ["admin", "owner"],
-            "pagination_enabled": True,
-            "pagination_max_chars": 2000,
-            "random_prompt_enabled": False,
-            "random_prompt_probability": 0
-        }
-        save_config(guild_id, config)
-        return config
-    with open(path, "r") as f:
-        config = json.load(f)
-    # Ensure default_model is set and valid
-    if ("default_model" not in config or not config["default_model"] or config["default_model"] not in available_models) and available_models:
-        config["default_model"] = available_models[0]
-        save_config(guild_id, config)
-    return config
+def _atomic_write_json(file_path: str, data: dict):
+    """Writes JSON data atomically to prevent file corruption."""
+    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
+    temp_dir = os.path.dirname(os.path.abspath(file_path))
+    temp_file = tempfile.NamedTemporaryFile("w", dir=temp_dir, delete=False, encoding="utf-8")
+    try:
+        json.dump(data, temp_file, indent=2)
+        temp_file.flush()
+        os.fsync(temp_file.fileno())
+        temp_file.close()
+        os.replace(temp_file.name, file_path)
+    except Exception as e:
+        if os.path.exists(temp_file.name):
+            try:
+                os.remove(temp_file.name)
+            except Exception:
+                pass
+        raise e
 
-def save_config(guild_id, config):
-    """
-    Saves the config for a given guild/server.
-    """
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    path = get_config_path(guild_id)
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-
-def get_app_config_path():
+def get_app_config_path() -> str:
     return os.path.join(CONFIG_DIR, "app_config.json")
 
-def load_app_config():
+def load_app_config() -> dict:
+    """Loads global application settings, filling in defaults."""
     os.makedirs(CONFIG_DIR, exist_ok=True)
     path = get_app_config_path()
-    if not os.path.exists(path):
-        # Default app config
-        config = {"theme": "retrowave"}
+    config = dict(DEFAULT_APP_CONFIG)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                user_config = json.load(f)
+                if isinstance(user_config, dict):
+                    config.update(user_config)
+        except Exception as e:
+            logger.error(f"Error loading app_config.json, using defaults: {e}")
+    else:
         save_app_config(config)
-        return config
-    with open(path, "r") as f:
-        return json.load(f)
+    return config
 
-def save_app_config(config):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+def save_app_config(config: dict):
+    """Saves global application settings atomically."""
     path = get_app_config_path()
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
+    _atomic_write_json(path, config)
 
-# Utility to set the default model for a guild
+def get_config_path(guild_id) -> str:
+    return os.path.join(CONFIG_DIR, f"{guild_id}.json")
 
-def set_default_model(guild_id, model_name):
-    config = load_config(guild_id)
-    config["default_model"] = model_name
-    save_config(guild_id, config)
+def load_config(guild_id) -> dict:
+    """
+    Loads config for a given guild/server.
+    If guild_id is None (DM), returns DM default config without writing to disk.
+    """
+    if guild_id is None:
+        app_cfg = load_app_config()
+        dm_cfg = dict(DEFAULT_GUILD_CONFIG)
+        if app_cfg.get("dm_default_model"):
+            dm_cfg["default_model"] = app_cfg.get("dm_default_model")
+        return dm_cfg
 
-# --- System Usage Utilities ---
-def get_cpu_usage():
-    """Returns CPU usage as a percentage (float)."""
-    return psutil.cpu_percent(interval=0.2)
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    path = get_config_path(guild_id)
+    if not os.path.exists(path):
+        config = dict(DEFAULT_GUILD_CONFIG)
+        save_config(guild_id, config)
+        return config
 
-def get_memory_usage():
-    """Returns (used_MB, total_MB, percent) for system memory."""
-    mem = psutil.virtual_memory()
-    used = mem.used / (1024 * 1024)
-    total = mem.total / (1024 * 1024)
-    percent = mem.percent
-    return used, total, percent 
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            merged = dict(DEFAULT_GUILD_CONFIG)
+            merged.update(data)
+            # Enforce max chars boundary
+            if merged.get("pagination_max_chars", 1900) > 1900:
+                merged["pagination_max_chars"] = 1900
+            return merged
+    except Exception as e:
+        logger.error(f"Error loading config for guild {guild_id}: {e}")
+        return dict(DEFAULT_GUILD_CONFIG)
+
+def save_config(guild_id, config: dict):
+    """Saves the config for a given guild atomically."""
+    if guild_id is None:
+        return
+    path = get_config_path(guild_id)
+    _atomic_write_json(path, config)

@@ -1,172 +1,43 @@
 """
-Ollama API integration for Silas Blue.
-Handles sending prompts, listing models, downloading models, and status.
+Ollama API integration for Silas Blue (Backwards-compatible wrapper).
+Delegates to ai_providers.OllamaProvider with support for remote Ollama servers.
 """
 
-import requests
-import threading
-import subprocess
-import logging
-import time
-import re
-import json
-import config
-import sys  # Add this import for platform check
-
-logger = logging.getLogger("silasblue")
-
-ANSI_ESCAPE = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-def strip_ansi(text):
-    return ANSI_ESCAPE.sub('', text)
+from typing import Optional, Callable, List
+from ai_providers.ollama_provider import OllamaProvider
+from utils import load_app_config
 
 class OllamaClient:
-    def __init__(self, base_url=None):
-        self.base_url = base_url or "http://localhost:11434"
-        self.ollama_process = None
+    def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None):
+        if base_url is None:
+            config = load_app_config()
+            base_url = config.get("ollama_url", "http://localhost:11434")
+            if not api_key:
+                api_key = config.get("api_key", "")
+        self.provider = OllamaProvider(base_url=base_url, api_key=api_key)
 
-    def send_prompt(self, prompt, model):
-        """
-        Sends a prompt to Ollama and returns the response.
-        """
-        url = f"{self.base_url}/api/generate"
-        data = {"model": model, "prompt": prompt}
-        try:
-            resp = requests.post(url, json=data, timeout=60)
-            resp.raise_for_status()
-            # Always decode as UTF-8
-            text = resp.content.decode('utf-8')
-            responses = []
-            for line in text.strip().splitlines():
-                try:
-                    obj = json.loads(line)
-                    if 'response' in obj:
-                        responses.append(obj['response'])
-                except Exception:
-                    continue
-            return ''.join(responses) if responses else resp.json().get("response", "")
-        except Exception as e:
-            return f"Error: {e}"
+    @property
+    def base_url(self) -> str:
+        return self.provider.base_url
 
-    def list_models(self):
-        """
-        Returns a list of available models.
-        """
-        url = f"{self.base_url}/api/tags"
-        if config.DEBUG:
-            print(f"[DEBUG] OllamaClient.list_models() requesting: {url}")
-        try:
-            resp = requests.get(url, timeout=5)
-            if config.DEBUG:
-                print(f"[DEBUG] OllamaClient.list_models() response status: {resp.status_code}")
-            if resp.status_code == 200:
-                if config.DEBUG:
-                    print(f"[DEBUG] OllamaClient.list_models() response text: {resp.text[:200]}")
-                return [m['name'] for m in resp.json().get('models', [])]
-            else:
-                if config.DEBUG:
-                    print(f"[DEBUG] OllamaClient.list_models() error: {resp.text}")
-                return []
-        except Exception as e:
-            if config.DEBUG:
-                print(f"[DEBUG] OllamaClient.list_models() error: {e}")
-            return []
+    def send_prompt(self, prompt: str, model: str) -> str:
+        return self.provider.send_prompt_sync(prompt, model)
 
-    def download_model(self, model_name, progress_callback=None):
-        """
-        Downloads a model using the ollama CLI and pipes output to logger and callback.
-        """
-        logger.info(f"Starting download for model: {model_name}")
-        start_time = time.time()
-        try:
-            process = subprocess.Popen(
-                ["ollama", "pull", model_name],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8"  # Ensure UTF-8 decoding for output
-            )
-            for line in process.stdout:
-                clean_line = strip_ansi(line)
-                logger.info(clean_line.strip())
-                if progress_callback:
-                    # Try to parse percentage from line, e.g. "pulling manifest:  50% ..."
-                    match = re.search(r'(\d+)%', clean_line)
-                    if match:
-                        percent = int(match.group(1))
-                        elapsed = time.time() - start_time
-                        speed = f"{percent / elapsed:.2f}%/s" if elapsed > 0 else ""
-                        progress_callback(percent, speed)
-            process.wait()
-            if process.returncode == 0:
-                logger.info(f"Model {model_name} downloaded successfully.")
-                if progress_callback:
-                    progress_callback(100, "done")
-                return True
-            else:
-                logger.error(f"Failed to download model {model_name}.")
-                if progress_callback:
-                    progress_callback(-1, "error")
-                return False
-        except Exception as e:
-            logger.error(f"Error downloading model {model_name}: {e}")
-            if progress_callback:
-                progress_callback(-1, "error")
-            return False
+    def list_models(self) -> List[str]:
+        return self.provider.list_models_sync()
 
-    def status(self):
-        """
-        Returns True if Ollama is running (by checking /api/tags), False otherwise.
-        """
-        url = f"{self.base_url}/api/tags"
-        if config.DEBUG:
-            print(f"[DEBUG] OllamaClient.status() requesting: {url}")
-        try:
-            resp = requests.get(url, timeout=5)
-            if config.DEBUG:
-                print(f"[DEBUG] OllamaClient.status() response status: {resp.status_code}")
-            return resp.status_code == 200
-        except Exception as e:
-            if config.DEBUG:
-                print(f"[DEBUG] OllamaClient.status() error: {e}")
-            return False
+    def download_model(self, model_name: str, progress_callback: Optional[Callable[[int, str], None]] = None) -> bool:
+        return self.provider.pull_model_sync(model_name, progress_callback)
 
-    def start(self):
-        """
-        Starts Ollama as a subprocess (if not already running).
-        """
-        if self.status():
-            return True  # Already running
-        try:
-            # Start Ollama in server mode
-            creationflags = 0
-            if sys.platform == "win32":
-                creationflags = subprocess.CREATE_NO_WINDOW
-            self.ollama_process = subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=creationflags
-            )
-            return True
-        except Exception as e:
-            print(f"Failed to start Ollama: {e}")
-            return False
+    def status(self) -> bool:
+        return self.provider.status_sync()
 
-    def stop(self):
-        """
-        Stops Ollama subprocess (if started by this client).
-        """
-        if self.ollama_process:
-            self.ollama_process.terminate()
-            self.ollama_process.wait(timeout=10)
-            self.ollama_process = None
-            return True
-        # If not started by this client, try to kill by port (advanced: not implemented here)
-        return False
+    def start(self) -> bool:
+        return self.provider.start_local_service()
 
-    def restart(self):
-        """
-        Restarts Ollama subprocess.
-        """
+    def stop(self) -> bool:
+        return self.provider.stop_local_service()
+
+    def restart(self) -> bool:
         self.stop()
-        return self.start() 
+        return self.start()

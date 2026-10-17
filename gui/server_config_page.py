@@ -1,14 +1,14 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, QTextEdit, QPushButton, QTabWidget, QListWidget, QListWidgetItem, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, QTextEdit, QPushButton, QTabWidget, QListWidget, QListWidgetItem, QCheckBox, QHBoxLayout
 )
 from PySide6.QtCore import QTimer, Qt
-import os
 import json
 import logging
 
 from utils import load_config, save_config
-from bot_core import bot
-from .animated_checkbox import AnimatedCheckBox
+from bot_core import bot, update_server_config
+
+logger = logging.getLogger("silasblue")
 
 class ServerConfigPage(QWidget):
     """
@@ -63,16 +63,16 @@ class ServerConfigPage(QWidget):
 
         gui_layout.addLayout(permissions_row)
 
-        # Pagination and random prompt controls in a row with stretch
+        # Pagination and random prompt controls
         pag_rand_row = QHBoxLayout()
-        self.pagination_enabled = AnimatedCheckBox("Enable Pagination", colors=main_window.theme_manager.get_checkbox_colors())
+        self.pagination_enabled = QCheckBox("Enable Pagination")
         pag_rand_row.addWidget(self.pagination_enabled, 1)
-        pag_rand_row.addWidget(QLabel("Max characters per page:"))
+        pag_rand_row.addWidget(QLabel("Max characters per page (max 1900):"))
         self.pagination_max_chars = QSpinBox()
-        self.pagination_max_chars.setRange(500, 4000)
-        self.pagination_max_chars.setValue(2000)
+        self.pagination_max_chars.setRange(500, 1900)
+        self.pagination_max_chars.setValue(1900)
         pag_rand_row.addWidget(self.pagination_max_chars, 2)
-        self.random_prompt_enabled = AnimatedCheckBox("Enable random prompt mode", colors=main_window.theme_manager.get_checkbox_colors())
+        self.random_prompt_enabled = QCheckBox("Enable random prompt mode")
         pag_rand_row.addWidget(self.random_prompt_enabled, 1)
         pag_rand_row.addWidget(QLabel("Probability:"))
         self.random_prompt_probability = QComboBox()
@@ -103,22 +103,17 @@ class ServerConfigPage(QWidget):
         self.guild_select.currentIndexChanged.connect(self.load_config)
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
-        # Connect itemChanged signals for role lists
         self.reply_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
         self.change_model_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
         self.change_permission_roles_list.itemChanged.connect(lambda _: self.on_roles_checkbox_changed())
 
-        # Initial population (deferred to avoid blocking UI)
-        QTimer.singleShot(0, self.update_guilds)
-        QTimer.singleShot(0, self.load_config)
+        # Initial population
+        self.update_guilds()
+        self.load_config()
 
     def update_guilds(self):
         """Populate the guild selection box with connected servers."""
         try:
-            from bot_core import _bot_instance
-            bot = _bot_instance
-            if not bot:
-                return
             current_ids = [self.guild_select.itemData(i) for i in range(self.guild_select.count())]
             new_guilds = [(guild.name, guild.id) for guild in getattr(bot, 'guilds', [])]
             if len(current_ids) != len(new_guilds) or any(str(gid) not in [str(x[1]) for x in new_guilds] for gid in current_ids):
@@ -129,50 +124,44 @@ class ServerConfigPage(QWidget):
                 self.guild_select.blockSignals(False)
                 self.load_config()
         except Exception as e:
-            logging.getLogger("silasblue").error(f"Failed to update guilds: {e}")
+            logger.error(f"Failed to update guilds: {e}")
 
     def load_config(self):
         guild_id = self.guild_select.currentData()
         if guild_id is None:
             return
         try:
-            from bot_core import _bot_instance
-            bot = _bot_instance
-            if not bot:
-                return
             guild = next((g for g in getattr(bot, 'guilds', []) if g.id == guild_id), None)
             if not guild:
                 return
         except Exception as e:
-            logging.getLogger("silasblue").error(f"Failed to load config: {e}")
+            logger.error(f"Failed to load config: {e}")
             return
         config = load_config(guild_id)
         self.set_roles_list(self.reply_roles_list, guild, config.get("reply_roles", []))
         self.set_roles_list(self.change_model_roles_list, guild, config.get("change_model_roles", []))
         self.set_roles_list(self.change_permission_roles_list, guild, config.get("change_permission_roles", []))
         self.pagination_enabled.setChecked(config.get("pagination_enabled", True))
-        self.pagination_max_chars.setValue(config.get("pagination_max_chars", 2000))
+        self.pagination_max_chars.setValue(min(config.get("pagination_max_chars", 1900), 1900))
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
         self.raw_config.setPlainText(json.dumps(config, indent=2))
 
     def set_roles_list(self, list_widget, guild, selected_roles):
-        # Block signals to prevent unwanted itemChanged events
         list_widget.blockSignals(True)
         list_widget.clear()
-        for role in reversed(guild.roles):
+        selected_lower = [r.lower() for r in selected_roles]
+        for role in guild.roles:
             if role.is_default():
-                continue  # Skip @everyone for selection, handle separately if needed
+                continue
             item = QListWidgetItem(role.name)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            item.setCheckState(Qt.Checked if role.name in selected_roles else Qt.Unchecked)
+            item.setCheckState(Qt.Checked if role.name.lower() in selected_lower else Qt.Unchecked)
             list_widget.addItem(item)
-        # Optionally add @everyone
         item = QListWidgetItem("@everyone")
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-        item.setCheckState(Qt.Checked if "everyone" in selected_roles else Qt.Unchecked)
+        item.setCheckState(Qt.Checked if "everyone" in selected_lower else Qt.Unchecked)
         list_widget.addItem(item)
-        # Unblock signals after update
         list_widget.blockSignals(False)
 
     def get_selected_roles(self, list_widget):
@@ -187,25 +176,22 @@ class ServerConfigPage(QWidget):
         return roles
 
     def get_config_from_widgets(self):
-        config = {
+        max_chars = min(self.pagination_max_chars.value(), 1900)
+        return {
             "reply_roles": self.get_selected_roles(self.reply_roles_list),
             "change_model_roles": self.get_selected_roles(self.change_model_roles_list),
             "change_permission_roles": self.get_selected_roles(self.change_permission_roles_list),
             "pagination_enabled": self.pagination_enabled.isChecked(),
-            "pagination_max_chars": self.pagination_max_chars.value(),
+            "pagination_max_chars": max_chars,
             "random_prompt_enabled": self.random_prompt_enabled.isChecked(),
             "random_prompt_probability": int(self.random_prompt_probability.currentText().replace("%", ""))
         }
-        return config
 
     def on_tab_changed(self, idx):
-        # 0 = GUI, 1 = Raw JSON
         if idx == 1:
-            # Switched to Raw JSON: update JSON from widgets
             config = self.get_config_from_widgets()
             self.raw_config.setPlainText(json.dumps(config, indent=2))
         elif idx == 0:
-            # Switched to GUI: update widgets from JSON (if valid)
             try:
                 config = json.loads(self.raw_config.toPlainText())
                 self.set_widgets_from_config(config)
@@ -216,22 +202,14 @@ class ServerConfigPage(QWidget):
         guild_id = self.guild_select.currentData()
         if guild_id is None:
             return
-        try:
-            from bot_core import _bot_instance
-            bot = _bot_instance
-            if not bot:
-                return
-            guild = next((g for g in getattr(bot, 'guilds', []) if g.id == guild_id), None)
-            if not guild:
-                return
-        except Exception as e:
-            logging.getLogger("silasblue").error(f"Failed to set widgets from config: {e}")
+        guild = next((g for g in getattr(bot, 'guilds', []) if g.id == guild_id), None)
+        if not guild:
             return
         self.set_roles_list(self.reply_roles_list, guild, config.get("reply_roles", []))
         self.set_roles_list(self.change_model_roles_list, guild, config.get("change_model_roles", []))
         self.set_roles_list(self.change_permission_roles_list, guild, config.get("change_permission_roles", []))
         self.pagination_enabled.setChecked(config.get("pagination_enabled", True))
-        self.pagination_max_chars.setValue(config.get("pagination_max_chars", 2000))
+        self.pagination_max_chars.setValue(min(config.get("pagination_max_chars", 1900), 1900))
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
 
@@ -239,46 +217,45 @@ class ServerConfigPage(QWidget):
         guild_id = self.guild_select.currentData()
         if guild_id is None:
             return
-        # Save from whichever tab is active
         if self.tabs.currentIndex() == 0:
             config = self.get_config_from_widgets()
         else:
             try:
                 config = json.loads(self.raw_config.toPlainText())
             except Exception:
-                return  # Invalid JSON, do not save
+                return
+
+        # Ensure pagination_max_chars stays within Discord safe limits
+        if config.get("pagination_max_chars", 1900) > 1900:
+            config["pagination_max_chars"] = 1900
+
+        # Save to disk
         save_config(guild_id, config)
+        # Update running bot immediately!
+        update_server_config(guild_id, config)
+
         self.raw_config.setPlainText(json.dumps(config, indent=2))
-        logging.getLogger("silasblue").info(f"Config for server {guild_id} saved via GUI.")
-        self.show_feedback(self.save_btn, "Saved!")
-        self.reload_config_from_disk()  # Ensure UI is in sync after save
+        logger.info(f"Config for server {guild_id} saved and applied.")
+        self.show_feedback(self.save_btn, "Config Saved & Applied!")
+        self.reload_config_from_disk()
 
     def show_feedback(self, button, message):
-        """Show a temporary color change and log message for button feedback."""
         orig_style = button.styleSheet()
         button.setStyleSheet("background-color: #00f0ff; color: #181825;")
         QTimer.singleShot(200, lambda: button.setStyleSheet(orig_style))
-        if hasattr(self.main_window, "log_output"):
-            self.main_window.log_output.append(message)
+        if hasattr(self.main_window, "system_log_output"):
+            self.main_window.system_log_output.append(message)
 
     def reload_config_from_disk(self):
         guild_id = self.guild_select.currentData()
         if guild_id is None:
             return
         config = load_config(guild_id)
-        # Only update widgets if not currently editing (i.e., not focused)
         if not self.raw_config.hasFocus():
             self.raw_config.setPlainText(json.dumps(config, indent=2))
         if self.tabs.currentIndex() == 0:
             self.set_widgets_from_config(config)
 
     def on_roles_checkbox_changed(self):
-        """
-        Update the raw JSON view when a role checkbox is checked/unchecked.
-        """
         config = self.get_config_from_widgets()
         self.raw_config.setPlainText(json.dumps(config, indent=2))
-
-    def update_checkbox_colors(self, colors):
-        self.pagination_enabled.set_colors(colors)
-        self.random_prompt_enabled.set_colors(colors) 

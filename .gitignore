@@ -1,12 +1,16 @@
 /.idea
 /__pycache__
 /gui/__pycache__
+ai_providers/__pycache__
+tests/__pycache__
 config/*.json
 !config/example.json
 config/bot_token.txt
 config/gui_log.txt
+config/crash_counter.txt
 gui/silasblue.png
 *.log
+logs/*.log
 *.rar
 *.zip
 *.7z

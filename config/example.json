@@ -4,13 +4,13 @@
     "everyone"
   ],
   "change_model_roles": [
-    "admin",
+    "admin"
   ],
   "change_permission_roles": [
-    "admin",
+    "admin"
   ],
   "pagination_enabled": true,
-  "pagination_max_chars": 500,
+  "pagination_max_chars": 1900,
   "random_prompt_enabled": false,
   "random_prompt_probability": 0
 }

@@ -1,5 +1,5 @@
 """
-Silas Blue - Discord Bot powered by local AI models via Ollama
+Silas Blue - Discord Bot powered by local AI models via Ollama or Llama.cpp
 Main entry point: launches both the Discord bot and the GUI.
 """
 
@@ -13,123 +13,86 @@ from PySide6.QtWidgets import QApplication, QSplashScreen
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QPixmap
 
-from bot_core import start_bot, stop_bot, restart_bot
-from ollama_api import OllamaClient
-import config  # Changed from 'from config import DEBUG'
-from utils import get_resource_path
+from bot_core import start_bot, stop_bot, restart_bot, get_provider
+from utils import load_app_config
+import config
 
-# Ensure logs directory exists
-os.makedirs('logs', exist_ok=True)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("silasblue")
 
-# Set up logging to file
-logging.basicConfig(
-    filename='logs/silasblue.log',
-    filemode='a',
-    format='%(asctime)s %(levelname)s:%(message)s',
-    level=logging.DEBUG  # or INFO, as needed
-)
+CRASH_COUNTER_FILE = os.path.join("config", "crash_counter.txt")
 
-# Redirect stdout and stderr to log files
-sys.stdout = open('logs/stdout.log', 'a')
-sys.stderr = open('logs/stderr.log', 'a')
-
-# Force the root logger's level based on config.DEBUG
-logging.getLogger().setLevel(logging.DEBUG if getattr(config, 'DEBUG', False) else logging.INFO)
-
-# --- Crash counter logic for auto-debug ---
-CRASH_COUNTER_FILE = get_resource_path(os.path.join('config', 'crash_counter.txt'))
-def get_crash_counter():
+def get_crash_counter() -> int:
     try:
-        with open(CRASH_COUNTER_FILE, 'r', encoding='utf-8') as f:
+        with open(CRASH_COUNTER_FILE, "r", encoding="utf-8") as f:
             return int(f.read().strip())
     except Exception:
         return 0
 
-def set_crash_counter(val):
+def set_crash_counter(val: int):
     try:
-        with open(CRASH_COUNTER_FILE, 'w', encoding='utf-8') as f:
+        os.makedirs("config", exist_ok=True)
+        with open(CRASH_COUNTER_FILE, "w", encoding="utf-8") as f:
             f.write(str(val))
     except Exception:
         pass
 
-# Only check and set debug mode if crash counter is high, but do not increment here
-count = get_crash_counter()
-if count >= 2:
-    # Set DEBUG=True in config.py
-    try:
-        with open('config.py', 'w', encoding='utf-8') as f:
-            f.write('DEBUG = True\n')
-    except Exception:
-        pass
-    set_crash_counter(0)  # Reset after enabling debug
+# Check if repeated crashes previously occurred
+if get_crash_counter() >= 2:
+    config.DEBUG = True
+    logger.info("Debug mode auto-enabled due to previous crashes.")
+    set_crash_counter(0)
 
 def start_gui_and_bot():
-    """
-    Starts the PySide6 GUI in the main thread and starts the bot after the event loop starts.
-    """
-    print("[DEBUG] Creating QApplication...")
-    logging.debug("Creating QApplication...")
+    """Starts the PySide6 GUI and triggers bot startup."""
     app = QApplication(sys.argv)
-    print("[DEBUG] QApplication created.")
-    logging.debug("QApplication created.")
-    # --- Splash Screen ---
-    print("[DEBUG] Loading splash image...")
-    splash_pix = QPixmap(get_resource_path("gui/splash.png"))
-    splash = QSplashScreen(splash_pix)
-    print("[DEBUG] Showing splash screen...")
-    splash.show()
-    app.processEvents()  # Ensure splash screen is shown
-    print("[DEBUG] Splash screen shown.")
+
+    # Splash Screen
+    splash = None
+    splash_path = os.path.join("gui", "splash.png")
+    if os.path.exists(splash_path):
+        splash_pix = QPixmap(splash_path)
+        splash = QSplashScreen(splash_pix)
+        splash.show()
+        app.processEvents()
 
     def show_main_window():
-        print("[DEBUG] Creating MainWindow...")
-        logging.debug("Creating MainWindow...")
         window = MainWindow(start_bot=start_bot, stop_bot=stop_bot, restart_bot=restart_bot)
-        print("[DEBUG] MainWindow created.")
-        logging.debug("MainWindow created.")
         window.show()
-        print("[DEBUG] MainWindow shown.")
-        splash.finish(window)  # Hide splash when main window is ready
-        print("[DEBUG] Splash screen finished.")
-        logging.debug("MainWindow shown.")
+        if splash:
+            splash.finish(window)
         window.redirect_output_to_log()
-        # Start the bot after the event loop starts
-        QTimer.singleShot(100, lambda: logging.debug("Starting bot...") or start_bot())
+        # Start Discord bot in background
+        QTimer.singleShot(100, start_bot)
 
-    # Show the main window as soon as possible (no fixed delay)
-    QTimer.singleShot(100, show_main_window)
-    print("[DEBUG] Entering Qt event loop...")
-    logging.debug("Entering Qt event loop...")
-    sys.exit(app.exec())
+    # Transition from splash to main window
+    QTimer.singleShot(1500, show_main_window)
+    exit_code = app.exec()
+    set_crash_counter(0)  # Clean exit
+    sys.exit(exit_code)
 
-def ensure_ollama_running():
+def ensure_ai_service_running():
     """
-    Checks if Ollama is running, and starts it if not. Runs in a background thread.
+    If configured for local Ollama, checks if Ollama service is active and starts it if needed.
+    Does nothing if configured for a remote server or Llama.cpp.
     """
-    ollama_client = OllamaClient()
-    if not ollama_client.status():
-        logging.info("Ollama is not running. Attempting to start Ollama service...")
-        started = ollama_client.start()
-        if started:
-            logging.info("Ollama service started successfully.")
+    provider = get_provider()
+    if provider.name == "Ollama" and provider.is_local():
+        if not provider.status_sync():
+            logger.info("Local Ollama is not running. Attempting to start local Ollama service...")
+            if provider.start_local_service():
+                logger.info("Local Ollama service started successfully.")
+            else:
+                logger.warning("Failed to start local Ollama. The bot may not function until Ollama is started.")
         else:
-            logging.error("Failed to start Ollama service. The bot may not function correctly.")
-    else:
-        logging.info("Ollama service is already running.")
+            logger.info("Local Ollama service is running.")
 
 if __name__ == "__main__":
-    logging.debug("Starting Ollama ensure thread...")
     try:
-        threading.Thread(target=ensure_ollama_running, daemon=True).start()
-        logging.debug("Starting GUI and bot...")
+        threading.Thread(target=ensure_ai_service_running, daemon=True).start()
         start_gui_and_bot()
-        set_crash_counter(0)  # Reset on clean exit
     except Exception as e:
-        logging.error(f"Unhandled exception: {e}")
-        # Increment crash counter so next launch can auto-enable debug
-        count = get_crash_counter()
-        set_crash_counter(count + 1)
+        count = get_crash_counter() + 1
+        set_crash_counter(count)
+        logger.error(f"Silas Blue encountered an unhandled crash: {e}")
         raise
-
-
-
