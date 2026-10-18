@@ -65,6 +65,7 @@ class WorkerSignals(QObject):
     backend_detected = Signal(dict)
     remote_test_finished = Signal(bool, str)
     remote_models_fetched = Signal(list)
+    web_search_tested = Signal(bool, str)
 
 
 class MainWindow(QMainWindow):
@@ -103,6 +104,7 @@ class MainWindow(QMainWindow):
         self.signals.backend_detected.connect(self.on_backend_detected)
         self.signals.remote_test_finished.connect(self.on_remote_test_finished)
         self.signals.remote_models_fetched.connect(self.on_remote_models_fetched)
+        self.signals.web_search_tested.connect(self.on_web_search_tested)
 
         # Compatibility widgets (in case external modules query them)
         self.bot_status_label = QLabel("Bot Status: Stopped")
@@ -172,7 +174,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.1.0")
+        app_sub = QLabel("AI Discord Assistant v3.2.0")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -732,6 +734,75 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(dm_card)
 
+        # --- 5. Web Search & Auto-Grounding Card ---
+        search_card = QFrame()
+        search_card.setObjectName("card")
+        sc_layout = QVBoxLayout(search_card)
+        sc_layout.setContentsMargins(14, 12, 14, 12)
+        sc_layout.setSpacing(10)
+
+        sc_title = QLabel("🌐 Web Search & Auto-Grounding (RAG)")
+        sc_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        sc_layout.addWidget(sc_title)
+
+        self.web_search_enabled_checkbox = QCheckBox("Enable Web Search (!search, !web, !links)")
+        self.web_search_enabled_checkbox.setChecked(bool(self.app_cfg.get("web_search_enabled", True)))
+        sc_layout.addWidget(self.web_search_enabled_checkbox)
+
+        self.web_search_auto_checkbox = QCheckBox("Auto-Search Mode (Intelligently search the web for prompts needing live info)")
+        self.web_search_auto_checkbox.setChecked(bool(self.app_cfg.get("web_search_auto", True)))
+        sc_layout.addWidget(self.web_search_auto_checkbox)
+
+        prov_row = QHBoxLayout()
+        prov_row.addWidget(QLabel("Search Provider:"))
+        self.web_search_provider_select = QComboBox()
+        self.web_search_provider_select.addItem("DuckDuckGo (Free, Zero-Config)", userData="duckduckgo")
+        self.web_search_provider_select.addItem("Tavily AI Search (API Key)", userData="tavily")
+        self.web_search_provider_select.addItem("Brave Search (API Key)", userData="brave")
+        current_sp = self.app_cfg.get("web_search_provider", "duckduckgo").lower()
+        for idx in range(self.web_search_provider_select.count()):
+            if self.web_search_provider_select.itemData(idx) == current_sp:
+                self.web_search_provider_select.setCurrentIndex(idx)
+                break
+        prov_row.addWidget(self.web_search_provider_select, 1)
+
+        prov_row.addWidget(QLabel("Max Results:"))
+        self.web_search_max_results_input = QSpinBox()
+        self.web_search_max_results_input.setRange(1, 10)
+        self.web_search_max_results_input.setValue(int(self.app_cfg.get("web_search_max_results", 5)))
+        prov_row.addWidget(self.web_search_max_results_input)
+        sc_layout.addLayout(prov_row)
+
+        tavily_row = QHBoxLayout()
+        tavily_row.addWidget(QLabel("Tavily API Key (Optional):"))
+        self.tavily_api_key_input = QLineEdit(self.app_cfg.get("tavily_api_key", ""))
+        self.tavily_api_key_input.setEchoMode(QLineEdit.Password)
+        self.tavily_api_key_input.setPlaceholderText("tvly-...")
+        tavily_row.addWidget(self.tavily_api_key_input, 1)
+        sc_layout.addLayout(tavily_row)
+
+        brave_row = QHBoxLayout()
+        brave_row.addWidget(QLabel("Brave API Key (Optional):"))
+        self.brave_api_key_input = QLineEdit(self.app_cfg.get("brave_api_key", ""))
+        self.brave_api_key_input.setEchoMode(QLineEdit.Password)
+        self.brave_api_key_input.setPlaceholderText("BSA...")
+        brave_row.addWidget(self.brave_api_key_input, 1)
+        sc_layout.addLayout(brave_row)
+
+        test_row = QHBoxLayout()
+        self.test_search_input = QLineEdit("Python latest version news")
+        self.test_search_input.setPlaceholderText("Enter test search query...")
+        self.test_search_btn = QPushButton("🔍 Test Web Search")
+        self.test_search_btn.clicked.connect(self.test_web_search_async)
+        test_row.addWidget(self.test_search_input, 1)
+        test_row.addWidget(self.test_search_btn)
+        sc_layout.addLayout(test_row)
+
+        self.test_search_status = QLabel("")
+        sc_layout.addWidget(self.test_search_status)
+
+        layout.addWidget(search_card)
+
         # --- Save Settings Button ---
         save_btn_row = QHBoxLayout()
         self.save_settings_btn = QPushButton("Save AI & Bot Settings")
@@ -1078,6 +1149,14 @@ class MainWindow(QMainWindow):
         self.app_cfg["dm_default_model"] = self.dm_model_input.text().strip()
         self.app_cfg["dm_disabled_message"] = self.dm_disabled_msg_input.text().strip()
 
+        # Web Search settings
+        self.app_cfg["web_search_enabled"] = self.web_search_enabled_checkbox.isChecked()
+        self.app_cfg["web_search_auto"] = self.web_search_auto_checkbox.isChecked()
+        self.app_cfg["web_search_provider"] = self.web_search_provider_select.currentData() or "duckduckgo"
+        self.app_cfg["web_search_max_results"] = self.web_search_max_results_input.value()
+        self.app_cfg["tavily_api_key"] = self.tavily_api_key_input.text().strip()
+        self.app_cfg["brave_api_key"] = self.brave_api_key_input.text().strip()
+
         save_app_config(self.app_cfg)
         self.provider = get_ai_provider(self.app_cfg)
         reload_ai_provider()
@@ -1089,6 +1168,56 @@ class MainWindow(QMainWindow):
         self.show_feedback(self.save_settings_btn, "✓ Settings Saved!")
         self.update_ai_status()
         self.refresh_models_async()
+
+    def test_web_search_async(self):
+        query = self.test_search_input.text().strip() or "Python release"
+        provider_name = self.web_search_provider_select.currentData() or "duckduckgo"
+        tavily_key = self.tavily_api_key_input.text().strip()
+        brave_key = self.brave_api_key_input.text().strip()
+        max_res = self.web_search_max_results_input.value()
+
+        self.test_search_btn.setEnabled(False)
+        self.test_search_status.setStyleSheet("color: #00f0ff; font-weight: 600;")
+        self.test_search_status.setText(f"Searching via {provider_name}...")
+
+        def run_search():
+            import asyncio
+            from web_search import SearchService
+            test_cfg = {
+                "web_search_provider": provider_name,
+                "tavily_api_key": tavily_key,
+                "brave_api_key": brave_key,
+                "web_search_max_results": max_res
+            }
+            service = SearchService(test_cfg)
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                results = loop.run_until_complete(service.search(query, max_results=max_res))
+                loop.close()
+                if results:
+                    title_snippet = results[0].title[:45]
+                    return True, f"✓ Success: Found {len(results)} results! (Top: '{title_snippet}...')", results
+                return False, "0 results returned from search provider.", []
+            except Exception as e:
+                return False, f"Search error: {e}", []
+
+        def done_callback(fut):
+            success, msg, _ = fut.result()
+            self.signals.web_search_tested.emit(success, msg)
+
+        future = self.executor.submit(run_search)
+        future.add_done_callback(done_callback)
+
+    @Slot(bool, str)
+    def on_web_search_tested(self, success: bool, msg: str):
+        self.test_search_btn.setEnabled(True)
+        if success:
+            self.test_search_status.setStyleSheet("color: #00ff88; font-weight: 600;")
+        else:
+            self.test_search_status.setStyleSheet("color: #ff3366; font-weight: 600;")
+        self.test_search_status.setText(msg)
+        self.system_log_output.append(f"[WEB SEARCH] {msg}")
 
     def auto_detect_on_startup(self):
         """If configured AI backend is offline, runs auto-detection in background."""
@@ -1464,6 +1593,13 @@ class MainWindow(QMainWindow):
                     guild = data.get("guild_name") or data.get("guild_id")
                     reply_snippet = data.get("reply", "")[:180]
                     msg = f"[{now_str}] [{guild}] Silas Blue -> {reply_snippet}..."
+                    self.bot_log_output.append(msg)
+                    self.recent_activity_output.append(msg)
+                elif event == "web_search":
+                    guild = data.get("guild_name") or data.get("guild_id") or "Direct Message"
+                    query_snippet = data.get("query", "")[:50]
+                    res_count = data.get("results_count", 0)
+                    msg = f"[{now_str}] [{guild}] 🌐 Web Search: \"{query_snippet}\" ({res_count} results)"
                     self.bot_log_output.append(msg)
                     self.recent_activity_output.append(msg)
                 elif event == "server_joined":

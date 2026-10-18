@@ -39,6 +39,12 @@ DEFAULT_APP_CONFIG = {
     "dm_disabled_message": "Direct messages with the bot are currently disabled.",
     "dm_memory_turns": 6,
     "dm_memory_ttl_minutes": 30,
+    "web_search_enabled": True,
+    "web_search_auto": True,
+    "web_search_provider": "duckduckgo",
+    "web_search_max_results": 5,
+    "tavily_api_key": "",
+    "brave_api_key": "",
     "debug": False,
     "theme": "retrowave"
 }
@@ -48,6 +54,9 @@ DEFAULT_GUILD_CONFIG = {
     "reply_roles": ["everyone"],
     "change_model_roles": ["admin", "owner"],
     "change_permission_roles": ["admin", "owner"],
+    "search_roles": ["everyone"],
+    "web_search_enabled": True,
+    "web_search_auto": True,
     "pagination_enabled": True,
     "pagination_max_chars": 1000,
     "random_prompt_enabled": False,

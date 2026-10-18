@@ -87,6 +87,10 @@ class ApiHandler:
                     elif event == "server_left":
                         event_type = "server"
                         formatted_msg = f"[{now_str}] [Discord] Left server: {data.get('guild_name')} ({data.get('guild_id')})"
+                    elif event == "web_search":
+                        event_type = "search"
+                        guild = data.get("guild_name") or data.get("guild_id") or "Direct Message"
+                        formatted_msg = f"[{now_str}] [{guild}] 🌐 Web Search: \"{data.get('query', '')[:50]}\" ({data.get('results_count', 0)} results)"
 
                     if formatted_msg and self.active_ws_clients:
                         payload = json.dumps({

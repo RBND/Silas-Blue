@@ -60,3 +60,20 @@ class PermissionManager:
         allowed_roles = [r.casefold() for r in config.get("change_permission_roles", ["admin", "owner"])]
         user_roles = [role.name.casefold() for role in getattr(user, "roles", [])]
         return any(role in allowed_roles for role in user_roles)
+
+    def can_search(self, user, guild, config) -> bool:
+        """
+        Determines if the user can use web search features.
+        """
+        if guild is None:
+            return True
+
+        if hasattr(user, "guild_permissions") and user.guild_permissions.administrator:
+            return True
+
+        allowed_roles = [r.casefold() for r in config.get("search_roles", ["everyone"])]
+        if "everyone" in allowed_roles:
+            return True
+
+        user_roles = [role.name.casefold() for role in getattr(user, "roles", [])]
+        return any(role in allowed_roles for role in user_roles)

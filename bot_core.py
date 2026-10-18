@@ -21,6 +21,12 @@ from ai_providers import get_ai_provider, AIProvider
 from permissions import PermissionManager
 from utils import load_config, save_config, get_config_path, load_app_config
 from memory import conversation_memory
+from web_search import (
+    SearchService,
+    WebSearchResult,
+    should_auto_search,
+    format_grounded_prompt
+)
 
 logger = logging.getLogger("silasblue")
 
@@ -72,6 +78,7 @@ DISCORD_TOKEN = None  # Loaded lazily or on start
 permissions = PermissionManager()
 server_configs: Dict[Any, dict] = {}
 current_ai_provider: Optional[AIProvider] = None
+current_search_service: Optional[SearchService] = None
 
 def get_client_id_from_token(token: Optional[str] = None) -> Optional[int]:
     """Extracts the client ID from a Discord bot token by decoding its first component."""
@@ -142,10 +149,25 @@ def get_provider() -> AIProvider:
         current_ai_provider = get_ai_provider()
     return current_ai_provider
 
+def get_search_service() -> SearchService:
+    global current_search_service
+    if current_search_service is None:
+        app_cfg = load_app_config()
+        current_search_service = SearchService(app_cfg)
+    return current_search_service
+
+def reload_search_service():
+    """Reloads search service with updated configuration."""
+    global current_search_service
+    app_cfg = load_app_config()
+    current_search_service = SearchService(app_cfg)
+    logger.info(f"Web search service reloaded (Provider: {app_cfg.get('web_search_provider', 'duckduckgo')})")
+
 def reload_ai_provider():
     """Reloads the active AI provider with updated app settings."""
     global current_ai_provider
     current_ai_provider = get_ai_provider()
+    reload_search_service()
     logger.info(f"AI Provider reloaded: {current_ai_provider.name} ({current_ai_provider.base_url})")
 
 def update_server_config(guild_id, config: dict):
@@ -249,12 +271,17 @@ class PaginatedView(discord.ui.View):
             except Exception:
                 pass
 
-async def handle_ai_prompt(message: discord.Message, config: dict, prompt_override: Optional[str] = None):
+async def handle_ai_prompt(
+    message: discord.Message,
+    config: dict,
+    prompt_override: Optional[str] = None,
+    force_web_search: bool = False
+):
     """
     Sends message to active AI provider asynchronously without blocking event loop.
     Validates model against active provider and automatically falls back to currently loaded model.
     Displays typing indicator while processing.
-    Integrates conversation memory history and native Discord reply context.
+    Integrates conversation memory history, native Discord reply context, and RAG web search grounding.
     """
     raw_prompt = (prompt_override if prompt_override is not None else message.content).strip()
     provider = get_provider()
@@ -327,21 +354,80 @@ async def handle_ai_prompt(message: discord.Message, config: dict, prompt_overri
         "prompt": effective_prompt
     })
 
-    # Show Discord typing indicator during model inference
-    # Server-specific system prompt takes precedence over global default
+    # Web search configuration check & intent detection
+    guild_search_enabled = config.get("web_search_enabled", True) if message.guild else True
+    app_search_enabled = app_cfg.get("web_search_enabled", True)
+    search_enabled = guild_search_enabled and app_search_enabled
+
+    guild_auto_search = config.get("web_search_auto", True) if message.guild else True
+    app_auto_search = app_cfg.get("web_search_auto", True)
+    auto_search_enabled = search_enabled and guild_auto_search and app_auto_search
+
+    can_search = permissions.can_search(message.author, message.guild, config)
+    do_web_search = can_search and (
+        force_web_search or (auto_search_enabled and should_auto_search(raw_prompt))
+    )
+
+    search_results = []
+    citations_footer = ""
+
+    # Base system prompt
     server_prompt = (config.get("system_prompt") or "").strip() if config else ""
     global_prompt = (app_cfg.get("system_prompt") or "").strip()
-    system_prompt = server_prompt if server_prompt else (global_prompt or None)
+    base_sys_prompt = server_prompt if server_prompt else (global_prompt or None)
 
     try:
         async with message.channel.typing():
+            # Perform web search if needed
+            if do_web_search:
+                try:
+                    search_service = get_search_service()
+                    search_results = await search_service.search(raw_prompt)
+                    if search_results:
+                        log_to_gui("web_search", {
+                            "guild_id": guild_id,
+                            "guild_name": guild_name,
+                            "user": str(message.author),
+                            "query": raw_prompt,
+                            "results_count": len(search_results)
+                        })
+                        system_prompt, citations_footer = format_grounded_prompt(
+                            raw_prompt, search_results, base_system_prompt=base_sys_prompt
+                        )
+                    else:
+                        system_prompt = base_sys_prompt
+                except Exception as s_err:
+                    logger.warning(f"Web search error, proceeding with standard AI response: {s_err}")
+                    system_prompt = base_sys_prompt
+            else:
+                system_prompt = base_sys_prompt
+
             response = await provider.send_prompt(effective_prompt, default_model, system_prompt=system_prompt, history=history)
     except Exception as e:
         logger.error(f"Error getting AI response: {e}")
         response = f"Error processing AI request: {e}"
 
+    is_error_response = (
+        not response
+        or response.startswith("Error processing AI request:")
+        or response.startswith("Ollama Error (")
+        or response.startswith("Llama.cpp Error (")
+        or response.startswith("OpenAI/Remote Error (")
+    )
+
+    if not is_error_response:
+        if citations_footer:
+            response = response.strip() + citations_footer
+    elif force_web_search and search_results:
+        # Fallback if model fails during explicit search command
+        fallback_lines = ["⚠️ *AI service is currently unavailable, but here are the top search results for your query:*\n"]
+        for idx, r in enumerate(search_results, 1):
+            clean_title = r.title.replace("[", "").replace("]", "")
+            fallback_lines.append(f"**{idx}. [{clean_title}](<{r.url}>)**\n> {r.snippet}\n")
+        response = "\n".join(fallback_lines)
+
     # Record turn in conversation memory if response was valid
-    if max_turns > 0 and response and not response.startswith("Error processing AI request:") and not response.startswith("Ollama Error (") and not response.startswith("Llama.cpp Error (") and not response.startswith("OpenAI/Remote Error ("):
+    if max_turns > 0 and not is_error_response:
         conversation_memory.add_turn(mem_key, effective_prompt, response, max_turns=max_turns)
 
     log_to_gui("reply", {
@@ -740,6 +826,111 @@ async def set_ttl(ctx, minutes: int):
     server_configs[guild_id] = config
     await ctx.send(f"Conversation memory inactivity TTL set to **{minutes}** minutes for this server.")
 
+@bot.command(name="search", aliases=["web", "ddg"])
+async def search_command(ctx, *, query: str = ""):
+    """Searches the web and generates an AI-grounded response citing sources."""
+    query = query.strip()
+    if not query:
+        await ctx.send("Please provide a query to search. Example: `!search latest Mars rover discoveries`")
+        return
+    config = server_configs.get(ctx.guild.id, {}) if ctx.guild else load_config(None)
+    if not permissions.can_search(ctx.author, ctx.guild, config):
+        await ctx.send("You do not have permission to use web search.")
+        return
+    await handle_ai_prompt(ctx.message, config, prompt_override=query, force_web_search=True)
+
+@bot.command(name="links", aliases=["rawsearch"])
+async def links_command(ctx, *, query: str = ""):
+    """Fetches raw web search links and snippets without calling the AI."""
+    query = query.strip()
+    if not query:
+        await ctx.send("Please provide a query to search. Example: `!links Python documentation`")
+        return
+    config = server_configs.get(ctx.guild.id, {}) if ctx.guild else load_config(None)
+    if not permissions.can_search(ctx.author, ctx.guild, config):
+        await ctx.send("You do not have permission to use web search.")
+        return
+
+    search_service = get_search_service()
+    async with ctx.channel.typing():
+        results = await search_service.search(query)
+
+    if not results:
+        await ctx.send(f"No search results found for: `{query}`")
+        return
+
+    lines = [f"🔍 **Web Search Results for:** *{query}*\n"]
+    for idx, r in enumerate(results, 1):
+        clean_title = r.title.replace("[", "").replace("]", "")
+        lines.append(f"**{idx}. [{clean_title}](<{r.url}>)**\n> {r.snippet}\n")
+
+    output = "\n".join(lines)
+    max_chars = min(config.get("pagination_max_chars", 1900), 1900)
+    pages = paginate_text(output, max_chars)
+    if len(pages) == 1:
+        await ctx.send(pages[0])
+    else:
+        view = PaginatedView(pages, ctx.author.id)
+        view.message = await ctx.send(f"Page 1/{len(pages)}\n{pages[0]}", view=view)
+
+@bot.command(name="autosearch", aliases=["setautosearch"])
+async def autosearch_command(ctx, state: Optional[str] = None):
+    """Toggles or sets auto-search mode for this server (Admin only)."""
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
+    guild_id = ctx.guild.id
+    config = server_configs.get(guild_id, {})
+    if not permissions.can_change_permissions(ctx.author, ctx.guild, config):
+        await ctx.send("You do not have permission to configure search settings.")
+        return
+
+    if state is None:
+        current = config.get("web_search_auto", True)
+        new_state = not current
+    elif state.lower() in ("on", "true", "enable", "1"):
+        new_state = True
+    elif state.lower() in ("off", "false", "disable", "0"):
+        new_state = False
+    else:
+        await ctx.send("Usage: `!autosearch [on|off]`")
+        return
+
+    config["web_search_auto"] = new_state
+    save_config(guild_id, config)
+    server_configs[guild_id] = config
+    status_str = "ENABLED" if new_state else "DISABLED"
+    await ctx.send(f"🌐 Auto-search mode is now **{status_str}** for this server.")
+
+@bot.command(name="setwebsearch", aliases=["websearch"])
+async def set_web_search_command(ctx, state: Optional[str] = None):
+    """Enables or disables web search features for this server (Admin only)."""
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
+    guild_id = ctx.guild.id
+    config = server_configs.get(guild_id, {})
+    if not permissions.can_change_permissions(ctx.author, ctx.guild, config):
+        await ctx.send("You do not have permission to configure search settings.")
+        return
+
+    if state is None:
+        current = config.get("web_search_enabled", True)
+        new_state = not current
+    elif state.lower() in ("on", "true", "enable", "1"):
+        new_state = True
+    elif state.lower() in ("off", "false", "disable", "0"):
+        new_state = False
+    else:
+        await ctx.send("Usage: `!setwebsearch [on|off]`")
+        return
+
+    config["web_search_enabled"] = new_state
+    save_config(guild_id, config)
+    server_configs[guild_id] = config
+    status_str = "ENABLED" if new_state else "DISABLED"
+    await ctx.send(f"🌐 Web search is now **{status_str}** for this server.")
+
 @bot.command(name="help")
 async def help_command(ctx):
     guild_id = ctx.guild.id if ctx.guild else None
@@ -757,6 +948,10 @@ async def help_command(ctx):
         f"{prefix}invite - Get invite link to add Silas Blue to a server\n"
         f"{prefix}setmodel <name> - Set default model for this server\n"
         f"{prefix}models - List available models on AI backend\n"
+        f"{prefix}search <query> - Search web and answer with live AI citations\n"
+        f"{prefix}links <query> - Search web and return direct links and snippets\n"
+        f"{prefix}autosearch [on|off] - Toggle auto-search for questions needing live info\n"
+        f"{prefix}setwebsearch [on|off] - Enable/disable web search for this server\n"
         f"{prefix}setprompt <text> - Set custom AI persona for this server (use 'reset' for default)\n"
         f"{prefix}clear / {prefix}reset - Clear channel or DM conversation memory\n"
         f"{prefix}recall <msg_id_or_link> [notes] - Recall a previous message and analyze/respond\n"

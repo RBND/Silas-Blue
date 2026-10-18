@@ -1,6 +1,6 @@
-# Silas Blue v3.1.0
+# Silas Blue v3.2.0
 
-[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,32 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.1.0 introduces **stateful multi-turn conversation memory**, **isolated per-user DM privacy**, **configurable inactivity TTL**, **token context compression**, **native Discord reply integration**, and an explicit **`!recall` command**.
+Silas Blue v3.2.0 introduces **Real-Time Web Search & Smart Auto-Search Grounding (RAG)**, zero-configuration **DuckDuckGo search**, optional **Tavily** and **Brave Search** integrations, dedicated **GUI controls & diagnostics**, and explicit search commands (`!search`, `!links`, `!autosearch`, `!setwebsearch`).
 
 ---
 
-## 🚀 What's New in Version 3.1.0
+## 🚀 What's New in Version 3.2.0
+
+* **Real-Time Web Search & Auto-Grounding (RAG)**:
+  * **Smart Auto-Search Mode**: Automatically evaluates user prompts for search intent or temporal/real-time requirements (e.g. news, releases, scores, current facts) and fetches live web context in the background before generating a response.
+  * **Zero-Config DuckDuckGo Search**: Built-in async search requiring no external API keys or accounts.
+  * **API Search Integrations**: Optional high-speed search via Tavily AI Search and Brave Search APIs.
+  * **Source Citations**: Model synthesizes grounded answers with clean, clickable Discord markdown links to the sources used.
+  * **Search Caching**: In-memory query caching (5-minute TTL) prevents redundant search queries.
+* **New Discord Search Commands**:
+  * `!search <query>` / `!web <query>`: Forces a live web search and synthesizes an answer citing sources.
+  * `!links <query>` / `!rawsearch <query>`: Fetches raw web links and snippets directly without calling the AI model.
+  * `!autosearch [on|off]`: Server admin command to toggle auto-search for live questions.
+  * `!setwebsearch [on|off]`: Server admin command to enable or disable web search features server-wide.
+* **Control Panel & Web Dashboard Controls**:
+  * Dedicated **Web Search & Auto-Grounding** configuration card in the PySide6 desktop GUI.
+  * Live **Test Web Search** tool with real-time status and latency reporting.
+  * Server-level toggles in the GUI Server Config page.
+  * Real-time search logging streamed to both desktop and web consoles.
+
+---
+
+## 🚀 Prior Features (v3.1.0)
 
 * **Stateful Multi-Turn Conversation Memory**:
   * **Per-Channel Server Context**: Discussions within a server channel remain contextual across multiple conversation turns.
@@ -45,6 +66,7 @@ Silas Blue v3.1.0 introduces **stateful multi-turn conversation memory**, **isol
 | **Custom Server Personas** | Set dedicated AI system prompts / personas per Discord server to tailor bot behavior to specific server communities. |
 | **Model Manager & Puller** | Discover installed models, switch active models on the fly, or pull new models from Ollama / HuggingFace. |
 | **Smart Response Pagination** | Intelligently breaks long AI responses into readable, Discord-safe paginated embeds (up to 1900 chars). |
+| **Web Search & Auto-Grounding** | Real-time RAG web search via DuckDuckGo (free, zero-config), Tavily, or Brave with intelligent auto-search intent detection. |
 | **Live WebSocket Logging** | Real-time monitoring of user prompts, AI completions, and gateway status without page refreshing. |
 | **Crash Protection & Auto-Restart** | Automatic recovery counters and optional periodic daemon auto-restarts for continuous uptime. |
 
@@ -222,6 +244,13 @@ Silas Blue responds to mentions or standard prefix commands:
   !recall <msg_id_or_link>   - Fetch a previous message by ID or link and analyze/respond to it
   !setmemory <0-50>          - Set conversation memory turns for this server (0 to disable)
   !setttl <1-1440>           - Set memory inactivity expiration in minutes for this server
+  ```
+* **Real-Time Web Search & Auto-Grounding (RAG)**:
+  ```text
+  !search <query>            - Search the web and answer with live AI citations (aliases: !web, !ddg)
+  !links <query>             - Fetch raw web search links and snippets directly (alias: !rawsearch)
+  !autosearch [on|off]       - Toggle auto-search for questions requiring live/temporal info (Admin only)
+  !setwebsearch [on|off]     - Enable or disable web search features for this server (Admin only)
   ```
 * **Help & Server Info**:
   ```text

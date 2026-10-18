@@ -171,6 +171,15 @@ class ServerConfigPage(QWidget):
 
         memory_row.addStretch(1)
         options_layout.addLayout(memory_row)
+
+        search_row = QHBoxLayout()
+        self.server_web_search_enabled = QCheckBox("Enable Web Search")
+        self.server_web_search_auto = QCheckBox("Auto-Search Mode")
+        search_row.addWidget(self.server_web_search_enabled)
+        search_row.addWidget(self.server_web_search_auto)
+        search_row.addStretch(1)
+        options_layout.addLayout(search_row)
+
         gui_layout.addWidget(options_card)
 
         # Save Button Row
@@ -303,6 +312,8 @@ class ServerConfigPage(QWidget):
             "random_prompt_enabled": self.random_prompt_enabled.isChecked(),
             "random_prompt_probability": int(self.random_prompt_probability.currentText().replace("%", "")),
             "system_prompt": self.server_system_prompt_input.toPlainText().strip(),
+            "web_search_enabled": self.server_web_search_enabled.isChecked(),
+            "web_search_auto": self.server_web_search_auto.isChecked(),
             "memory_turns": self.memory_turns.value(),
             "memory_ttl_minutes": self.memory_ttl_minutes.value()
         }
@@ -333,6 +344,8 @@ class ServerConfigPage(QWidget):
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
         self.server_system_prompt_input.setPlainText(config.get("system_prompt", ""))
+        self.server_web_search_enabled.setChecked(config.get("web_search_enabled", True))
+        self.server_web_search_auto.setChecked(config.get("web_search_auto", True))
         self.memory_turns.setValue(int(config.get("memory_turns", 6)))
         self.memory_ttl_minutes.setValue(int(config.get("memory_ttl_minutes", 30)))
 
