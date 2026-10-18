@@ -301,6 +301,18 @@ class ThemeManager:
                 border: 1px solid {accent_focus};
             }}
 
+            QComboBox:editable {{
+                background-color: {input_bg};
+                color: {input_fg};
+            }}
+
+            QComboBox:editable QLineEdit {{
+                background: transparent;
+                border: none;
+                color: {input_fg};
+                padding: 0px;
+            }}
+
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;

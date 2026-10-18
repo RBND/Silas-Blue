@@ -258,7 +258,7 @@ class ApiHandler:
         for key in ["api_key", "remote_api_key", "discord_token", "discord_oauth_client_secret"]:
             if cfg.get(key):
                 cfg[key] = "●●●●●●●●" if len(cfg[key]) > 0 else ""
-        return web.json_response({"config": cfg, "presets": list(REMOTE_PRESETS.keys())})
+        return web.json_response({"config": cfg, "presets": list(REMOTE_PRESETS.keys()), "preset_details": REMOTE_PRESETS})
 
     async def save_ai_config(self, request):
         """Saves AI provider settings and reloads the active provider."""

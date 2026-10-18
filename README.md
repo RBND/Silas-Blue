@@ -1,6 +1,6 @@
-# Silas Blue v3.3.1
+# Silas Blue v3.3.2
 
-[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,7 +9,19 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.3.1 delivers precision **Web Search Intent Detection & Multi-Turn Memory Grounding**: eliminating false-positive web searches on conversational phrasing (e.g. "now that...", "how are you today"), preventing quoted reply context leaks from triggering auto-search, preserving citation footers across conversation memory compression, and guarding against attaching search sources to command refusals.
+Silas Blue v3.3.2 introduces interactive **Remote Model Selection Dropdowns**: transforming fetched remote API models (Xiaomi MiMo, OpenAI, Groq, DeepSeek, etc.) into an intuitive, editable dropdown list with instant popup selection and dynamic Dashboard synchronization.
+
+---
+
+## 🚀 What's New in Version 3.3.2
+
+* **Interactive Remote Model Dropdown (`QComboBox`)**:
+  * Upgraded the Remote Provider Default Model field from a static single-line input into an editable `QComboBox` dropdown.
+  * Fetching models via "📡 Fetch Models" now loads all retrieved models directly into the dropdown and automatically unfolds the list for instant one-click selection.
+  * Selecting a preset (Xiaomi MiMo, Groq, OpenAI, etc.) auto-populates the dropdown with the provider's known models while still allowing custom model name typing.
+  * Real-time synchronization between the AI Settings dropdown and Dashboard Active Model selector.
+* **Web Dashboard Datalist Integration**:
+  * Integrated an HTML5 `<datalist>` into the Web Dashboard for automatic model suggestions and preset synchronization.
 
 ---
 

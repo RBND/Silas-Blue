@@ -276,6 +276,7 @@ async function loadAiSettings() {
 
         const presetSel = document.getElementById('cfg-remote-preset');
         presetSel.innerHTML = '';
+        const presetDetails = data.preset_details || {};
         (data.presets || []).forEach(p => {
             const opt = document.createElement('option');
             opt.value = p;
@@ -284,9 +285,32 @@ async function loadAiSettings() {
             presetSel.appendChild(opt);
         });
 
+        function updateRemoteModelDatalist(selectedPreset) {
+            const datalist = document.getElementById('remote-models-datalist');
+            if (!datalist) return;
+            datalist.innerHTML = '';
+            const models = presetDetails[selectedPreset]?.models || [];
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                datalist.appendChild(opt);
+            });
+        }
+
+        presetSel.onchange = () => {
+            const p = presetSel.value;
+            const details = presetDetails[p];
+            if (details) {
+                if (details.base_url) document.getElementById('cfg-remote-url').value = details.base_url;
+                if (details.default_model) document.getElementById('cfg-remote-model').value = details.default_model;
+            }
+            updateRemoteModelDatalist(p);
+        };
+
         document.getElementById('cfg-remote-url').value = cfg.remote_base_url || '';
         document.getElementById('cfg-remote-key').value = cfg.remote_api_key || '';
         document.getElementById('cfg-remote-model').value = cfg.remote_model || '';
+        updateRemoteModelDatalist(cfg.remote_preset || presetSel.value);
 
         document.getElementById('cfg-system-prompt').value = cfg.system_prompt || '';
         document.getElementById('cfg-allow-dms').checked = cfg.allow_dms !== false;

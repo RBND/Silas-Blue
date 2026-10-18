@@ -74,5 +74,33 @@ class TestGuiPermissions(unittest.TestCase):
             tm.apply_theme(w, th)
             self.assertTrue(bool(w.styleSheet()))
 
+    def test_remote_models_combobox_integration(self):
+        from gui.main_window import MainWindow
+        from PySide6.QtWidgets import QComboBox
+        from unittest.mock import MagicMock
+        win = MainWindow(start_bot=MagicMock(), stop_bot=MagicMock(), restart_bot=MagicMock())
+        try:
+            self.assertIsInstance(win.remote_model_combo, QComboBox)
+            self.assertTrue(win.remote_model_combo.isEditable())
+
+            # Test preset change populates models in dropdown
+            win.remote_preset_combo.setCurrentText("Groq")
+            items = [win.remote_model_combo.itemText(i) for i in range(win.remote_model_combo.count())]
+            self.assertIn("llama-3.3-70b-versatile", items)
+            self.assertEqual(win.remote_model_combo.currentText(), "llama-3.3-70b-versatile")
+
+            # Test fetched models callback loads into dropdown
+            fetched = ["mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-custom-experimental"]
+            win.on_remote_models_fetched(fetched)
+            combo_items = [win.remote_model_combo.itemText(i) for i in range(win.remote_model_combo.count())]
+            self.assertEqual(combo_items, fetched)
+            self.assertEqual(win.remote_model_combo.currentText(), "mimo-v2.6-pro")
+
+            # Test user can select another model from the dropdown
+            win.remote_model_combo.setCurrentText("mimo-v2.6-flash")
+            self.assertEqual(win.app_cfg["remote_model"], "mimo-v2.6-flash")
+        finally:
+            win.close()
+
 if __name__ == "__main__":
     unittest.main()

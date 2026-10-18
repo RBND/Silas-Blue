@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.3.1")
+        app_sub = QLabel("AI Discord Assistant v3.3.2")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -653,10 +653,33 @@ class MainWindow(QMainWindow):
 
         r_model_row = QHBoxLayout()
         r_model_row.addWidget(QLabel("Default Model:"))
-        self.remote_model_input = QLineEdit(self.app_cfg.get("remote_model", "mimo-v2.6-pro"))
+        self.remote_model_combo = QComboBox()
+        self.remote_model_combo.setEditable(True)
+        self.remote_model_combo.setInsertPolicy(QComboBox.NoInsert)
+        if self.remote_model_combo.lineEdit():
+            self.remote_model_combo.lineEdit().setPlaceholderText("Select or enter model (e.g. mimo-v2.6-pro)...")
+        self.remote_model_combo.setMinimumWidth(220)
+
+        saved_model = self.app_cfg.get("remote_model", "mimo-v2.6-pro")
+        preset_models = REMOTE_PRESETS.get(saved_preset, {}).get("models", [])
+        initial_models = []
+        if saved_model:
+            initial_models.append(saved_model)
+        for m in preset_models:
+            if m not in initial_models:
+                initial_models.append(m)
+        self.remote_model_combo.addItems(initial_models)
+        if saved_model:
+            self.remote_model_combo.setCurrentText(saved_model)
+
+        self.remote_model_input = self.remote_model_combo
+        self.remote_model_combo.text = self.remote_model_combo.currentText
+        self.remote_model_combo.setText = self.remote_model_combo.setCurrentText
+        self.remote_model_combo.currentTextChanged.connect(self.on_remote_model_selected)
+
         self.fetch_remote_models_btn = QPushButton("📡 Fetch Models")
         self.fetch_remote_models_btn.clicked.connect(self.fetch_remote_models)
-        r_model_row.addWidget(self.remote_model_input, 1)
+        r_model_row.addWidget(self.remote_model_combo, 1)
         r_model_row.addWidget(self.fetch_remote_models_btn)
         r_layout.addLayout(r_model_row)
 
@@ -1039,8 +1062,38 @@ class MainWindow(QMainWindow):
             if preset_name != "Custom":
                 self.remote_url_input.setText(preset_data.get("base_url", ""))
                 default_m = preset_data.get("default_model", "")
-                if default_m:
-                    self.remote_model_input.setText(default_m)
+                preset_models = preset_data.get("models", [])
+                self.remote_model_combo.blockSignals(True)
+                self.remote_model_combo.clear()
+                if preset_models:
+                    self.remote_model_combo.addItems(preset_models)
+                    if default_m in preset_models:
+                        self.remote_model_combo.setCurrentText(default_m)
+                    else:
+                        self.remote_model_combo.setCurrentIndex(0)
+                elif default_m:
+                    self.remote_model_combo.addItem(default_m)
+                    self.remote_model_combo.setCurrentText(default_m)
+                self.remote_model_combo.blockSignals(False)
+                self.app_cfg["remote_model"] = self.remote_model_combo.currentText().strip()
+
+    def on_remote_model_selected(self, model_name: str):
+        model_name = model_name.strip()
+        if not model_name:
+            return
+        self.app_cfg["remote_model"] = model_name
+        if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+            self.app_cfg["active_model"] = model_name
+            self.kpi_model_val.setText(model_name)
+            self.sidebar_model_label.setText(f"Model: {model_name[:14]}")
+            if hasattr(self, "model_select"):
+                self.model_select.blockSignals(True)
+                if self.model_select.findText(model_name) >= 0:
+                    self.model_select.setCurrentText(model_name)
+                else:
+                    self.model_select.addItem(model_name)
+                    self.model_select.setCurrentText(model_name)
+                self.model_select.blockSignals(False)
 
     def toggle_remote_key_visibility(self):
         if self.remote_key_input.echoMode() == QLineEdit.Password:
@@ -1089,6 +1142,7 @@ class MainWindow(QMainWindow):
 
     def fetch_remote_models(self):
         self.fetch_remote_models_btn.setEnabled(False)
+        self.fetch_remote_models_btn.setText("📡 Fetching...")
         base_url = self.remote_url_input.text().strip()
         api_key = self.remote_key_input.text().strip()
         preset = self.remote_preset_combo.currentText()
@@ -1106,9 +1160,11 @@ class MainWindow(QMainWindow):
         def poll():
             if future.done():
                 self.fetch_remote_models_btn.setEnabled(True)
+                self.fetch_remote_models_btn.setText("📡 Fetch Models")
                 try:
                     models = future.result()
-                except Exception:
+                except Exception as e:
+                    logger.error(f"Error fetching remote models: {e}")
                     models = []
                 self.signals.remote_models_fetched.emit(models)
             else:
@@ -1118,11 +1174,30 @@ class MainWindow(QMainWindow):
     @Slot(list)
     def on_remote_models_fetched(self, models: list):
         if models:
-            self.remote_model_input.setText(models[0])
-            self.system_log_output.append(f"[REMOTE] Retrieved {len(models)} models from API.")
+            cur_selection = self.remote_model_combo.currentText().strip()
+            self.remote_model_combo.blockSignals(True)
+            self.remote_model_combo.clear()
+            self.remote_model_combo.addItems(models)
+            if cur_selection and cur_selection in models:
+                self.remote_model_combo.setCurrentText(cur_selection)
+            else:
+                self.remote_model_combo.setCurrentIndex(0)
+            self.remote_model_combo.blockSignals(False)
+
+            active_m = self.remote_model_combo.currentText().strip()
+            self.app_cfg["remote_model"] = active_m
+
+            # Sync Dashboard dropdown if remote backend is active
+            if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+                self.signals.models_loaded.emit(models)
+
+            log_msg = f"[REMOTE] Retrieved {len(models)} models from API: {', '.join(models[:6])}{'...' if len(models) > 6 else ''}"
+            self.system_log_output.append(log_msg)
             self.show_feedback(self.fetch_remote_models_btn, f"Found {len(models)} models!")
+            QTimer.singleShot(150, self.remote_model_combo.showPopup)
         else:
             self.show_feedback(self.fetch_remote_models_btn, "No models retrieved")
+            self.system_log_output.append("[REMOTE] Warning: No models returned from API endpoint. Check endpoint URL and API key.")
 
     def save_backend_settings(self):
         if self.rb_llamacpp.isChecked():
@@ -1143,7 +1218,9 @@ class MainWindow(QMainWindow):
         self.app_cfg["remote_preset"] = self.remote_preset_combo.currentText()
         self.app_cfg["remote_base_url"] = self.remote_url_input.text().strip()
         self.app_cfg["remote_api_key"] = self.remote_key_input.text().strip()
-        self.app_cfg["remote_model"] = self.remote_model_input.text().strip()
+        self.app_cfg["remote_model"] = self.remote_model_combo.currentText().strip()
+        if backend_type == "remote_openai":
+            self.app_cfg["active_model"] = self.app_cfg["remote_model"]
         self.app_cfg["system_prompt"] = self.system_prompt_input.toPlainText().strip()
 
         self.app_cfg["allow_dms"] = self.allow_dms_checkbox.isChecked()
@@ -1454,6 +1531,16 @@ class MainWindow(QMainWindow):
         if not model_name or model_name in ("No models found", f"{self.provider.name} not reachable"):
             return
         self.app_cfg["active_model"] = model_name
+        if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+            self.app_cfg["remote_model"] = model_name
+            if hasattr(self, "remote_model_combo"):
+                self.remote_model_combo.blockSignals(True)
+                if self.remote_model_combo.findText(model_name) >= 0:
+                    self.remote_model_combo.setCurrentText(model_name)
+                else:
+                    self.remote_model_combo.addItem(model_name)
+                    self.remote_model_combo.setCurrentText(model_name)
+                self.remote_model_combo.blockSignals(False)
         self.kpi_model_val.setText(model_name)
         self.sidebar_model_label.setText(f"Model: {model_name[:14]}")
         save_app_config(self.app_cfg)
