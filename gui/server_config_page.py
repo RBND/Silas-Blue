@@ -22,8 +22,14 @@ class ServerConfigPage(QWidget):
         self.setLayout(main_layout)
 
         self.guild_select = QComboBox()
-        main_layout.addWidget(QLabel("Select Server:"))
-        main_layout.addWidget(self.guild_select)
+        server_select_row = QHBoxLayout()
+        server_select_row.addWidget(QLabel("Select Server:"))
+        server_select_row.addWidget(self.guild_select, 3)
+        self.invite_btn = QPushButton("➕ Invite Bot to Server")
+        self.invite_btn.setToolTip("Invite Silas Blue to a Discord server")
+        self.invite_btn.clicked.connect(self.open_invite_dialog)
+        server_select_row.addWidget(self.invite_btn, 1)
+        main_layout.addLayout(server_select_row)
 
         # Tab widget for GUI/Raw JSON
         self.tabs = QTabWidget()
@@ -259,3 +265,9 @@ class ServerConfigPage(QWidget):
     def on_roles_checkbox_changed(self):
         config = self.get_config_from_widgets()
         self.raw_config.setPlainText(json.dumps(config, indent=2))
+
+    def open_invite_dialog(self):
+        """Opens the Invite Bot dialog."""
+        from .invite_dialog import InviteBotDialog
+        dialog = InviteBotDialog(self)
+        dialog.exec()

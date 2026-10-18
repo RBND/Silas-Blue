@@ -1,167 +1,127 @@
-![Silas Blue Retrowave Banner](assets/banner.jpg)
+# About Silas Blue V2 Alpha
 
----
+## What is Silas Blue?
 
-# 🎸 ** Silas Blue V2 **
+Silas Blue is a versatile Discord bot powered by local AI models through Ollama. It allows you to bring powerful AI capabilities directly to your Discord server without relying on external API services, ensuring privacy and control over your data.
 
-> _A Discord bot with a Retrowave soul, powered by local AI models via Ollama_
+## Key Features
 
----
+- **Easy To Use Gui**: Modern gui with custom themes. (RetroWave theme included)
+- **Local AI Processing**: Runs AI models locally through Ollama for privacy and control
+- **Multi-Model Support**: Compatible with various Ollama models (Gemma, Llama, etc.)
+- **Discord Integration**: Seamless interaction within your server channels
+- **Server-Specific Configuration**: Customize settings per Discord server
+- **Permission Management**: Control who can use which features
+- **Automatic Restart Option**: Optional scheduled restarts for stability
+- **Paginated Responses**: Clean formatting for longer AI responses
+- **Terminal Control Interface**: Manage your bot settings via terminal commands
+- **Simple Command Structure**: Interact using `!` prefix or by tagging the bot
 
-## 🌈 Table of Contents
-- [✨ About Silas Blue](#-about-silas-blue)
-- [🚀 Key Features](#-key-features)
-- [🛠️ Requirements](#️-requirements)
-- [📦 Setup Instructions](#-setup-instructions)
-  - [Install Requirements](#install-requirements)
-  - [Create a Discord Bot](#create-a-discord-bot)
-  - [Run the Bot](#run-the-bot)
-- [❓ Need Help?](#-need-help)
+## Requirements
 
----
+- **Python 3**: [Download from python.org](https://www.python.org/downloads)
+- **Ollama**: [Download from ollama.com](https://ollama.com/download)
+- **Python Libraries**: Discord.py, PySide6, requests
+- **Discord Developer Account**: You'll need to create an application in the [Discord Developer Portal](https://discord.com/developers/applications)
+- **Discord Bot Token**: Generate a private token for your bot through the Developer Portal
 
-## ✨ About Silas Blue
+## Detailed Setup Instructions
 
-Silas Blue is a versatile Discord bot powered by local AI models through Ollama. Bring powerful AI to your Discord server _without_ relying on external APIs—**privacy and control are yours**.
+### Installing Requirements
 
----
+1. **Download Silas Blue**:
+   - Download and extract the Silas Blue V2 files to a folder on your computer
 
-## 🚀 Key Features
+2. **Install Python 3**:
+   - Visit [python.org/downloads](https://www.python.org/downloads)
+   - Download the latest version for your operating system
+   - During installation, **make sure to check the box** "Add Python to PATH"
+   - Complete the installation wizard
 
-🎨 **Modern GUI** with custom Retrowave themes  
-🤖 **Local AI Processing** (Ollama)  
-🔄 **Multi-Model Support** (Gemma, Llama, etc.)  
-💬 **Discord Integration**  
-⚙️ **Server-Specific Configuration**  
-🔒 **Permission Management**  
-⏰ **Automatic Restart Option**  
-📄 **Paginated Responses**  
-❗ **Simple Command Structure** (`!command` or `@BotName command`)
+3. **Install Required Python Libraries**:
+   - Open a command prompt or terminal pointed to Silas Blue folder.
+   - For Windows (Run as Administrator):
+     ```
+     py -3 -m pip install -r requirements.txt
+     ```
+   - For macOS/Linux:
+     ```
+     python3 -m pip install -r requirements.txt
+     ```
+   - Wait for the installation to complete
+  
+4. **Install Ollama**:
+   - Visit [ollama.com/download](https://ollama.com/download)
+   - Download and install the version for your operating system
+   - Follow the installation prompts
 
----
+### Creating a Discord Bot
 
-## 🛠️ Requirements
+1. **Create a Discord Account** (skip if you already have one):
+   - Visit [discord.com/register](https://discord.com/register)
+   - Complete the registration process
 
-- **Python 3** ([python.org](https://www.python.org/downloads))
-- **Ollama** ([ollama.com](https://ollama.com/download))
-- **Python Libraries**: `discord.py`, `PySide6`, `requests`, `psutil`, `pynvml`
-- **Discord Developer Account** ([Discord Developer Portal](https://discord.com/developers/applications))
-- **Discord Bot Token**
+2. **Access the Discord Developer Portal**:
+   - Go to [discord.com/developers/applications](https://discord.com/developers/applications)
+   - Log in with your Discord account
 
----
+3. **Create a New Application**:
+   - Click the "New Application" button in the top-right corner
+   - Enter a name for your bot (e.g., "Silas Blue")
+   - Accept the terms and click "Create"
 
-## 📦 Setup Instructions
+4. **Configure Bot Settings**:
+   - In the left sidebar, click "Bot"
+   - Click "Add Bot" and confirm with "Yes, do it!"
+   - Under the username section, you'll see your bot's profile
+   - Toggle on these recommended settings:
+     - "PUBLIC BOT" (if you want others to invite it)
+     - "MESSAGE CONTENT INTENT" (required for the bot to read messages)
+     - "PRESENCE INTENT"
+     - "SERVER MEMBERS INTENT"
 
-### Install Requirements
+5. **Get Your Bot Token**:
+   - In the "Bot" section, click "Reset Token" and confirm
+   - Copy the displayed token (this is your private bot token)
+   - **IMPORTANT**: Never share this token publicly - it grants control of your bot
 
-```diff
-+ Recommended: Use a virtual environment for isolation!
+6. **Generate Invite Link**:
+   - In the left sidebar, click "OAuth2" then "URL Generator"
+   - Under "SCOPES", select "bot"
+   - Under "BOT PERMISSIONS", select:
+     - "Read Messages/View Channels"
+     - "Send Messages"
+     - "Embed Links"
+     - "Attach Files"
+     - "Read Message History"
+     - "Add Reactions"
+   - Copy the generated URL from the bottom of the page
+   - *(Note: You can also generate and open this invite directly from the Silas Blue app using the **➕ Invite Bot** button, or in Discord using `!invite`)*
 
-```
+7. **Invite Bot to Your Server**:
+   - Paste the URL in your browser (or click **Open in Browser** from the Silas Blue app)
+   - Select your server from the dropdown
+   - Click "Authorize" and complete any verification
+   - Your bot will now appear in your server member list and connect automatically!
 
-#### 1. Download Silas Blue
-- Download and extract the Silas Blue V2 files to a folder on your computer.
+### Running the bot
 
-#### 2. Install Python 3
-- Download from [python.org/downloads](https://www.python.org/downloads)
-- **Check the box** "Add Python to PATH" during install
-
-#### 3. Install Required Python Libraries
-
-**Create a new virtual environment and install requirements:**
-
-- **Windows:**
-  ```sh
-  py -3 -m venv .venv
-  .venv\Scripts\activate
-  pip install -r requirements.txt
-  ```
-- **macOS/Linux:**
-  ```sh
-  python3 -m venv .venv
-  source .venv/bin/activate
-  pip install -r requirements.txt
-  ```
-
-**To install into an existing virtual environment:**
-- Activate your venv first:
-  - Windows: `path\to\your\venv\Scripts\activate`
-  - macOS/Linux: `source path/to/your/venv/bin/activate`
-- Then:
-  ```sh
-  pip install -r requirements.txt
-  ```
-
-**Alternatively, install globally (not recommended):**
-- Windows: `py -3 -m pip install -r requirements.txt`
-- macOS/Linux: `python3 -m pip install -r requirements.txt`
-
-#### 4. Install Ollama
-- Download and install from [ollama.com/download](https://ollama.com/download)
-
----
-
-### Create a Discord Bot
-
-1. **Create a Discord Account** ([register](https://discord.com/register))
-2. **Go to the [Discord Developer Portal](https://discord.com/developers/applications)**
-3. **Create a New Application**
-   - Click "New Application", name it (e.g., _Silas Blue_)
-4. **Configure Bot Settings**
-   - Go to "Bot" > "Add Bot"
-   - Enable:
-     - `PUBLIC BOT` (optional)
-       - _Allows anyone with the invite link to add your bot to their server. If disabled, only you (the owner) can add the bot to servers._
-     - `MESSAGE CONTENT INTENT` (required)
-     - `PRESENCE INTENT`
-     - `SERVER MEMBERS INTENT`
-5. **Get Your Bot Token**
-   - Click "Reset Token" and copy it (keep it secret!)
-6. **Generate Invite Link**
-   - OAuth2 > URL Generator
-   - SCOPES: `bot`
-   - BOT PERMISSIONS: `Read Messages`, `Send Messages`, `Embed Links`, `Attach Files`, `Read Message History`, `Add Reactions`
-   - Copy the generated URL
-7. **Invite Bot to Your Server**
-   - Paste the URL in your browser, select your server, authorize
-
----
-
-### Run the Bot
-
-```diff
-+ The GUI is Retrowave-themed by default! Enjoy the vibes.
-```
-
-1. **Launch the Bot:**
+1. **Launch the Bot**:
    - Open a terminal in the folder containing the bot files
-   - **On Windows:**
-     ```sh
-     pythonw SilasBlue.py
-     ```
-   - **On macOS/Linux:**
-     ```sh
-     python3 SilasBlue.py
-     ```
-   - _(Or use `python SilasBlue.py` if `python` points to Python 3)_
+   - To run: `python SilasBlue.py`
 
-2. **First-Time Setup:**
+3. **First-Time Setup**:
    - When prompted, paste your Discord bot token into the terminal
-   - Or create a file `Config/bot_token.txt` with your token
-   - The bot will connect to Discord and display connection info
+   - or can create a `bot_token.txt` file with your token in it inside the folder  `Config`
+   - The bot will connect to Discord and display connection information
+   - You'll see configuration information for any servers the bot has joined
 
-3. **Using the Bot:**
-   - Configure via the GUI (download new models, change themes, etc.)
-   - Or interact in Discord using `!command` or `@BotName command`
-   - Type `!help` or `@BotName help` for available commands
+4. **Using the Bot**:
+   - You can configure the bot via the gui including downloading new models
+   - or interact with the bot in Discord using `!command` or by tagging `@BotName command`
+   - Type `!help` or `@BotName help` to see available commands
 
----
 
-## ❓ Need Help?
+## Need Help?
 
-Contact **RobotsNeverDie** via [Discord](https://discord.com/users/296353246920835074) _(preferred)_ or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)
-
----
-
-> _Stay retro. Stay blue. Enjoy your AI-powered Discord experience!_
- 
+Contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) (preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)

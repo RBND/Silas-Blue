@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 import logging
 import os
+import base64
 import asyncio
 import json
 import getpass
@@ -70,6 +71,69 @@ DISCORD_TOKEN = None  # Loaded lazily or on start
 permissions = PermissionManager()
 server_configs: Dict[Any, dict] = {}
 current_ai_provider: Optional[AIProvider] = None
+
+def get_client_id_from_token(token: Optional[str] = None) -> Optional[int]:
+    """Extracts the client ID from a Discord bot token by decoding its first component."""
+    if token is None:
+        token_path = os.path.join("config", "bot_token.txt")
+        if os.path.exists(token_path):
+            try:
+                with open(token_path, "r", encoding="utf-8") as f:
+                    token = f.read().strip()
+            except Exception:
+                token = None
+    if not token:
+        return None
+    try:
+        part = token.split(".")[0].strip()
+        padding = "=" * (-len(part) % 4)
+        decoded = base64.b64decode(part + padding).decode("utf-8")
+        if decoded.isdigit():
+            return int(decoded)
+    except Exception as e:
+        logger.debug(f"Could not extract client ID from token: {e}")
+    return None
+
+def get_bot_client_id() -> Optional[int]:
+    """Returns the bot's application/client ID if known."""
+    if bot.user and getattr(bot.user, "id", None):
+        return bot.user.id
+    if getattr(bot, "application_id", None):
+        return bot.application_id
+    global DISCORD_TOKEN
+    return get_client_id_from_token(DISCORD_TOKEN)
+
+def get_bot_invite_url(
+    client_id: Optional[int] = None,
+    administrator: bool = False,
+    permissions: Optional[discord.Permissions] = None
+) -> Optional[str]:
+    """
+    Generates a Discord OAuth2 authorization URL to invite the bot to a server.
+    If client_id is not specified, it will attempt to detect it from the bot or token.
+    """
+    cid = client_id or get_bot_client_id()
+    if not cid:
+        return None
+
+    if administrator:
+        perms = discord.Permissions(administrator=True)
+    elif permissions is not None:
+        perms = permissions
+    else:
+        # Standard recommended permissions for Silas Blue
+        perms = discord.Permissions(
+            view_channel=True,
+            send_messages=True,
+            send_messages_in_threads=True,
+            embed_links=True,
+            attach_files=True,
+            read_message_history=True,
+            add_reactions=True,
+            use_external_emojis=True,
+        )
+
+    return discord.utils.oauth_url(cid, permissions=perms, scopes=("bot", "applications.commands"))
 
 def get_provider() -> AIProvider:
     global current_ai_provider
@@ -264,10 +328,12 @@ async def on_guild_join(guild):
     logger.info(f"Joined server: {guild.name} ({guild.id})")
     config = load_config(guild.id)
     server_configs[guild.id] = config
+    log_to_gui("server_joined", {"guild_id": guild.id, "guild_name": guild.name})
 
 @bot.event
 async def on_guild_remove(guild):
     logger.info(f"Left server: {guild.name} ({guild.id})")
+    log_to_gui("server_left", {"guild_id": guild.id, "guild_name": guild.name})
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -338,6 +404,15 @@ async def on_message(message: discord.Message):
 @bot.command(name="ping")
 async def ping(ctx):
     await ctx.send("Pong!")
+
+@bot.command(name="invite")
+async def invite_command(ctx):
+    """Generates an invite link to add Silas Blue to a Discord server."""
+    invite_url = get_bot_invite_url()
+    if invite_url:
+        await ctx.send(f"**Invite Silas Blue to your server:**\n<{invite_url}>")
+    else:
+        await ctx.send("Unable to generate invite URL. Bot client ID could not be determined.")
 
 @bot.command(name="setmodel")
 async def set_model(ctx, model_name: str):
@@ -427,6 +502,7 @@ async def help_command(ctx):
         f"Example: {prefix}Tell me a short story\n\n"
         f"Commands:\n"
         f"{prefix}ping - Check bot response\n"
+        f"{prefix}invite - Get invite link to add Silas Blue to a server\n"
         f"{prefix}setmodel <name> - Set default model for this server\n"
         f"{prefix}models - List available models on AI backend\n"
         f"{prefix}setpagination <500-1900> - Set pagination limit\n"

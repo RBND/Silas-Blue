@@ -195,8 +195,12 @@ class MainWindow(QMainWindow):
         servers_theme_row = QHBoxLayout()
         self.servers_label = QLabel("Connected Servers:")
         self.servers_list = QComboBox()
+        self.invite_bot_btn = QPushButton("➕ Invite Bot")
+        self.invite_bot_btn.setToolTip("Invite Silas Blue to a Discord server")
+        self.invite_bot_btn.clicked.connect(self.open_invite_dialog)
         servers_theme_row.addWidget(self.servers_label)
         servers_theme_row.addWidget(self.servers_list, 2)
+        servers_theme_row.addWidget(self.invite_bot_btn, 1)
         servers_theme_row.addWidget(QLabel("Theme:"))
         self.theme_select = QComboBox()
         for t in self.theme_manager.available_themes():
@@ -584,10 +588,26 @@ class MainWindow(QMainWindow):
                     guild = data.get("guild_name") or data.get("guild_id")
                     reply_snippet = data.get("reply", "")[:180]
                     self.bot_log_output.append(f"[{guild}] Silas Blue -> {reply_snippet}...")
+                elif event == "server_joined":
+                    guild_name = data.get("guild_name", "Unknown Server")
+                    guild_id = data.get("guild_id", "")
+                    self.system_log_output.append(f"[Discord] Silas Blue joined new server: {guild_name} ({guild_id})")
+                    self.update_servers_list()
+                elif event == "server_left":
+                    guild_name = data.get("guild_name", "Unknown Server")
+                    guild_id = data.get("guild_id", "")
+                    self.system_log_output.append(f"[Discord] Silas Blue left server: {guild_name} ({guild_id})")
+                    self.update_servers_list()
             except queue.Empty:
                 break
             except Exception:
                 pass
+
+    def open_invite_dialog(self):
+        """Opens the Invite Bot dialog."""
+        from .invite_dialog import InviteBotDialog
+        dialog = InviteBotDialog(self)
+        dialog.exec()
 
     def change_theme(self, theme_name):
         theme_file = f"themes/{theme_name.lower()}.json"
