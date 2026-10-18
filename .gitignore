@@ -1,22 +1,49 @@
+# IDE & Environments
 /.idea
+/.vscode
+/.venv
+/venv
+/env
+
+# Python Bytecode & Caches
 /__pycache__
 /gui/__pycache__
 ai_providers/__pycache__
 tests/__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+
+# Configuration & Secrets
+.env
+.env.*
+*.env
 config/*.json
 !config/example.json
+config/*.txt
+!config/example.txt
 config/bot_token.txt
 config/gui_log.txt
 config/crash_counter.txt
-gui/silasblue.png
+
+# Logs
 *.log
-logs/*.log
+logs/
+logs/*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build & Archives
+gui/silasblue.png
+/dist
+/build
 *.rar
 *.zip
 *.7z
 *.tar
 *.gz
 *.bz2
-/.venv
-/dist
-/build
+

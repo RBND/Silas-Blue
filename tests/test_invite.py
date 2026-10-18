@@ -6,10 +6,10 @@ from bot_core import bot, get_client_id_from_token, get_bot_client_id, get_bot_i
 
 class TestBotInvite(unittest.TestCase):
     def test_get_client_id_from_token_valid(self):
-        # MTM2MTg4Mzc1MjM2MzcyMDgxNg in base64 is 1361883752363720816
-        token = "MTM2MTg4Mzc1MjM2MzcyMDgxNg.GzX123.ABC-def_ghijk"
+        # MTIzNDU2Nzg5MDEyMzQ1Njc4 in base64 is 123456789012345678
+        token = "MTIzNDU2Nzg5MDEyMzQ1Njc4.GzX123.ABC-def_ghijk"
         cid = get_client_id_from_token(token)
-        self.assertEqual(cid, 1361883752363720816)
+        self.assertEqual(cid, 123456789012345678)
 
     def test_get_client_id_from_token_padding(self):
         # OTk5 in base64 is 999
@@ -28,17 +28,17 @@ class TestBotInvite(unittest.TestCase):
             self.assertEqual(get_bot_client_id(), 987654321)
 
     def test_get_bot_invite_url_standard(self):
-        url = get_bot_invite_url(client_id=1361883752363720816, administrator=False)
+        url = get_bot_invite_url(client_id=123456789012345678, administrator=False)
         self.assertIsNotNone(url)
-        self.assertIn("client_id=1361883752363720816", url)
+        self.assertIn("client_id=123456789012345678", url)
         self.assertIn("permissions=274878286912", url)
         self.assertIn("bot", url)
         self.assertIn("applications.commands", url)
 
     def test_get_bot_invite_url_admin(self):
-        url = get_bot_invite_url(client_id=1361883752363720816, administrator=True)
+        url = get_bot_invite_url(client_id=123456789012345678, administrator=True)
         self.assertIsNotNone(url)
-        self.assertIn("client_id=1361883752363720816", url)
+        self.assertIn("client_id=123456789012345678", url)
         self.assertIn("permissions=8", url)
 
     def test_get_bot_invite_url_no_id(self):

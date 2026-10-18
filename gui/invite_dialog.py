@@ -56,7 +56,7 @@ class InviteBotDialog(QDialog):
         cid_row = QHBoxLayout()
         cid_row.addWidget(QLabel("Client ID:"))
         self.client_id_input = QLineEdit()
-        self.client_id_input.setPlaceholderText("Discord Bot / Application ID (e.g. 1361883752363720816)")
+        self.client_id_input.setPlaceholderText("Discord Bot / Application ID (e.g. 123456789012345678)")
 
         detected_cid = get_bot_client_id()
         if detected_cid:
