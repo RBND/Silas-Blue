@@ -78,5 +78,4 @@ We may update these Terms of Service from time to time. Any changes will be post
 If you have questions, concerns, or requests regarding these Terms of Service, you may contact the developer:
 
 - **Discord:** [RobotsNeverDie (User ID: 296353246920835074)](https://discord.com/users/296353246920835074)
-- **Reddit:** [u/Robots_Never_Die](https://www.reddit.com/user/Robots_Never_Die/)
 - **GitHub Issues:** [https://github.com/RobotsNeverDie/Silas-Blue/issues](https://github.com/RobotsNeverDie/Silas-Blue/issues)

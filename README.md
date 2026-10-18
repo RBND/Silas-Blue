@@ -269,5 +269,4 @@ python -m unittest discover tests
 ## 💬 Community & Support
 
 * **Discord**: [Contact RobotsNeverDie](https://discord.com/users/296353246920835074)
-* **Reddit**: [u/Robots_Never_Die](https://www.reddit.com/user/Robots_Never_Die/)
 * **GitHub Issues**: [github.com/RobotsNeverDie/Silas-Blue/issues](https://github.com/RobotsNeverDie/Silas-Blue/issues)
