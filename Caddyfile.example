@@ -1,0 +1,22 @@
+# Example Caddyfile for automated HTTPS on a public VPS
+# Copy this file to Caddyfile and replace 'bot.yourdomain.com' with your actual domain or VPS IP
+
+bot.yourdomain.com {
+    # Reverse proxy traffic to the Silas Blue container
+    reverse_proxy silas-blue:8080 {
+        # Enable WebSocket reverse proxy support
+        header_up Upgrade {http.upgrade}
+        header_up Connection {http.connection}
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Enable gzip / zstd compression
+    encode gzip zstd
+}

@@ -1,133 +1,260 @@
-# About Silas Blue V2 Alpha
+# Silas Blue v3.0.0
 
-## What is Silas Blue?
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
+[![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
+[![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
+[![License](https://img.shields.io/badge/license-RBND--NC--1.1-orange.svg)](license.md)
+[![Discord](https://img.shields.io/badge/Discord-discord.py-5865F2.svg)](https://discordpy.readthedocs.io/)
 
-Silas Blue is a versatile Discord bot powered by local AI models through Ollama. It allows you to bring powerful AI capabilities directly to your Discord server without relying on external API services, ensuring privacy and control over your data.
+**Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-## Key Features
+Silas Blue v3.0.0 introduces a **Discord-grade desktop control panel** alongside a **secure, remote web management dashboard** for managing your bot from anywhere—whether on your local network (LAN) or a remote Linux VPS.
 
-- **Easy To Use Gui**: Modern gui with custom themes. (RetroWave theme included)
-- **Flexible AI Backends**: Runs local models via Ollama and Llama.cpp, or connects to Cloud / Remote LLMs (Xiaomi MiMo, OpenAI, OpenRouter, Groq, DeepSeek, xAI, or custom OpenAI-compatible endpoints)
-- **Multi-Model Support**: Compatible with various models across local backends and cloud APIs
-- **Discord Integration**: Seamless interaction within your server channels
-- **Server-Specific Configuration**: Customize settings per Discord server
-- **Permission Management**: Control who can use which features
-- **Automatic Restart Option**: Optional scheduled restarts for stability
-- **Paginated Responses**: Clean formatting for longer AI responses
-- **Terminal Control Interface**: Manage your bot settings via terminal commands
-- **Simple Command Structure**: Interact using `!` prefix or by tagging the bot
+---
 
-## Requirements
+## 🚀 What's New in Version 3.0.0
 
-- **Python 3**: [Download from python.org](https://www.python.org/downloads)
-- **Ollama**: [Download from ollama.com](https://ollama.com/download)
-- **Python Libraries**: Discord.py, PySide6, requests
-- **Discord Developer Account**: You'll need to create an application in the [Discord Developer Portal](https://discord.com/developers/applications)
-- **Discord Bot Token**: Generate a private token for your bot through the Developer Portal
+* **Modern Desktop Control Panel**: Complete visual overhaul featuring a left-hand navigation rail (**Dashboard**, **AI & Models**, **Server Config**, **Logs & Console**, and **Settings**), real-time status KPI cards, and responsive card layouts.
+* **Secure Remote Web Management Console**: An embedded async web interface (`aiohttp`) that enables managing your bot from any browser without installing desktop dependencies.
+* **Discord OAuth2 & Zero-Trust Web Security**:
+  * **Discord OAuth2 Login**: Restricts web management access strictly to verified Bot Owner or Admin Discord accounts.
+  * **LAN Magic Link (OTP)**: Cryptographically secure one-time login links printed to the console for instant setup on private local networks.
+  * **Hardened Sessions**: HMAC-SHA256 signed `HttpOnly` session cookies, CSRF protection, and brute-force IP rate limiting.
+* **Headless Server & Turnkey VPS Deployment**:
+  * Run in pure headless daemon mode using `python SilasBlue.py --headless --web`.
+  * Production-ready `Dockerfile`, `docker-compose.yml`, and `Caddyfile` for automated Let's Encrypt HTTPS.
+* **Context-Sensitive AI Configuration**: Dynamic provider switching between Ollama, Llama.cpp, and Remote Cloud APIs—revealing only the fields relevant to your active backend.
+* **Real-Time WebSocket Log Streaming**: Live dual-terminal event stream (Discord Activity vs System Logs) accessible simultaneously on desktop and web.
+* **Upgraded Theme System**: Refined styling supporting 5 built-in palettes (**RetroWave**, **OLED Dark**, **Forest Night**, **Rose Pine**, and **Solarized Light**).
 
-## Detailed Setup Instructions
+---
 
-### Installing Requirements
+## 🌟 Key Features
 
-1. **Download Silas Blue**:
-   - Download and extract the Silas Blue V2 files to a folder on your computer
+| Feature | Description |
+| :--- | :--- |
+| **Flexible AI Backends** | Run locally via **Ollama** or **Llama.cpp** (llama-server), or connect to remote endpoints (Xiaomi MiMo, OpenAI, Groq, OpenRouter, DeepSeek). |
+| **Dual Management UIs** | Desktop application built with PySide6 + responsive Single-Page App (SPA) web dashboard. |
+| **Discord OAuth2 Login** | Access-controlled web management locked to designated Discord User IDs. |
+| **Per-Server Role Permissions** | Define who can prompt the bot, switch AI models, or adjust server settings on a per-guild basis. |
+| **Model Manager & Puller** | Discover installed models, switch active models on the fly, or pull new models from Ollama / HuggingFace. |
+| **Smart Response Pagination** | Intelligently breaks long AI responses into readable, Discord-safe paginated embeds (up to 1900 chars). |
+| **Live WebSocket Logging** | Real-time monitoring of user prompts, AI completions, and gateway status without page refreshing. |
+| **Crash Protection & Auto-Restart** | Automatic recovery counters and optional periodic daemon auto-restarts for continuous uptime. |
 
-2. **Install Python 3**:
-   - Visit [python.org/downloads](https://www.python.org/downloads)
-   - Download the latest version for your operating system
-   - During installation, **make sure to check the box** "Add Python to PATH"
-   - Complete the installation wizard
+---
 
-3. **Install Required Python Libraries**:
-   - Open a command prompt or terminal pointed to Silas Blue folder.
-   - For Windows (Run as Administrator):
+## 📋 System Requirements
+
+* **Python**: 3.10, 3.11, 3.12, or 3.13
+* **AI Provider** (choose one or more):
+  * [Ollama](https://ollama.com/download) (Recommended for local inference)
+  * [Llama.cpp](https://github.com/ggerganov/llama.cpp) (`llama-server.exe` / `llama-server`)
+  * An API key for an OpenAI-compatible remote provider (Xiaomi MiMo, Groq, OpenRouter, etc.)
+* **Discord Bot Account**: Created via the [Discord Developer Portal](https://discord.com/developers/applications).
+
+---
+
+## 🛠️ Installation & Setup
+
+### 1. Local Desktop Installation (Windows, macOS, Linux)
+
+#### Windows Quick Start
+1. Clone or download this repository:
+   ```cmd
+   git clone https://github.com/RobotsNeverDie/Silas-Blue.git
+   cd Silas-Blue
+   ```
+2. Double-click **`start.bat`**. 
+   * `start.bat` will automatically create a local virtual environment (`.venv`), install all requirements, and launch Silas Blue v3.0.0.
+
+#### Manual Installation (All Platforms)
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/RobotsNeverDie/Silas-Blue.git
+   cd Silas-Blue
+   ```
+
+2. **Create and activate a virtual environment**:
+   * **Windows (PowerShell)**:
+     ```powershell
+     python -m venv .venv
+     .venv\Scripts\Activate.ps1
      ```
-     py -3 -m pip install -r requirements.txt
+   * **Linux / macOS**:
+     ```bash
+     python3 -m venv .venv
+     source .venv/bin/activate
      ```
-   - For macOS/Linux:
-     ```
-     python3 -m pip install -r requirements.txt
-     ```
-   - Wait for the installation to complete
-  
-4. **Install Ollama**:
-   - Visit [ollama.com/download](https://ollama.com/download)
-   - Download and install the version for your operating system
-   - Follow the installation prompts
 
-### Creating a Discord Bot
+3. **Install dependencies**:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
 
-1. **Create a Discord Account** (skip if you already have one):
-   - Visit [discord.com/register](https://discord.com/register)
-   - Complete the registration process
+4. **Launch the application**:
+   ```bash
+   python SilasBlue.py
+   ```
 
-2. **Access the Discord Developer Portal**:
-   - Go to [discord.com/developers/applications](https://discord.com/developers/applications)
-   - Log in with your Discord account
+---
 
-3. **Create a New Application**:
-   - Click the "New Application" button in the top-right corner
-   - Enter a name for your bot (e.g., "Silas Blue")
-   - Accept the terms and click "Create"
+### 2. Headless Server & VPS Deployment (No GUI / Display Required)
 
-4. **Configure Bot Settings**:
-   - In the left sidebar, click "Bot"
-   - Click "Add Bot" and confirm with "Yes, do it!"
-   - Under the username section, you'll see your bot's profile
-   - Toggle on these recommended settings:
-     - "PUBLIC BOT" (if you want others to invite it)
-     - "MESSAGE CONTENT INTENT" (required for the bot to read messages)
-     - "PRESENCE INTENT"
-     - "SERVER MEMBERS INTENT"
+Silas Blue v3.0.0 can run as a background service on headless Linux servers or virtual private servers (VPS):
 
-5. **Get Your Bot Token**:
-   - In the "Bot" section, click "Reset Token" and confirm
-   - Copy the displayed token (this is your private bot token)
-   - **IMPORTANT**: Never share this token publicly - it grants control of your bot
+```bash
+# Run headless with web management bound to all network interfaces:
+python SilasBlue.py --headless --web --web-host 0.0.0.0 --web-port 8080
+```
 
-6. **Generate Invite Link**:
-   - In the left sidebar, click "OAuth2" then "URL Generator"
-   - Under "SCOPES", select "bot"
-   - Under "BOT PERMISSIONS", select:
-     - "Read Messages/View Channels"
-     - "Send Messages"
-     - "Embed Links"
-     - "Attach Files"
-     - "Read Message History"
-     - "Add Reactions"
-   - Copy the generated URL from the bottom of the page
-   - *(Note: You can also generate and open this invite directly from the Silas Blue app using the **➕ Invite Bot** button, or in Discord using `!invite`)*
+On startup, Silas Blue will print your secure **One-Time Magic Link (OTP)**:
+```text
+=================================================================
+          SILAS BLUE WEB DASHBOARD ACTIVE
+=================================================================
+ Web URL:         http://0.0.0.0:8080
+ One-Time Login:  http://localhost:8080/auth/otp?token=f9a8b7c6d5e4...
+ (Use the One-Time Login link above to access the dashboard)
+=================================================================
+```
+Open the login link in your browser to immediately access the web dashboard!
 
-7. **Invite Bot to Your Server**:
-   - Paste the URL in your browser (or click **Open in Browser** from the Silas Blue app)
-   - Select your server from the dropdown
-   - Click "Authorize" and complete any verification
-   - Your bot will now appear in your server member list and connect automatically!
+---
 
-### Running the bot
+### 3. Docker & Automated HTTPS Deployment (Turnkey VPS)
 
-1. **Launch the Bot**:
-   - Open a terminal in the folder containing the bot files
-   - To run: `python SilasBlue.py`
+For public VPS servers, run Silas Blue behind an automated **Caddy** reverse proxy that provisions and renews Let's Encrypt SSL certificates automatically.
 
-3. **First-Time Setup**:
-   - When prompted, paste your Discord bot token into the terminal
-   - or can create a `bot_token.txt` file with your token in it inside the folder  `Config`
-   - The bot will connect to Discord and display connection information
-   - You'll see configuration information for any servers the bot has joined
+1. **Configure your domain**:
+   Copy the example Caddyfile:
+   ```bash
+   cp Caddyfile.example Caddyfile
+   ```
+   Edit `Caddyfile` and replace `bot.yourdomain.com` with your domain or VPS hostname.
 
-4. **Using the Bot**:
-   - You can configure the bot via the gui including downloading new models
-   - or interact with the bot in Discord using `!command` or by tagging `@BotName command`
-   - Type `!help` or `@BotName help` to see available commands
+2. **Start the containers**:
+   ```bash
+   docker compose up -d
+   ```
 
+3. **Access your dashboard**:
+   Navigate to `https://bot.yourdomain.com` in your browser. All traffic is securely encrypted with automated HTTPS!
 
-## Legal & Policies
+---
 
-- [License](license.md) (RBND-NC License 1.1)
-- [Terms of Service](TERMS_OF_SERVICE.md)
-- [Privacy Policy](PRIVACY_POLICY.md)
+## 🤖 Discord Bot Setup Guide
 
-## Need Help?
+### 1. Create Your Discord Application
+1. Visit the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Click **New Application**, give your bot a name (e.g. `Silas Blue`), and accept the Developer Terms.
 
-Contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) (preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)
+### 2. Configure Privileged Gateway Intents
+1. In the left navigation, click **Bot**.
+2. Scroll down to **Privileged Gateway Intents** and enable:
+   * ✅ **Message Content Intent** *(Required for reading prompts and commands)*
+   * ✅ **Presence Intent**
+   * ✅ **Server Members Intent**
+3. Under the **Token** section, click **Reset Token**, copy the token, and keep it safe.
+
+### 3. Invite the Bot to Your Server
+* **Via Desktop/Web GUI**: Open Silas Blue and click **➕ Invite Bot** in the sidebar. Select your desired permissions and click **Open in Browser**.
+* **Via Discord Command**: Type `!invite` in any channel where the bot is present.
+
+### 4. (Optional) Set Up Discord OAuth2 for Web Management
+To allow logging into the Web Management Dashboard via Discord:
+1. In the Developer Portal, navigate to **OAuth2**.
+2. Under **Redirects**, click **Add Redirect** and enter your dashboard callback URL:
+   * For local testing: `http://localhost:8080/auth/discord/callback`
+   * For a VPS / domain: `https://bot.yourdomain.com/auth/discord/callback`
+3. Copy your **Client ID** and **Client Secret**.
+4. In Silas Blue (GUI or `config/app_config.json`), set:
+   ```json
+   "discord_oauth_client_id": "YOUR_CLIENT_ID",
+   "discord_oauth_client_secret": "YOUR_CLIENT_SECRET",
+   "bot_owner_id": "YOUR_DISCORD_USER_ID"
+   ```
+
+---
+
+## 🎮 How to Use Silas Blue
+
+### In Discord
+Silas Blue responds to mentions or standard prefix commands:
+* **Chatting**: Simply mention the bot or use `!` prefix:
+  ```text
+  @SilasBlue Explain quantum computing in three sentences.
+  !Explain the rules of chess.
+  ```
+* **Switching Models**:
+  ```text
+  !model llama3:8b
+  !models
+  ```
+* **Help & Server Info**:
+  ```text
+  !help       - View available commands and usage
+  !invite     - Generate an invitation link to add Silas Blue to a server
+  !ping       - Check bot gateway latency
+  ```
+
+---
+
+### Command-Line Arguments Reference
+
+| Option | Description | Default |
+| :--- | :--- | :--- |
+| `--headless`, `--no-gui` | Runs without desktop GUI (auto-detected on display-less Linux). | `False` |
+| `--web` | Enables the embedded aiohttp web management server. | `True` |
+| `--no-web` | Disables the web management server. | `False` |
+| `--web-host` | Network interface to bind (`127.0.0.1` for local, `0.0.0.0` for LAN/VPS). | `127.0.0.1` |
+| `--web-port` | TCP port for the web dashboard. | `8080` |
+
+---
+
+## ⚙️ Configuration Reference (`config/app_config.json`)
+
+```json
+{
+  "backend_type": "ollama",
+  "active_model": "llama3:8b",
+  "ollama_url": "http://localhost:11434",
+  "llamacpp_url": "http://localhost:8080",
+  "remote_preset": "Xiaomi MiMo",
+  "remote_base_url": "https://api.xiaomimimo.com/v1",
+  "remote_model": "mimo-v2.6-pro",
+  "system_prompt": "You are Silas Blue, a helpful and knowledgeable AI Discord assistant.",
+  "allow_dms": true,
+  "theme": "retrowave",
+  "debug": false
+}
+```
+
+---
+
+## 🧪 Testing & Verification
+
+Run the automated test suite across all subsystems (providers, configuration, permissions, invite link generator, web authentication, and REST API):
+
+```bash
+# Run all unit tests
+python -m unittest discover tests
+```
+
+---
+
+## 📜 Legal & Policies
+
+* **License**: [RBND-NC License Version 1.1](license.md)
+* **Terms of Service**: [TERMS_OF_SERVICE.md](TERMS_OF_SERVICE.md)
+* **Privacy Policy**: [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
+
+---
+
+## 💬 Community & Support
+
+* **Discord**: [Contact RobotsNeverDie](https://discord.com/users/296353246920835074)
+* **Reddit**: [u/Robots_Never_Die](https://www.reddit.com/user/Robots_Never_Die/)
+* **GitHub Issues**: [github.com/RobotsNeverDie/Silas-Blue/issues](https://github.com/RobotsNeverDie/Silas-Blue/issues)

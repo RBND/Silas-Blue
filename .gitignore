@@ -19,6 +19,8 @@ tests/__pycache__
 .env
 .env.*
 *.env
+*.key
+config/*.key
 config/*.json
 !config/example.json
 config/*.txt

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Silas Blue - Web Management Console</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+    <!-- Sidebar Navigation Rail -->
+    <nav id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-title">SILAS BLUE</div>
+            <div class="brand-subtitle">Remote Management v3.0.0</div>
+            <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
+        </div>
+
+        <div class="nav-menu">
+            <button class="nav-item active" onclick="switchPage('dashboard')">📊 Dashboard</button>
+            <button class="nav-item" onclick="switchPage('ai')">🧠 AI & Models</button>
+            <button class="nav-item" onclick="switchPage('servers')">🛡️ Server Config</button>
+            <button class="nav-item" onclick="switchPage('logs')">📜 Live Console</button>
+        </div>
+
+        <div class="sidebar-user">
+            <div class="user-info" id="user-display">Admin</div>
+            <a href="/logout" class="logout-btn">Log out</a>
+        </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main id="main">
+        <!-- 1. DASHBOARD PAGE -->
+        <div id="page-dashboard" class="page active">
+            <div class="page-header">
+                <div class="page-title">Dashboard</div>
+                <button onclick="refreshStatus()">🔄 Refresh Status</button>
+            </div>
+
+            <!-- KPI Cards Row -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-title">Bot Daemon</div>
+                    <div id="kpi-bot-pill" class="status-pill offline">STOPPED</div>
+                    <div class="kpi-subtext" id="kpi-bot-sub">Discord Gateway Offline</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-title">AI Backend</div>
+                    <div id="kpi-ai-pill" class="status-pill warning">CHECKING...</div>
+                    <div class="kpi-value" id="kpi-ai-name">Ollama</div>
+                    <div class="kpi-subtext" id="kpi-ai-url">http://localhost:11434</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-title">Active Model</div>
+                    <div class="kpi-value" id="kpi-active-model">None</div>
+                    <div class="kpi-subtext">Inference Model</div>
+                </div>
+
+                <div class="kpi-card">
+                    <div class="kpi-title">Connected Servers</div>
+                    <div class="kpi-value" id="kpi-servers-count">0 Guilds</div>
+                    <div class="kpi-subtext">Active Discord Guilds</div>
+                </div>
+            </div>
+
+            <!-- Bot Controls & Quick Switcher Row -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                <div class="card">
+                    <div class="card-title">Bot & Service Controls</div>
+                    <div class="btn-group" style="margin-bottom: 12px;">
+                        <button class="success" onclick="botAction('start')">▶ Start Bot</button>
+                        <button class="danger" onclick="botAction('stop')">⏹ Stop Bot</button>
+                        <button onclick="botAction('restart')">🔄 Restart Bot</button>
+                    </div>
+                    <div class="kpi-subtext" id="bot-action-feedback"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">Quick Model Switcher</div>
+                    <div class="form-row">
+                        <select id="quick-model-select"></select>
+                        <button class="primary" onclick="changeActiveModel()">Switch</button>
+                    </div>
+                    <div class="form-row" style="margin-bottom: 0;">
+                        <input type="text" id="quick-pull-input" placeholder="e.g. llama3:8b">
+                        <button onclick="pullModel()">Pull Model</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Activity Card -->
+            <div class="card" style="flex: 1; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <div class="card-title" style="margin-bottom: 0;">Recent Activity Stream</div>
+                    <button onclick="switchPage('logs')">Open Full Console ↗</button>
+                </div>
+                <div class="terminal-logs" id="dash-recent-logs" style="max-height: 220px; background: #12121a; border-radius: 6px;"></div>
+            </div>
+        </div>
+
+        <!-- 2. AI & MODELS PAGE -->
+        <div id="page-ai" class="page">
+            <div class="page-header">
+                <div class="page-title">AI Backend Configuration</div>
+                <button class="primary" onclick="saveAiSettings()">💾 Save AI Settings</button>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Active AI Provider</div>
+                <div class="form-row">
+                    <label>Provider Type:</label>
+                    <select id="ai-provider-type" onchange="onBackendTypeChange()">
+                        <option value="ollama">Ollama (Local or Remote)</option>
+                        <option value="llamacpp">Llama.cpp (llama-server)</option>
+                        <option value="remote_openai">Remote OpenAI-Compatible API</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Provider Specific Settings Card -->
+            <div class="card" id="ai-provider-details">
+                <div class="card-title" id="provider-details-title">Provider Connection</div>
+                
+                <!-- Ollama Fields -->
+                <div id="fields-ollama">
+                    <div class="form-row">
+                        <label>Ollama Server URL:</label>
+                        <input type="text" id="cfg-ollama-url" placeholder="http://localhost:11434">
+                    </div>
+                    <div class="form-row">
+                        <label>Bearer Token (Optional):</label>
+                        <input type="password" id="cfg-ollama-key" placeholder="Reverse proxy secret">
+                    </div>
+                </div>
+
+                <!-- Llama.cpp Fields -->
+                <div id="fields-llamacpp" style="display: none;">
+                    <div class="form-row">
+                        <label>Llama.cpp Server URL:</label>
+                        <input type="text" id="cfg-llamacpp-url" placeholder="http://localhost:8080">
+                    </div>
+                    <div class="form-row">
+                        <label>Executable Path:</label>
+                        <input type="text" id="cfg-llamacpp-bin" placeholder="/usr/local/bin/llama-server">
+                    </div>
+                    <div class="form-row">
+                        <label>Model Path (.gguf):</label>
+                        <input type="text" id="cfg-llamacpp-model" placeholder="/models/llama3.gguf">
+                    </div>
+                </div>
+
+                <!-- Remote API Fields -->
+                <div id="fields-remote" style="display: none;">
+                    <div class="form-row">
+                        <label>Preset:</label>
+                        <select id="cfg-remote-preset"></select>
+                    </div>
+                    <div class="form-row">
+                        <label>Endpoint URL:</label>
+                        <input type="text" id="cfg-remote-url" placeholder="https://api.xiaomimimo.com/v1">
+                    </div>
+                    <div class="form-row">
+                        <label>API Key:</label>
+                        <input type="password" id="cfg-remote-key" placeholder="sk-...">
+                    </div>
+                    <div class="form-row">
+                        <label>Default Model:</label>
+                        <input type="text" id="cfg-remote-model" placeholder="mimo-v2.6-pro">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Persona & DM Policy Card -->
+            <div class="card">
+                <div class="card-title">System Prompt & DM Policy</div>
+                <div class="form-row" style="align-items: flex-start;">
+                    <label>System Prompt:</label>
+                    <textarea id="cfg-system-prompt" rows="3" style="width: 100%;"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>Allow DMs:</label>
+                    <input type="checkbox" id="cfg-allow-dms" style="width: auto;">
+                </div>
+                <div class="form-row">
+                    <label>DM Default Model:</label>
+                    <input type="text" id="cfg-dm-model" placeholder="Leave empty for active model">
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. SERVER CONFIG PAGE -->
+        <div id="page-servers" class="page">
+            <div class="page-header">
+                <div class="page-title">Discord Server Configuration</div>
+                <button class="primary" onclick="saveServerConfig()">💾 Save Server Config</button>
+            </div>
+
+            <div class="card">
+                <div class="form-row">
+                    <label>Select Server:</label>
+                    <select id="guild-select" onchange="loadSelectedGuildConfig()"></select>
+                </div>
+            </div>
+
+            <div class="card" id="guild-config-card">
+                <div class="card-title">Role-Based Access Control</div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
+                    <div>
+                        <div style="font-weight: 600; margin-bottom: 6px;">Who can the bot reply to?</div>
+                        <div id="roles-reply" style="max-height: 180px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: 6px;"></div>
+                    </div>
+                    <div>
+                        <div style="font-weight: 600; margin-bottom: 6px;">Who can switch models?</div>
+                        <div id="roles-model" style="max-height: 180px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: 6px;"></div>
+                    </div>
+                    <div>
+                        <div style="font-weight: 600; margin-bottom: 6px;">Who can change settings?</div>
+                        <div id="roles-perm" style="max-height: 180px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: 6px;"></div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 14px;">
+                    <div class="form-row">
+                        <label>Enable Pagination:</label>
+                        <input type="checkbox" id="cfg-pagination" style="width: auto;">
+                    </div>
+                    <div class="form-row">
+                        <label>Max chars per page:</label>
+                        <input type="number" id="cfg-max-chars" min="500" max="1900" value="1900">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. LIVE CONSOLE PAGE -->
+        <div id="page-logs" class="page">
+            <div class="page-header">
+                <div class="page-title">Live Event Stream & Console</div>
+                <div class="btn-group">
+                    <button onclick="clearConsoleLogs()">Clear Console</button>
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 12px;">
+                        <input type="checkbox" id="autoscroll-toggle" checked style="width: auto;"> Auto-scroll
+                    </label>
+                </div>
+            </div>
+
+            <div class="terminal-container">
+                <div class="terminal-header">
+                    <span style="color: var(--accent-cyan); font-weight: 600;">● WebSocket Live Stream</span>
+                    <input type="text" id="log-filter-input" placeholder="🔍 Filter logs..." oninput="filterLogs()" style="padding: 4px 8px; font-size: 11px;">
+                </div>
+                <div class="terminal-logs" id="full-terminal-logs"></div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
