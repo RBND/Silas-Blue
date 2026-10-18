@@ -49,7 +49,8 @@ class LlamaCppProvider(AIProvider):
         self,
         prompt: str,
         model: str,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None
     ) -> str:
         """
         Sends prompt to llama-server via /v1/chat/completions (OpenAI compatible).
@@ -59,6 +60,8 @@ class LlamaCppProvider(AIProvider):
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        if history:
+            messages.extend(history)
         messages.append({"role": "user", "content": prompt})
 
         payload = {

@@ -24,7 +24,8 @@ class AIProvider(ABC):
         self,
         prompt: str,
         model: str,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None
     ) -> str:
         """
         Sends a prompt to the AI backend and returns the text response.

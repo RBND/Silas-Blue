@@ -154,6 +154,23 @@ class ServerConfigPage(QWidget):
 
         pag_rand_row.addStretch(1)
         options_layout.addLayout(pag_rand_row)
+
+        memory_row = QHBoxLayout()
+        memory_row.addWidget(QLabel("Conversation Memory Turns (0=off):"))
+        self.memory_turns = QSpinBox()
+        self.memory_turns.setRange(0, 50)
+        self.memory_turns.setValue(6)
+        memory_row.addWidget(self.memory_turns)
+
+        memory_row.addSpacing(20)
+        memory_row.addWidget(QLabel("Inactivity Expiration (Minutes):"))
+        self.memory_ttl_minutes = QSpinBox()
+        self.memory_ttl_minutes.setRange(1, 1440)
+        self.memory_ttl_minutes.setValue(30)
+        memory_row.addWidget(self.memory_ttl_minutes)
+
+        memory_row.addStretch(1)
+        options_layout.addLayout(memory_row)
         gui_layout.addWidget(options_card)
 
         # Save Button Row
@@ -243,6 +260,8 @@ class ServerConfigPage(QWidget):
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
         self.server_system_prompt_input.setPlainText(config.get("system_prompt", ""))
+        self.memory_turns.setValue(int(config.get("memory_turns", 6)))
+        self.memory_ttl_minutes.setValue(int(config.get("memory_ttl_minutes", 30)))
         self.raw_config.setPlainText(json.dumps(config, indent=2))
 
     def set_roles_list(self, list_widget, guild, selected_roles):
@@ -283,7 +302,9 @@ class ServerConfigPage(QWidget):
             "pagination_max_chars": max_chars,
             "random_prompt_enabled": self.random_prompt_enabled.isChecked(),
             "random_prompt_probability": int(self.random_prompt_probability.currentText().replace("%", "")),
-            "system_prompt": self.server_system_prompt_input.toPlainText().strip()
+            "system_prompt": self.server_system_prompt_input.toPlainText().strip(),
+            "memory_turns": self.memory_turns.value(),
+            "memory_ttl_minutes": self.memory_ttl_minutes.value()
         }
 
     def on_tab_changed(self, idx):
@@ -312,6 +333,8 @@ class ServerConfigPage(QWidget):
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
         self.server_system_prompt_input.setPlainText(config.get("system_prompt", ""))
+        self.memory_turns.setValue(int(config.get("memory_turns", 6)))
+        self.memory_ttl_minutes.setValue(int(config.get("memory_ttl_minutes", 30)))
 
     def save_config(self):
         guild_id = self.guild_select.currentData()

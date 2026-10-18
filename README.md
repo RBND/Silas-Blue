@@ -1,6 +1,6 @@
-# Silas Blue v3.0.0
+# Silas Blue v3.1.0
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,24 +9,28 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.0.0 introduces a **Discord-grade desktop control panel** alongside a **secure, remote web management dashboard** for managing your bot from anywhere—whether on your local network (LAN) or a remote Linux VPS.
+Silas Blue v3.1.0 introduces **stateful multi-turn conversation memory**, **isolated per-user DM privacy**, **configurable inactivity TTL**, **token context compression**, **native Discord reply integration**, and an explicit **`!recall` command**.
 
 ---
 
-## 🚀 What's New in Version 3.0.0
+## 🚀 What's New in Version 3.1.0
 
-* **Modern Desktop Control Panel**: Complete visual overhaul featuring a left-hand navigation rail (**Dashboard**, **AI & Models**, **Server Config**, **Logs & Console**, and **Settings**), real-time status KPI cards, and responsive card layouts.
-* **Secure Remote Web Management Console**: An embedded async web interface (`aiohttp`) that enables managing your bot from any browser without installing desktop dependencies.
-* **Discord OAuth2 & Zero-Trust Web Security**:
-  * **Discord OAuth2 Login**: Restricts web management access strictly to verified Bot Owner or Admin Discord accounts.
-  * **LAN Magic Link (OTP)**: Cryptographically secure one-time login links printed to the console for instant setup on private local networks.
-  * **Hardened Sessions**: HMAC-SHA256 signed `HttpOnly` session cookies, CSRF protection, and brute-force IP rate limiting.
-* **Headless Server & Turnkey VPS Deployment**:
-  * Run in pure headless daemon mode using `python SilasBlue.py --headless --web`.
-  * Production-ready `Dockerfile`, `docker-compose.yml`, and `Caddyfile` for automated Let's Encrypt HTTPS.
-* **Context-Sensitive AI Configuration**: Dynamic provider switching between Ollama, Llama.cpp, and Remote Cloud APIs—revealing only the fields relevant to your active backend.
-* **Real-Time WebSocket Log Streaming**: Live dual-terminal event stream (Discord Activity vs System Logs) accessible simultaneously on desktop and web.
-* **Upgraded Theme System**: Refined styling supporting 5 built-in palettes (**RetroWave**, **OLED Dark**, **Forest Night**, **Rose Pine**, and **Solarized Light**).
+* **Stateful Multi-Turn Conversation Memory**:
+  * **Per-Channel Server Context**: Discussions within a server channel remain contextual across multiple conversation turns.
+  * **Strict DM Privacy Isolation**: DMs are strictly isolated per user ID (`dm_user_<author_id>`), ensuring zero cross-user context leakage or privacy spillover.
+  * **Configurable Sliding Window**: Customize how many turns are remembered (default 6 turns, up to 50, or 0 to disable).
+  * **Configurable Inactivity Expiration (TTL)**: Automatically clears inactive conversation memory after a configurable period of silence (default 30 minutes, 1–1440 min).
+  * **Smart Token Compression**: Older historical assistant responses are compressed to conserve model context tokens without losing user intent.
+* **Native Discord Message Reply Context**:
+  * Replying directly to any previous message in Discord passes the referenced message and author as context into the AI model.
+  * Replying directly to Silas Blue automatically continues the conversation seamlessly.
+* **Explicit Message Recall Command**:
+  * `!recall <message_id_or_link> [optional instructions]`: Fetches any prior message in the channel and prompts the AI to analyze, summarize, or respond to it.
+* **Memory Management Commands & UI Controls**:
+  * `!clear` / `!reset` / `!forget`: Instantly wipes channel or DM memory.
+  * `!setmemory <0-50>`: Configures conversation turns for the server.
+  * `!setttl <1-1440>`: Configures inactivity expiration in minutes for the server.
+  * Full GUI and Web Dashboard sliders and inputs for both server memory and global DM memory.
 
 ---
 
@@ -212,12 +216,19 @@ Silas Blue responds to mentions or standard prefix commands:
   !setprompt You are a helpful assistant for the Coding Club. Keep answers concise.
   !setprompt reset   (resets back to the global default persona)
   ```
+* **Conversation Memory & Message Recall**:
+  ```text
+  !clear                     - Clear conversation memory for the current channel or DM (aliases: !reset, !forget)
+  !recall <msg_id_or_link>   - Fetch a previous message by ID or link and analyze/respond to it
+  !setmemory <0-50>          - Set conversation memory turns for this server (0 to disable)
+  !setttl <1-1440>           - Set memory inactivity expiration in minutes for this server
+  ```
 * **Help & Server Info**:
   ```text
-  !help       - View available commands and usage
-  !invite     - Generate an invitation link to add Silas Blue to a server
-  !ping       - Check bot gateway latency
-  !config     - View active server configuration (Admin only)
+  !help                      - View available commands and usage
+  !invite                    - Generate an invitation link to add Silas Blue to a server
+  !ping                      - Check bot gateway latency
+  !config                    - View active server configuration (Admin only)
   ```
 
 ---

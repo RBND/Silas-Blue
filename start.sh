@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Silas Blue v3.0.0 Launcher for Linux and macOS
+# Silas Blue v3.1.0 Launcher for Linux and macOS
 
 set -e
 
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "========================================"
-echo "       Starting Silas Blue v3.0.0"
+echo "       Starting Silas Blue v3.1.0"
 echo "========================================"
 echo ""
 

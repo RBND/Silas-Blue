@@ -11,7 +11,7 @@
     <nav id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-title">SILAS BLUE</div>
-            <div class="brand-subtitle">Remote Management v3.0.0</div>
+            <div class="brand-subtitle">Remote Management v3.1.0</div>
             <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
         </div>
 
@@ -187,6 +187,14 @@
                     <label>DM Default Model:</label>
                     <input type="text" id="cfg-dm-model" placeholder="Leave empty for active model">
                 </div>
+                <div class="form-row">
+                    <label>DM Memory Turns (0=off):</label>
+                    <input type="number" id="cfg-dm-memory-turns" min="0" max="50" value="6">
+                </div>
+                <div class="form-row">
+                    <label>DM Inactivity TTL (Mins):</label>
+                    <input type="number" id="cfg-dm-memory-ttl" min="1" max="1440" value="30">
+                </div>
             </div>
         </div>
 
@@ -233,6 +241,14 @@
                     <div class="form-row">
                         <label>Max chars per page:</label>
                         <input type="number" id="cfg-max-chars" min="500" max="1900" value="1900">
+                    </div>
+                    <div class="form-row">
+                        <label>Memory Turns (0=off):</label>
+                        <input type="number" id="cfg-guild-memory-turns" min="0" max="50" value="6">
+                    </div>
+                    <div class="form-row">
+                        <label>Inactivity TTL (Minutes):</label>
+                        <input type="number" id="cfg-guild-memory-ttl" min="1" max="1440" value="30">
                     </div>
                 </div>
             </div>

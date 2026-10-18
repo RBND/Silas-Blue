@@ -40,19 +40,34 @@ class OllamaProvider(AIProvider):
         self,
         prompt: str,
         model: str,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None
     ) -> str:
         """
-        Sends a prompt to Ollama asynchronously via /api/generate.
+        Sends a prompt to Ollama asynchronously.
+        Uses /api/chat if history is provided, otherwise /api/generate.
         """
-        url = f"{self._base_url}/api/generate"
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False
-        }
-        if system_prompt:
-            payload["system"] = system_prompt
+        if history:
+            url = f"{self._base_url}/api/chat"
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(history)
+            messages.append({"role": "user", "content": prompt})
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False
+            }
+        else:
+            url = f"{self._base_url}/api/generate"
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False
+            }
+            if system_prompt:
+                payload["system"] = system_prompt
 
         timeout = aiohttp.ClientTimeout(total=300)
         try:
@@ -60,6 +75,8 @@ class OllamaProvider(AIProvider):
                 async with session.post(url, json=payload, headers=self._get_headers()) as response:
                     if response.status == 200:
                         data = await response.json()
+                        if history:
+                            return data.get("message", {}).get("content", "")
                         return data.get("response", "")
                     else:
                         text = await response.text()

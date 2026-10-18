@@ -20,6 +20,7 @@ from typing import Optional, Dict, Any, List
 from ai_providers import get_ai_provider, AIProvider
 from permissions import PermissionManager
 from utils import load_config, save_config, get_config_path, load_app_config
+from memory import conversation_memory
 
 logger = logging.getLogger("silasblue")
 
@@ -248,13 +249,14 @@ class PaginatedView(discord.ui.View):
             except Exception:
                 pass
 
-async def handle_ai_prompt(message: discord.Message, config: dict):
+async def handle_ai_prompt(message: discord.Message, config: dict, prompt_override: Optional[str] = None):
     """
     Sends message to active AI provider asynchronously without blocking event loop.
     Validates model against active provider and automatically falls back to currently loaded model.
     Displays typing indicator while processing.
+    Integrates conversation memory history and native Discord reply context.
     """
-    prompt = message.content.strip()
+    raw_prompt = (prompt_override if prompt_override is not None else message.content).strip()
     provider = get_provider()
 
     # Determine default model from active provider and configuration
@@ -266,6 +268,9 @@ async def handle_ai_prompt(message: discord.Message, config: dict):
     guild_name = message.guild.name if message.guild else "Direct Message"
 
     if message.guild is None:
+        mem_key = f"dm_user_{message.author.id}"
+        max_turns = int(app_cfg.get("dm_memory_turns", 6))
+        ttl_minutes = int(app_cfg.get("dm_memory_ttl_minutes", 30))
         # DM handling: check dm_default_model or active_model
         dm_model = app_cfg.get("dm_default_model")
         if dm_model and (not available or dm_model in available):
@@ -275,6 +280,9 @@ async def handle_ai_prompt(message: discord.Message, config: dict):
         else:
             default_model = active_loaded
     else:
+        mem_key = f"guild_{message.guild.id}_{message.channel.id}"
+        max_turns = int(config.get("memory_turns", 6))
+        ttl_minutes = int(config.get("memory_ttl_minutes", 30))
         # Guild handling:
         server_model = config.get("default_model")
         # If server has a model configured that actually exists on current provider, use it
@@ -292,14 +300,31 @@ async def handle_ai_prompt(message: discord.Message, config: dict):
                 config["default_model"] = default_model
                 save_config(guild_id, config)
 
-    guild_id = message.guild.id if message.guild else None
-    guild_name = message.guild.name if message.guild else "Direct Message"
+    # Resolve replied-to message context if user replied directly to a Discord message
+    replied_context = ""
+    if message.reference and message.reference.message_id and not prompt_override:
+        try:
+            ref_msg = message.reference.resolved
+            if ref_msg is None or isinstance(ref_msg, discord.DeletedReferencedMessage):
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+            if ref_msg and ref_msg.content:
+                author_name = getattr(ref_msg.author, "display_name", str(ref_msg.author))
+                replied_context = f"[Replying to {author_name}: \"{ref_msg.content}\"]\n"
+        except Exception as ref_err:
+            logger.debug(f"Could not resolve referenced message: {ref_err}")
+
+    effective_prompt = f"{replied_context}{raw_prompt}" if replied_context else raw_prompt
+
+    # Retrieve multi-turn history from memory buffer
+    history = None
+    if max_turns > 0:
+        history = conversation_memory.get_history(mem_key, max_turns=max_turns, ttl_minutes=ttl_minutes)
 
     log_to_gui("prompt", {
         "guild_id": guild_id,
         "guild_name": guild_name,
         "user": str(message.author),
-        "prompt": prompt
+        "prompt": effective_prompt
     })
 
     # Show Discord typing indicator during model inference
@@ -310,10 +335,14 @@ async def handle_ai_prompt(message: discord.Message, config: dict):
 
     try:
         async with message.channel.typing():
-            response = await provider.send_prompt(prompt, default_model, system_prompt=system_prompt)
+            response = await provider.send_prompt(effective_prompt, default_model, system_prompt=system_prompt, history=history)
     except Exception as e:
         logger.error(f"Error getting AI response: {e}")
         response = f"Error processing AI request: {e}"
+
+    # Record turn in conversation memory if response was valid
+    if max_turns > 0 and response and not response.startswith("Error processing AI request:") and not response.startswith("Ollama Error (") and not response.startswith("Llama.cpp Error (") and not response.startswith("OpenAI/Remote Error ("):
+        conversation_memory.add_turn(mem_key, effective_prompt, response, max_turns=max_turns)
 
     log_to_gui("reply", {
         "guild_id": guild_id,
@@ -371,7 +400,7 @@ async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
 
-    # Direct Message (DM) Policy Handling
+    # Direct Message (DM) Policy & Command Handling
     if message.guild is None:
         app_cfg = load_app_config()
         if not app_cfg.get("allow_dms", True):
@@ -382,6 +411,18 @@ async def on_message(message: discord.Message):
                 except Exception:
                     pass
             return
+
+        # Check for commands in DMs (e.g. !clear, !recall, !help)
+        content = message.content.strip()
+        if content.startswith(COMMAND_PREFIX):
+            first_word = content[len(COMMAND_PREFIX):].split(" ", 1)[0].lower()
+            command_names = [cmd.name for cmd in bot.commands]
+            for cmd in bot.commands:
+                command_names.extend(cmd.aliases)
+            if first_word in command_names:
+                await bot.process_commands(message)
+                return
+
         dm_config = load_config(None)
         await handle_ai_prompt(message, dm_config)
         return
@@ -404,33 +445,54 @@ async def on_message(message: discord.Message):
             await handle_ai_prompt(message, config)
             return
 
-    # Check for prefix or bot mention
     content = message.content
     mention_str_1 = f"<@{bot.user.id}>"
     mention_str_2 = f"<@!{bot.user.id}>"
-    is_command = False
 
+    # Check for command or prefix-based prompt
     if content.startswith(COMMAND_PREFIX):
-        is_command = True
-    elif content.startswith(mention_str_1) or content.startswith(mention_str_2):
+        first_word = content[len(COMMAND_PREFIX):].split(" ", 1)[0].lower()
+        command_names = [cmd.name for cmd in bot.commands]
+        for cmd in bot.commands:
+            command_names.extend(cmd.aliases)
+        if first_word in command_names:
+            await bot.process_commands(message)
+        else:
+            prompt_text = content[len(COMMAND_PREFIX):].lstrip()
+            if prompt_text:
+                await handle_ai_prompt(message, config, prompt_override=prompt_text)
+        return
+
+    # Check for direct bot mention
+    if content.startswith(mention_str_1) or content.startswith(mention_str_2):
         after_mention = content[len(mention_str_1):] if content.startswith(mention_str_1) else content[len(mention_str_2):]
         after_mention = after_mention.lstrip()
         first_word = after_mention.split(" ", 1)[0].lower() if after_mention else ""
         command_names = [cmd.name for cmd in bot.commands]
+        for cmd in bot.commands:
+            command_names.extend(cmd.aliases)
         if first_word in command_names:
-            is_command = True
             message.content = COMMAND_PREFIX + after_mention
+            await bot.process_commands(message)
+        elif after_mention:
+            await handle_ai_prompt(message, config, prompt_override=after_mention)
+        return
 
-    if is_command:
-        await bot.process_commands(message)
-    else:
-        if content.startswith(mention_str_1) or content.startswith(mention_str_2):
-            after_mention = content[len(mention_str_1):] if content.startswith(mention_str_1) else content[len(mention_str_2):]
-            after_mention = after_mention.lstrip()
-            if after_mention:
+    # Check if user replied directly to a message authored by the bot
+    if message.reference and message.reference.message_id:
+        try:
+            ref_msg = message.reference.resolved
+            if ref_msg is None or isinstance(ref_msg, discord.DeletedReferencedMessage):
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+            if ref_msg and ref_msg.author == bot.user:
                 await handle_ai_prompt(message, config)
-        elif bot.user in message.mentions:
-            await handle_ai_prompt(message, config)
+                return
+        except Exception:
+            pass
+
+    # Check if bot was mentioned elsewhere in the message
+    if bot.user in message.mentions:
+        await handle_ai_prompt(message, config)
 
 @bot.command(name="ping")
 async def ping(ctx):
@@ -584,10 +646,104 @@ async def set_global_name(ctx, *, new_name: str):
     except Exception as e:
         await ctx.send(f"Error changing global username: {e}")
 
-@bot.command(name="help")
-async def help_command(ctx):
+@bot.command(name="clear", aliases=["reset", "forget"])
+async def clear_memory_command(ctx):
+    """Clears conversation memory for the current channel or DM."""
+    if ctx.guild is None:
+        mem_key = f"dm_user_{ctx.author.id}"
+        conversation_memory.clear(mem_key)
+        await ctx.send("🧹 Your DM conversation memory has been cleared.")
+    else:
+        mem_key = f"guild_{ctx.guild.id}_{ctx.channel.id}"
+        conversation_memory.clear(mem_key)
+        await ctx.send("🧹 Conversation memory for this channel has been cleared.")
+
+@bot.command(name="recall")
+async def recall_command(ctx, target: str, *, instructions: str = ""):
+    """Recalls a specific previous message by ID or jump link and analyzes/responds to it."""
+    clean_target = target.strip("<>").rstrip("/")
+    msg_id_str = clean_target.split("/")[-1]
+    try:
+        msg_id = int(msg_id_str)
+    except ValueError:
+        await ctx.send("⚠️ Invalid message ID or link provided.")
+        return
+
+    try:
+        target_msg = await ctx.channel.fetch_message(msg_id)
+    except discord.NotFound:
+        await ctx.send("⚠️ Message not found in this channel.")
+        return
+    except discord.Forbidden:
+        await ctx.send("⚠️ I don't have permission to read message history here.")
+        return
+    except Exception as e:
+        await ctx.send(f"⚠️ Failed to fetch message: {e}")
+        return
+
+    author_name = getattr(target_msg.author, "display_name", str(target_msg.author))
+    target_content = target_msg.content or "[Non-text content / attachment]"
+
+    prompt_text = f"[Recalled message from {author_name} (ID: {target_msg.id})]:\n\"{target_content}\""
+    if instructions:
+        prompt_text += f"\n\nUser instructions regarding this message: {instructions}"
+    else:
+        prompt_text += "\n\nPlease summarize, analyze, or respond to this recalled message."
+
+    config = server_configs.get(ctx.guild.id, {}) if ctx.guild else load_config(None)
+    await handle_ai_prompt(ctx.message, config, prompt_override=prompt_text)
+
+@bot.command(name="setmemory")
+async def set_memory(ctx, turns: int):
+    """Sets the number of conversation turns to remember in this server (0 to disable)."""
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
     guild_id = ctx.guild.id
     config = server_configs.get(guild_id, {})
+    roles = config.get("change_permission_roles", ["admin", "owner"])
+    is_admin = ctx.author.guild_permissions.administrator or (ctx.author == ctx.guild.owner)
+    has_role = any(r.name.lower() in [x.lower() for x in roles] for r in getattr(ctx.author, "roles", []))
+    if not (is_admin or has_role):
+        await ctx.send("You do not have permission to configure memory settings.")
+        return
+    if turns < 0 or turns > 50:
+        await ctx.send("Please provide a number of memory turns between 0 and 50.")
+        return
+    config["memory_turns"] = turns
+    save_config(guild_id, config)
+    server_configs[guild_id] = config
+    if turns == 0:
+        await ctx.send("Conversation memory has been **disabled** for this server.")
+    else:
+        await ctx.send(f"Conversation memory set to **{turns}** turns for this server.")
+
+@bot.command(name="setttl", aliases=["setmemoryttl"])
+async def set_ttl(ctx, minutes: int):
+    """Sets the memory inactivity expiration time in minutes for this server (1 to 1440)."""
+    if ctx.guild is None:
+        await ctx.send("This command can only be used in a server.")
+        return
+    guild_id = ctx.guild.id
+    config = server_configs.get(guild_id, {})
+    roles = config.get("change_permission_roles", ["admin", "owner"])
+    is_admin = ctx.author.guild_permissions.administrator or (ctx.author == ctx.guild.owner)
+    has_role = any(r.name.lower() in [x.lower() for x in roles] for r in getattr(ctx.author, "roles", []))
+    if not (is_admin or has_role):
+        await ctx.send("You do not have permission to configure memory settings.")
+        return
+    if minutes < 1 or minutes > 1440:
+        await ctx.send("Please provide an inactivity TTL between 1 and 1440 minutes (24 hours).")
+        return
+    config["memory_ttl_minutes"] = minutes
+    save_config(guild_id, config)
+    server_configs[guild_id] = config
+    await ctx.send(f"Conversation memory inactivity TTL set to **{minutes}** minutes for this server.")
+
+@bot.command(name="help")
+async def help_command(ctx):
+    guild_id = ctx.guild.id if ctx.guild else None
+    config = server_configs.get(guild_id, {}) if guild_id else load_config(None)
     max_chars = min(config.get("pagination_max_chars", 1850), 1850)
     prefix = COMMAND_PREFIX
     provider = get_provider()
@@ -602,6 +758,10 @@ async def help_command(ctx):
         f"{prefix}setmodel <name> - Set default model for this server\n"
         f"{prefix}models - List available models on AI backend\n"
         f"{prefix}setprompt <text> - Set custom AI persona for this server (use 'reset' for default)\n"
+        f"{prefix}clear / {prefix}reset - Clear channel or DM conversation memory\n"
+        f"{prefix}recall <msg_id_or_link> [notes] - Recall a previous message and analyze/respond\n"
+        f"{prefix}setmemory <0-50> - Set conversation memory turns for this server (0 = off)\n"
+        f"{prefix}setttl <1-1440> - Set memory inactivity TTL in minutes for this server\n"
         f"{prefix}setnick <name> - Change bot nickname in this server\n"
         f"{prefix}setpagination <500-1900> - Set pagination limit\n"
         f"{prefix}config - Show server config (Admin only)\n"

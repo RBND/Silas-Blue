@@ -27,6 +27,8 @@ DEFAULT_APP_CONFIG = {
     "allow_dms": True,
     "dm_default_model": "",
     "dm_disabled_message": "Direct messages with the bot are currently disabled.",
+    "dm_memory_turns": 6,
+    "dm_memory_ttl_minutes": 30,
     "debug": False,
     "theme": "retrowave"
 }
@@ -40,7 +42,9 @@ DEFAULT_GUILD_CONFIG = {
     "pagination_max_chars": 1900,
     "random_prompt_enabled": False,
     "random_prompt_probability": 0,
-    "system_prompt": ""
+    "system_prompt": "",
+    "memory_turns": 6,
+    "memory_ttl_minutes": 30
 }
 
 def _atomic_write_json(file_path: str, data: dict):

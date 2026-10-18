@@ -291,6 +291,8 @@ async function loadAiSettings() {
         document.getElementById('cfg-system-prompt').value = cfg.system_prompt || '';
         document.getElementById('cfg-allow-dms').checked = cfg.allow_dms !== false;
         document.getElementById('cfg-dm-model').value = cfg.dm_default_model || '';
+        document.getElementById('cfg-dm-memory-turns').value = cfg.dm_memory_turns !== undefined ? cfg.dm_memory_turns : 6;
+        document.getElementById('cfg-dm-memory-ttl').value = cfg.dm_memory_ttl_minutes !== undefined ? cfg.dm_memory_ttl_minutes : 30;
     } catch (e) {
         console.error('Failed to load AI settings:', e);
     }
@@ -310,7 +312,9 @@ async function saveAiSettings() {
         remote_model: document.getElementById('cfg-remote-model').value.trim(),
         system_prompt: document.getElementById('cfg-system-prompt').value.trim(),
         allow_dms: document.getElementById('cfg-allow-dms').checked,
-        dm_default_model: document.getElementById('cfg-dm-model').value.trim()
+        dm_default_model: document.getElementById('cfg-dm-model').value.trim(),
+        dm_memory_turns: parseInt(document.getElementById('cfg-dm-memory-turns').value) || 0,
+        dm_memory_ttl_minutes: parseInt(document.getElementById('cfg-dm-memory-ttl').value) || 30
     };
 
     try {
@@ -359,6 +363,8 @@ async function loadSelectedGuildConfig() {
         document.getElementById('cfg-pagination').checked = cfg.pagination_enabled !== false;
         document.getElementById('cfg-max-chars').value = cfg.pagination_max_chars || 1900;
         document.getElementById('cfg-server-system-prompt').value = cfg.system_prompt || '';
+        document.getElementById('cfg-guild-memory-turns').value = cfg.memory_turns !== undefined ? cfg.memory_turns : 6;
+        document.getElementById('cfg-guild-memory-ttl').value = cfg.memory_ttl_minutes !== undefined ? cfg.memory_ttl_minutes : 30;
     } catch (e) {
         console.error('Failed to load guild config:', e);
     }
@@ -402,7 +408,9 @@ async function saveServerConfig() {
         change_permission_roles: getSelectedRoles('roles-perm'),
         pagination_enabled: document.getElementById('cfg-pagination').checked,
         pagination_max_chars: parseInt(document.getElementById('cfg-max-chars').value) || 1900,
-        system_prompt: document.getElementById('cfg-server-system-prompt').value.trim()
+        system_prompt: document.getElementById('cfg-server-system-prompt').value.trim(),
+        memory_turns: parseInt(document.getElementById('cfg-guild-memory-turns').value) || 0,
+        memory_ttl_minutes: parseInt(document.getElementById('cfg-guild-memory-ttl').value) || 30
     };
 
     try {
