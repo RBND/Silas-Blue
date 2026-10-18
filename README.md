@@ -1,6 +1,6 @@
-# Silas Blue v3.3.2
+# Silas Blue v3.3.3
 
-[![Version](https://img.shields.io/badge/version-3.3.2-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.3.3-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,7 +9,15 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.3.2 introduces interactive **Remote Model Selection Dropdowns**: transforming fetched remote API models (Xiaomi MiMo, OpenAI, Groq, DeepSeek, etc.) into an intuitive, editable dropdown list with instant popup selection and dynamic Dashboard synchronization.
+Silas Blue v3.3.3 delivers a critical stability fix for Discord prompt processing and citations checking, ensuring seamless replies across all AI backends.
+
+---
+
+## 🚀 What's New in Version 3.3.3
+
+* **Discord Prompt Handling & Refusal Guard Fix**:
+  * Fixed a `NameError: name 're' is not defined` in `bot_core.py` that occurred when inspecting AI responses for refusal patterns prior to attaching web citations.
+  * Added automated regression test in `tests/test_web_search.py` verifying clean execution.
 
 ---
 
