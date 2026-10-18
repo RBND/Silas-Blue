@@ -403,7 +403,7 @@ class ThemeManager:
             }}
 
             /* Status Pills with Dynamic WCAG AA Contrast */
-            QLabel#statusPillOnline {
+            QLabel#statusPillOnline {{
                 background-color: {pill_online_bg};
                 color: {pill_online_fg};
                 border: 1px solid {pill_online_border};
@@ -411,9 +411,9 @@ class ThemeManager:
                 padding: 3px 9px;
                 font-size: 11px;
                 font-weight: 700;
-            }
+            }}
 
-            QLabel#statusPillOffline {
+            QLabel#statusPillOffline {{
                 background-color: {pill_offline_bg};
                 color: {pill_offline_fg};
                 border: 1px solid {pill_offline_border};
@@ -421,9 +421,9 @@ class ThemeManager:
                 padding: 3px 9px;
                 font-size: 11px;
                 font-weight: 700;
-            }
+            }}
 
-            QLabel#statusPillWarning {
+            QLabel#statusPillWarning {{
                 background-color: {pill_warn_bg};
                 color: {pill_warn_fg};
                 border: 1px solid {pill_warn_border};
@@ -431,33 +431,33 @@ class ThemeManager:
                 padding: 3px 9px;
                 font-size: 11px;
                 font-weight: 700;
-            }
+            }}
 
             /* Permission Grants Chips */
-            QFrame#permChipRole {
+            QFrame#permChipRole {{
                 background-color: {self._hex_to_rgba(accent1, 0.22)};
                 border: 1px solid {self._hex_to_rgba(accent1, 0.55)};
                 border-radius: 6px;
-            }
+            }}
 
-            QFrame#permChipRole:hover {
+            QFrame#permChipRole:hover {{
                 border-color: {accent1};
-            }
+            }}
 
-            QFrame#permChipUser {
+            QFrame#permChipUser {{
                 background-color: {self._hex_to_rgba(accent2, 0.20)};
                 border: 1px solid {self._hex_to_rgba(accent2, 0.55)};
                 border-radius: 6px;
-            }
+            }}
 
-            QFrame#permChipUser:hover {
+            QFrame#permChipUser:hover {{
                 border-color: {accent2};
-            }
+            }}
 
             /* Accessibility Focus Rings */
-            QPushButton:focus, QComboBox:focus, QSpinBox:focus {
+            QPushButton:focus, QComboBox:focus, QSpinBox:focus {{
                 border: 1px solid {accent_focus};
-            }
+            }}
 
             /* Tabs (when embedded in child widgets) */
             QTabBar::tab {{

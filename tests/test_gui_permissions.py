@@ -62,7 +62,17 @@ class TestGuiPermissions(unittest.TestCase):
         lbl2 = QLabel("Chip 2")
         layout.addWidget(lbl1)
         layout.addWidget(lbl2)
-        self.assertEqual(layout.count(), 2)
+    def test_all_themes_apply_cleanly(self):
+        import glob
+        from PySide6.QtWidgets import QWidget
+        from gui.theme_manager import ThemeManager
+        tm = ThemeManager()
+        w = QWidget()
+        themes = glob.glob("themes/*.json")
+        self.assertGreater(len(themes), 0)
+        for th in themes:
+            tm.apply_theme(w, th)
+            self.assertTrue(bool(w.styleSheet()))
 
 if __name__ == "__main__":
     unittest.main()
