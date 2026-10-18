@@ -1,12 +1,12 @@
 @echo off
 setlocal
-title Silas Blue v3.3.3
+title Silas Blue v3.3.4
 
 :: Change directory to the folder containing this batch script
 cd /d "%~dp0"
 
 echo ========================================
-echo        Starting Silas Blue v3.3.3
+echo        Starting Silas Blue v3.3.4
 echo ========================================
 echo.
 

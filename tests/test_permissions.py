@@ -4,6 +4,17 @@ from permissions import PermissionManager
 from utils import save_app_config, DEFAULT_APP_CONFIG
 
 class TestPermissions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from utils import load_app_config
+        cls._original_app_cfg = load_app_config()
+
+    @classmethod
+    def tearDownClass(cls):
+        from utils import save_app_config
+        if hasattr(cls, "_original_app_cfg"):
+            save_app_config(cls._original_app_cfg)
+
     def setUp(self):
         self.pm = PermissionManager()
 

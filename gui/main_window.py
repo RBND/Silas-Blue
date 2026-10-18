@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.3.3")
+        app_sub = QLabel("AI Discord Assistant v3.3.4")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -562,6 +562,11 @@ class MainWindow(QMainWindow):
         o_key_row.addWidget(self.api_key_input, 1)
         o_layout.addLayout(o_key_row)
 
+        self.save_ollama_btn = QPushButton("💾 Save & Apply Ollama Settings")
+        self.save_ollama_btn.setObjectName("primaryBtn")
+        self.save_ollama_btn.clicked.connect(lambda: self.save_backend_settings(sender_btn=self.save_ollama_btn))
+        o_layout.addWidget(self.save_ollama_btn)
+
         self.provider_stack.addWidget(self.ollama_group)
 
         # View 1: Llama.cpp Settings
@@ -609,6 +614,11 @@ class MainWindow(QMainWindow):
         model_file_row.addWidget(self.browse_model_btn)
         l_layout.addLayout(model_file_row)
 
+        self.save_llamacpp_btn = QPushButton("💾 Save & Apply Llama.cpp Settings")
+        self.save_llamacpp_btn.setObjectName("primaryBtn")
+        self.save_llamacpp_btn.clicked.connect(lambda: self.save_backend_settings(sender_btn=self.save_llamacpp_btn))
+        l_layout.addWidget(self.save_llamacpp_btn)
+
         self.provider_stack.addWidget(self.llamacpp_group)
 
         # View 2: Remote OpenAI-Compatible API Settings
@@ -651,6 +661,22 @@ class MainWindow(QMainWindow):
         r_key_row.addWidget(self.toggle_remote_key_btn)
         r_layout.addLayout(r_key_row)
 
+        def on_remote_key_changed():
+            val = self.remote_key_input.text().strip()
+            if val:
+                self.app_cfg["remote_api_key"] = val
+                if self.rb_remote.isChecked():
+                    save_app_config(self.app_cfg)
+        self.remote_key_input.editingFinished.connect(on_remote_key_changed)
+
+        def on_remote_url_changed():
+            val = self.remote_url_input.text().strip()
+            if val:
+                self.app_cfg["remote_base_url"] = val
+                if self.rb_remote.isChecked():
+                    save_app_config(self.app_cfg)
+        self.remote_url_input.editingFinished.connect(on_remote_url_changed)
+
         r_model_row = QHBoxLayout()
         r_model_row.addWidget(QLabel("Default Model:"))
         self.remote_model_combo = QComboBox()
@@ -692,14 +718,32 @@ class MainWindow(QMainWindow):
         r_test_row.addWidget(self.remote_test_status, 1)
         r_layout.addLayout(r_test_row)
 
+        self.save_remote_btn = QPushButton("💾 Save & Apply Remote Settings")
+        self.save_remote_btn.setObjectName("primaryBtn")
+        self.save_remote_btn.clicked.connect(lambda: self.save_backend_settings(sender_btn=self.save_remote_btn))
+        r_layout.addWidget(self.save_remote_btn)
+
         self.provider_stack.addWidget(self.remote_group)
         layout.addWidget(self.provider_stack)
 
-        # Wire radio buttons to dynamic stack switching
-        def update_stack_view(btn_id):
+        # Wire radio buttons to dynamic stack switching and instant configuration saving
+        def on_provider_selected(btn_id):
             self.provider_stack.setCurrentIndex(btn_id)
+            if btn_id == 2:
+                self.app_cfg["backend_type"] = "remote_openai"
+                if hasattr(self, "remote_model_combo") and self.remote_model_combo.currentText().strip():
+                    self.app_cfg["active_model"] = self.remote_model_combo.currentText().strip()
+            elif btn_id == 1:
+                self.app_cfg["backend_type"] = "llamacpp"
+            else:
+                self.app_cfg["backend_type"] = "ollama"
+            save_app_config(self.app_cfg)
+            self.provider = get_ai_provider(self.app_cfg)
+            reload_ai_provider()
+            self.update_ai_status()
+            self.refresh_models_async()
 
-        self.provider_btn_group.idClicked.connect(update_stack_view)
+        self.provider_btn_group.idClicked.connect(on_provider_selected)
         # Set initial stack index
         if self.rb_llamacpp.isChecked():
             self.provider_stack.setCurrentIndex(1)
@@ -1059,8 +1103,10 @@ class MainWindow(QMainWindow):
     def on_remote_preset_changed(self, preset_name: str):
         if preset_name in REMOTE_PRESETS:
             preset_data = REMOTE_PRESETS[preset_name]
+            self.app_cfg["remote_preset"] = preset_name
             if preset_name != "Custom":
                 self.remote_url_input.setText(preset_data.get("base_url", ""))
+                self.app_cfg["remote_base_url"] = preset_data.get("base_url", "")
                 default_m = preset_data.get("default_model", "")
                 preset_models = preset_data.get("models", [])
                 self.remote_model_combo.blockSignals(True)
@@ -1076,13 +1122,17 @@ class MainWindow(QMainWindow):
                     self.remote_model_combo.setCurrentText(default_m)
                 self.remote_model_combo.blockSignals(False)
                 self.app_cfg["remote_model"] = self.remote_model_combo.currentText().strip()
+                if self.rb_remote.isChecked() or self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+                    self.app_cfg["active_model"] = self.app_cfg["remote_model"]
+                    save_app_config(self.app_cfg)
 
     def on_remote_model_selected(self, model_name: str):
         model_name = model_name.strip()
         if not model_name:
             return
         self.app_cfg["remote_model"] = model_name
-        if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+        if self.rb_remote.isChecked() or self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+            self.app_cfg["backend_type"] = "remote_openai"
             self.app_cfg["active_model"] = model_name
             self.kpi_model_val.setText(model_name)
             self.sidebar_model_label.setText(f"Model: {model_name[:14]}")
@@ -1094,6 +1144,7 @@ class MainWindow(QMainWindow):
                     self.model_select.addItem(model_name)
                     self.model_select.setCurrentText(model_name)
                 self.model_select.blockSignals(False)
+            save_app_config(self.app_cfg)
 
     def toggle_remote_key_visibility(self):
         if self.remote_key_input.echoMode() == QLineEdit.Password:
@@ -1139,6 +1190,19 @@ class MainWindow(QMainWindow):
         color = "#00ff88" if success else "#ff4466"
         self.remote_test_status.setText(msg)
         self.remote_test_status.setStyleSheet(f"color: {color}; font-weight: bold;")
+        if success and self.rb_remote.isChecked():
+            self.app_cfg["backend_type"] = "remote_openai"
+            self.app_cfg["remote_api_key"] = self.remote_key_input.text().strip()
+            self.app_cfg["remote_base_url"] = self.remote_url_input.text().strip()
+            self.app_cfg["remote_preset"] = self.remote_preset_combo.currentText()
+            m = self.remote_model_combo.currentText().strip()
+            if m:
+                self.app_cfg["remote_model"] = m
+                self.app_cfg["active_model"] = m
+            save_app_config(self.app_cfg)
+            self.provider = get_ai_provider(self.app_cfg)
+            reload_ai_provider()
+            self.update_ai_status()
 
     def fetch_remote_models(self):
         self.fetch_remote_models_btn.setEnabled(False)
@@ -1186,10 +1250,18 @@ class MainWindow(QMainWindow):
 
             active_m = self.remote_model_combo.currentText().strip()
             self.app_cfg["remote_model"] = active_m
+            self.app_cfg["remote_api_key"] = self.remote_key_input.text().strip()
+            self.app_cfg["remote_base_url"] = self.remote_url_input.text().strip()
+            self.app_cfg["remote_preset"] = self.remote_preset_combo.currentText()
 
-            # Sync Dashboard dropdown if remote backend is active
-            if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+            # Persist immediately and sync Dashboard dropdown
+            if self.rb_remote.isChecked() or self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+                self.app_cfg["backend_type"] = "remote_openai"
+                self.app_cfg["active_model"] = active_m
+                save_app_config(self.app_cfg)
                 self.signals.models_loaded.emit(models)
+            else:
+                save_app_config(self.app_cfg)
 
             log_msg = f"[REMOTE] Retrieved {len(models)} models from API: {', '.join(models[:6])}{'...' if len(models) > 6 else ''}"
             self.system_log_output.append(log_msg)
@@ -1199,7 +1271,7 @@ class MainWindow(QMainWindow):
             self.show_feedback(self.fetch_remote_models_btn, "No models retrieved")
             self.system_log_output.append("[REMOTE] Warning: No models returned from API endpoint. Check endpoint URL and API key.")
 
-    def save_backend_settings(self):
+    def save_backend_settings(self, sender_btn=None):
         if self.rb_llamacpp.isChecked():
             backend_type = "llamacpp"
         elif self.rb_remote.isChecked():
@@ -1221,6 +1293,7 @@ class MainWindow(QMainWindow):
         self.app_cfg["remote_model"] = self.remote_model_combo.currentText().strip()
         if backend_type == "remote_openai":
             self.app_cfg["active_model"] = self.app_cfg["remote_model"]
+        self.system_prompt_input.setPlainText(self.system_prompt_input.toPlainText())
         self.app_cfg["system_prompt"] = self.system_prompt_input.toPlainText().strip()
 
         self.app_cfg["allow_dms"] = self.allow_dms_checkbox.isChecked()
@@ -1243,7 +1316,8 @@ class MainWindow(QMainWindow):
         self.stop_ai_btn.setText(f"Stop {self.provider.name}")
 
         self.system_log_output.append(f"[SETTINGS] Saved! Switched to {self.provider.name} at {self.provider.base_url}")
-        self.show_feedback(self.save_settings_btn, "✓ Settings Saved!")
+        target_btn = sender_btn if (sender_btn and isinstance(sender_btn, QPushButton)) else self.save_settings_btn
+        self.show_feedback(target_btn, "✓ Saved & Applied!")
         self.update_ai_status()
         self.refresh_models_async()
 
@@ -1298,7 +1372,10 @@ class MainWindow(QMainWindow):
         self.system_log_output.append(f"[WEB SEARCH] {msg}")
 
     def auto_detect_on_startup(self):
-        """If configured AI backend is offline, runs auto-detection in background."""
+        """Only runs auto-detection on startup if backend_type was explicitly set to 'auto'."""
+        backend_type = self.app_cfg.get("backend_type", "ollama").lower()
+        if backend_type != "auto":
+            return
         if not self.provider.is_local():
             return
 

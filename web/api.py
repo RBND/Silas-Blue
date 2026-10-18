@@ -268,6 +268,10 @@ class ApiHandler:
             if val != "●●●●●●●●":  # Don't overwrite with mask
                 self.app_cfg[key] = val
 
+        if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
+            if self.app_cfg.get("remote_model"):
+                self.app_cfg["active_model"] = self.app_cfg["remote_model"]
+
         save_app_config(self.app_cfg)
         reload_ai_provider()
         return web.json_response({"success": True, "message": "AI settings saved and backend reloaded."})

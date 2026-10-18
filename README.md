@@ -1,6 +1,6 @@
-# Silas Blue v3.3.3
+# Silas Blue v3.3.4
 
-[![Version](https://img.shields.io/badge/version-3.3.3-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.3.4-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,7 +9,17 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.3.3 delivers a critical stability fix for Discord prompt processing and citations checking, ensuring seamless replies across all AI backends.
+Silas Blue v3.3.4 enhances configuration persistence and guards user-selected Remote Cloud APIs against inadvertent auto-detection overrides.
+
+---
+
+## 🚀 What's New in Version 3.3.4
+
+* **AI Configuration Persistence & Auto-Detection Guard**:
+  * Fixed an issue where startup background service checking would detect a running local Llama.cpp instance and overwrite user-configured Remote APIs (Xiaomi MiMo, OpenAI, Groq, etc.) with Llama.cpp.
+  * Configured remote cloud APIs and explicitly configured local providers are now strictly preserved across restarts.
+  * Added dedicated **"💾 Save & Apply"** buttons directly inside each AI provider card (Ollama, Llama.cpp, and Remote) for quick 1-click persistence.
+  * Added auto-persistence in the desktop GUI when switching provider radio buttons, selecting presets, fetching models, and selecting remote models.
 
 ---
 

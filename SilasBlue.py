@@ -3,7 +3,7 @@ Silas Blue - Discord Bot powered by local AI models via Ollama or Llama.cpp
 Main entry point: launches Discord bot with either desktop GUI or headless web management.
 """
 
-__version__ = "3.3.3"
+__version__ = "3.3.4"
 
 import sys
 import threading
@@ -121,19 +121,33 @@ def start_headless_and_bot(web_host: str = "127.0.0.1", web_port: int = 8080):
 def ensure_ai_service_running():
     """
     Checks if active AI provider is running. If not, attempts to start it locally
-    or auto-detects another running local AI backend (e.g. Llama.cpp or Ollama).
+    or auto-detects another running local AI backend when configured as 'auto'.
+    Never overwrites user-configured remote cloud APIs or explicit backend settings.
     """
     from bot_core import reload_ai_provider
     from ai_providers.detector import detect_all_ai_providers
 
+    app_cfg = load_app_config()
+    current_backend = app_cfg.get("backend_type", "ollama").lower()
     provider = get_provider()
 
-    # 1. If currently configured provider is already responsive, nothing to do
+    # 1. Remote cloud providers: test status, but NEVER hijack or overwrite with local backends
+    if current_backend in ("remote", "remote_openai", "openai", "remote_api") or not provider.is_local():
+        if provider.status_sync():
+            logger.info(f"{provider.name} service is running and responsive.")
+        else:
+            logger.warning(
+                f"Configured remote AI provider '{provider.name}' ({provider.base_url}) is currently not responding. "
+                "Retaining remote configuration. Please verify your network connection and API key."
+            )
+        return
+
+    # 2. Configured local provider is already running and responsive
     if provider.status_sync():
         logger.info(f"{provider.name} service is running and responsive.")
         return
 
-    # 2. Attempt to start configured local service
+    # 3. Attempt to start configured local service
     if provider.is_local():
         logger.info(f"Local {provider.name} is not running. Attempting to start local {provider.name} service...")
         if provider.start_local_service():
@@ -142,33 +156,36 @@ def ensure_ai_service_running():
         else:
             logger.warning(f"Failed to start local {provider.name}.")
 
-    # 3. If configured provider is still offline, check if another local AI backend is running
-    logger.info("Scanning for active local AI backends...")
-    detected = detect_all_ai_providers()
+    # 4. Only if backend_type was explicitly set to 'auto', auto-switch to a detected running backend
+    if current_backend == "auto":
+        logger.info("Scanning for active local AI backends...")
+        detected = detect_all_ai_providers()
 
-    app_cfg = load_app_config()
-    current_backend = app_cfg.get("backend_type", "ollama").lower()
-
-    if detected["llamacpp"]["running"] and current_backend != "llamacpp":
-        llama_info = detected["llamacpp"]
-        logger.info(f"Auto-detected running Llama.cpp instance at {llama_info['url']}! Switching backend...")
-        app_cfg["backend_type"] = "llamacpp"
-        app_cfg["llamacpp_url"] = llama_info["url"]
-        if llama_info.get("binary_path"):
-            app_cfg["llamacpp_binary_path"] = llama_info["binary_path"]
-        if llama_info.get("model_path") and not app_cfg.get("llamacpp_model_path"):
-            app_cfg["llamacpp_model_path"] = llama_info["model_path"]
-        save_app_config(app_cfg)
-        reload_ai_provider()
-        logger.info("Successfully switched to Llama.cpp backend.")
-    elif detected["ollama"]["running"] and current_backend != "ollama":
-        ollama_info = detected["ollama"]
-        logger.info(f"Auto-detected running Ollama instance at {ollama_info['url']}! Switching backend...")
-        app_cfg["backend_type"] = "ollama"
-        app_cfg["ollama_url"] = ollama_info["url"]
-        save_app_config(app_cfg)
-        reload_ai_provider()
-        logger.info("Successfully switched to Ollama backend.")
+        if detected["llamacpp"]["running"]:
+            llama_info = detected["llamacpp"]
+            logger.info(f"Auto-detected running Llama.cpp instance at {llama_info['url']}! Switching backend...")
+            app_cfg["backend_type"] = "llamacpp"
+            app_cfg["llamacpp_url"] = llama_info["url"]
+            if llama_info.get("binary_path"):
+                app_cfg["llamacpp_binary_path"] = llama_info["binary_path"]
+            if llama_info.get("model_path") and not app_cfg.get("llamacpp_model_path"):
+                app_cfg["llamacpp_model_path"] = llama_info["model_path"]
+            save_app_config(app_cfg)
+            reload_ai_provider()
+            logger.info("Successfully switched to Llama.cpp backend.")
+        elif detected["ollama"]["running"]:
+            ollama_info = detected["ollama"]
+            logger.info(f"Auto-detected running Ollama instance at {ollama_info['url']}! Switching backend...")
+            app_cfg["backend_type"] = "ollama"
+            app_cfg["ollama_url"] = ollama_info["url"]
+            save_app_config(app_cfg)
+            reload_ai_provider()
+            logger.info("Successfully switched to Ollama backend.")
+    else:
+        logger.warning(
+            f"Configured local backend '{current_backend}' is offline and could not be started automatically. "
+            "Retaining user configuration. You can run auto-detection or start the service from the Control Panel."
+        )
 
 def is_display_available() -> bool:
     """Checks if a graphical display environment is available."""

@@ -4,6 +4,17 @@ from utils import load_app_config, save_app_config, load_config, save_config
 import config
 
 class TestConfig(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from utils import load_app_config
+        cls._original_app_cfg = load_app_config()
+
+    @classmethod
+    def tearDownClass(cls):
+        from utils import save_app_config
+        if hasattr(cls, "_original_app_cfg"):
+            save_app_config(cls._original_app_cfg)
+
     def test_app_config_load_and_save(self):
         cfg = load_app_config()
         self.assertIn("backend_type", cfg)

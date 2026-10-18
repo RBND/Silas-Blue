@@ -9,6 +9,17 @@ if app is None:
     app = QApplication(sys.argv)
 
 class TestGuiPermissions(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from utils import load_app_config
+        cls._original_app_cfg = load_app_config()
+
+    @classmethod
+    def tearDownClass(cls):
+        from utils import save_app_config
+        if hasattr(cls, "_original_app_cfg"):
+            save_app_config(cls._original_app_cfg)
+
     def test_permission_chip_signals(self):
         chip = PermissionChip(name="Moderator", entity_id="123456", is_user=False)
         self.assertEqual(chip.name, "Moderator")
