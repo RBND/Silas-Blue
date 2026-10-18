@@ -16,7 +16,7 @@ if exist "%~dp0.venv\Scripts\python.exe" (
     if exist "%~dp0.venv\Scripts\activate.bat" (
         call "%~dp0.venv\Scripts\activate.bat"
     )
-    python SilasBlue.py %*
+    "%~dp0.venv\Scripts\python.exe" SilasBlue.py %*
     goto :handle_exit
 )
 
