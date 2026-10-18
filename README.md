@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
-[![License](https://img.shields.io/badge/license-RBND--NC--1.1-orange.svg)](license.md)
+[![License](https://img.shields.io/badge/license-RBND--NC--1.2-orange.svg)](LICENSE.md)
 [![Discord](https://img.shields.io/badge/Discord-discord.py-5865F2.svg)](https://discordpy.readthedocs.io/)
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
@@ -66,8 +66,21 @@ Silas Blue v3.0.0 introduces a **Discord-grade desktop control panel** alongside
    git clone https://github.com/RobotsNeverDie/Silas-Blue.git
    cd Silas-Blue
    ```
-2. Double-click **`start.bat`**. 
-   * `start.bat` will automatically create a local virtual environment (`.venv`), install all requirements, and launch Silas Blue v3.0.0.
+2. Double-click **`start.bat`** (or run `start.bat` in Command Prompt / PowerShell). 
+   * `start.bat` automatically detects your virtual environment (`.venv`) and launches Silas Blue.
+
+#### Linux & macOS Quick Start
+1. Clone or download this repository:
+   ```bash
+   git clone https://github.com/RobotsNeverDie/Silas-Blue.git
+   cd Silas-Blue
+   ```
+2. Make `start.sh` executable and run it:
+   ```bash
+   chmod +x start.sh
+   ./start.sh
+   ```
+   * `start.sh` automatically detects `.venv` or system Python 3 and launches Silas Blue.
 
 #### Manual Installation (All Platforms)
 1. **Clone the repository**:
@@ -247,7 +260,7 @@ python -m unittest discover tests
 
 ## 📜 Legal & Policies
 
-* **License**: [RBND-NC License Version 1.1](license.md)
+* **License**: [RBND-NC License Version 1.2](LICENSE.md)
 * **Terms of Service**: [TERMS_OF_SERVICE.md](TERMS_OF_SERVICE.md)
 * **Privacy Policy**: [PRIVACY_POLICY.md](PRIVACY_POLICY.md)
 

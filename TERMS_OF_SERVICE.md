@@ -40,9 +40,9 @@ When interacting with Silas Blue, you agree NOT to:
 
 ## 4. Software License & Commercial Use Restrictions
 
-1. **RBND-NC License:** Silas Blue is licensed under the **RBND-NC License (Version 1.1)**. 
+1. **RBND-NC License:** Silas Blue is licensed under the **RBND-NC License (Version 1.2)**. 
 2. **Non-Commercial Use Only:** The software and its services are strictly for non-commercial use. You may not sell, rent, monetize, or package Silas Blue or derivative works as part of a paid commercial service without explicit permission from the copyright holder.
-3. **Attribution:** Any redistribution, fork, or public hosting of modified/unmodified Silas Blue code must include clear attribution to **RobotsNeverDie** and link back to the original source repository: [https://github.com/RBND/Silas-Blue](https://github.com/RBND/Silas-Blue).
+3. **Attribution:** Any redistribution, fork, or public hosting of modified/unmodified Silas Blue code must include clear attribution to **RobotsNeverDie** and link back to the original source repository: [https://github.com/RobotsNeverDie/Silas-Blue](https://github.com/RobotsNeverDie/Silas-Blue).
 
 ---
 
@@ -79,4 +79,4 @@ If you have questions, concerns, or requests regarding these Terms of Service, y
 
 - **Discord:** [RobotsNeverDie (User ID: 296353246920835074)](https://discord.com/users/296353246920835074)
 - **Reddit:** [u/Robots_Never_Die](https://www.reddit.com/user/Robots_Never_Die/)
-- **GitHub Issues:** [https://github.com/RBND/Silas-Blue/issues](https://github.com/RBND/Silas-Blue/issues)
+- **GitHub Issues:** [https://github.com/RobotsNeverDie/Silas-Blue/issues](https://github.com/RobotsNeverDie/Silas-Blue/issues)

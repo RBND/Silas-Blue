@@ -115,4 +115,4 @@ If you have questions, feedback, or data privacy requests, please reach out via:
 
 - **Discord:** [RobotsNeverDie (User ID: 296353246920835074)](https://discord.com/users/296353246920835074)
 - **Reddit:** [u/Robots_Never_Die](https://www.reddit.com/user/Robots_Never_Die/)
-- **GitHub Repository:** [https://github.com/RBND/Silas-Blue](https://github.com/RBND/Silas-Blue)
+- **GitHub Repository:** [https://github.com/RobotsNeverDie/Silas-Blue](https://github.com/RobotsNeverDie/Silas-Blue)
