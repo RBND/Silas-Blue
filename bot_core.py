@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 import logging
 import os
+import re
 import base64
 import asyncio
 import json

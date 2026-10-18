@@ -389,6 +389,38 @@ class TestWebSearch(unittest.TestCase):
         finally:
             loop.close()
 
+    def test_handle_ai_prompt_citations_and_refusal_guard(self):
+        from bot_core import handle_ai_prompt
+        message = MagicMock()
+        message.guild = MagicMock()
+        message.guild.id = 12345
+        message.guild.name = "Test Guild"
+        message.channel.id = 67890
+        message.channel.send = AsyncMock()
+        message.channel.typing = MagicMock()
+        message.channel.typing.return_value.__aenter__ = AsyncMock()
+        message.channel.typing.return_value.__aexit__ = AsyncMock()
+        message.author = MagicMock()
+        message.author.id = 42
+        message.author.display_name = "TestUser"
+        message.author.guild_permissions.administrator = True
+        message.reference = None
+
+        mock_provider = MagicMock()
+        mock_provider.list_models = AsyncMock(return_value=["model-1"])
+        mock_provider.send_prompt = AsyncMock(return_value="I cannot shut down the computer as an AI assistant.")
+
+        with patch("bot_core.get_provider", return_value=mock_provider):
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(handle_ai_prompt(message, {}, prompt_override="shutdown computer now"))
+                self.assertTrue(message.channel.send.called)
+                sent_text = message.channel.send.call_args[0][0]
+                self.assertIn("I cannot shut down", sent_text)
+                self.assertNotIn("**Sources:**", sent_text)
+            finally:
+                loop.close()
+
 if __name__ == "__main__":
     unittest.main()
 
