@@ -266,6 +266,7 @@ class MainWindow(QMainWindow):
         self.check_ai_btn.clicked.connect(self.update_ai_status)
 
         self.model_download_btn.clicked.connect(self.download_model)
+        self.model_select.currentTextChanged.connect(self.on_active_model_changed)
         self.clear_system_log_btn.clicked.connect(lambda: self.system_log_output.clear())
         self.clear_bot_log_btn.clicked.connect(lambda: self.bot_log_output.clear())
         self.debug_checkbox.stateChanged.connect(self.on_debug_checkbox_changed)
@@ -630,12 +631,28 @@ class MainWindow(QMainWindow):
 
     @Slot(list)
     def on_models_loaded(self, models):
+        self.model_select.blockSignals(True)
         self.model_select.clear()
         if not models:
             self.model_select.addItem("No models found")
         else:
             for m in models:
                 self.model_select.addItem(m)
+            saved_active = self.app_cfg.get("active_model", "")
+            if saved_active in models:
+                self.model_select.setCurrentText(saved_active)
+            else:
+                self.model_select.setCurrentIndex(0)
+                self.app_cfg["active_model"] = models[0]
+                save_app_config(self.app_cfg)
+        self.model_select.blockSignals(False)
+
+    def on_active_model_changed(self, model_name: str):
+        if not model_name or model_name in ("No models found", f"{self.provider.name} not reachable"):
+            return
+        self.app_cfg["active_model"] = model_name
+        save_app_config(self.app_cfg)
+        self.system_log_output.append(f"[MODEL] Active model set to: {model_name}")
 
     def download_model(self):
         model_name = self.model_download_input.text().strip()

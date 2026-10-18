@@ -251,20 +251,46 @@ class PaginatedView(discord.ui.View):
 async def handle_ai_prompt(message: discord.Message, config: dict):
     """
     Sends message to active AI provider asynchronously without blocking event loop.
+    Validates model against active provider and automatically falls back to currently loaded model.
     Displays typing indicator while processing.
     """
     prompt = message.content.strip()
     provider = get_provider()
 
-    # Determine default model
-    default_model = config.get("default_model")
-    if not default_model:
-        app_cfg = load_app_config()
-        if message.guild is None and app_cfg.get("dm_default_model"):
-            default_model = app_cfg.get("dm_default_model")
+    # Determine default model from active provider and configuration
+    app_cfg = load_app_config()
+    available = await provider.list_models()
+    active_loaded = available[0] if available else "default"
+
+    guild_id = message.guild.id if message.guild else None
+    guild_name = message.guild.name if message.guild else "Direct Message"
+
+    if message.guild is None:
+        # DM handling: check dm_default_model or active_model
+        dm_model = app_cfg.get("dm_default_model")
+        if dm_model and (not available or dm_model in available):
+            default_model = dm_model
+        elif app_cfg.get("active_model") and app_cfg.get("active_model") in available:
+            default_model = app_cfg.get("active_model")
         else:
-            available = await provider.list_models()
-            default_model = available[0] if available else "default"
+            default_model = active_loaded
+    else:
+        # Guild handling:
+        server_model = config.get("default_model")
+        # If server has a model configured that actually exists on current provider, use it
+        if server_model and (not available or server_model in available):
+            default_model = server_model
+        # Otherwise, if app_config has an active_model that exists on current provider, use that
+        elif app_cfg.get("active_model") and app_cfg.get("active_model") in available:
+            default_model = app_cfg.get("active_model")
+            config["default_model"] = default_model
+            save_config(guild_id, config)
+        # Otherwise, fall back to the actively loaded model on the provider
+        else:
+            default_model = active_loaded
+            if server_model != default_model and available:
+                config["default_model"] = default_model
+                save_config(guild_id, config)
 
     guild_id = message.guild.id if message.guild else None
     guild_name = message.guild.name if message.guild else "Direct Message"

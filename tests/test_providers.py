@@ -71,5 +71,11 @@ class TestProviders(unittest.TestCase):
         self.assertIsNotNone(p)
         self.assertIn(p.name, ("Ollama", "Llama.cpp"))
 
+    def test_llamacpp_model_resolution(self):
+        p = LlamaCppProvider("http://127.0.0.1:9931")
+        models = p.list_models_sync()
+        self.assertIsInstance(models, list)
+        self.assertTrue(len(models) > 0)
+
 if __name__ == "__main__":
     unittest.main()

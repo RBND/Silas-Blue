@@ -90,6 +90,22 @@ class LlamaCppProvider(AIProvider):
                             else:
                                 err_text = await l_resp.text()
                                 return f"Llama.cpp Error ({l_resp.status}): {err_text}"
+                    elif resp.status == 400:
+                        text = await resp.text()
+                        if "not found" in text.lower():
+                            avail = await self.list_models()
+                            if avail and avail[0] != model and avail[0] != "default":
+                                logger.warning(f"Model '{model}' not found on Llama.cpp. Retrying with active model '{avail[0]}'...")
+                                payload["model"] = avail[0]
+                                async with session.post(chat_url, json=payload, headers=self._get_headers()) as retry_resp:
+                                    if retry_resp.status == 200:
+                                        r_data = await retry_resp.json()
+                                        choices = r_data.get("choices", [])
+                                        if choices:
+                                            return choices[0].get("message", {}).get("content", "")
+                                        return ""
+                        logger.error(f"Llama.cpp error {resp.status}: {text}")
+                        return f"Llama.cpp Error ({resp.status}): {text}"
                     else:
                         text = await resp.text()
                         logger.error(f"Llama.cpp error {resp.status}: {text}")

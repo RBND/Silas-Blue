@@ -17,6 +17,7 @@ DEFAULT_APP_CONFIG = {
     "llamacpp_url": "http://localhost:8080",
     "llamacpp_binary_path": "",
     "llamacpp_model_path": "",
+    "active_model": "",
     "api_key": "",
     "allow_dms": True,
     "dm_default_model": "",
@@ -26,7 +27,7 @@ DEFAULT_APP_CONFIG = {
 }
 
 DEFAULT_GUILD_CONFIG = {
-    "default_model": "llama2",
+    "default_model": "",
     "reply_roles": ["everyone"],
     "change_model_roles": ["admin", "owner"],
     "change_permission_roles": ["admin", "owner"],
