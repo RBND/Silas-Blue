@@ -303,9 +303,10 @@ async def handle_ai_prompt(message: discord.Message, config: dict):
     })
 
     # Show Discord typing indicator during model inference
+    system_prompt = app_cfg.get("system_prompt") or None
     try:
         async with message.channel.typing():
-            response = await provider.send_prompt(prompt, default_model)
+            response = await provider.send_prompt(prompt, default_model, system_prompt=system_prompt)
     except Exception as e:
         logger.error(f"Error getting AI response: {e}")
         response = f"Error processing AI request: {e}"

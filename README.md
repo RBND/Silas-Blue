@@ -7,8 +7,8 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
 ## Key Features
 
 - **Easy To Use Gui**: Modern gui with custom themes. (RetroWave theme included)
-- **Local AI Processing**: Runs AI models locally through Ollama for privacy and control
-- **Multi-Model Support**: Compatible with various Ollama models (Gemma, Llama, etc.)
+- **Flexible AI Backends**: Runs local models via Ollama and Llama.cpp, or connects to Cloud / Remote LLMs (Xiaomi MiMo, OpenAI, OpenRouter, Groq, DeepSeek, xAI, or custom OpenAI-compatible endpoints)
+- **Multi-Model Support**: Compatible with various models across local backends and cloud APIs
 - **Discord Integration**: Seamless interaction within your server channels
 - **Server-Specific Configuration**: Customize settings per Discord server
 - **Permission Management**: Control who can use which features

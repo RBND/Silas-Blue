@@ -16,7 +16,7 @@ from PySide6.QtGui import QFontMetrics
 
 from .theme_manager import ThemeManager
 from .server_config_page import ServerConfigPage
-from ai_providers import get_ai_provider, AIProvider
+from ai_providers import get_ai_provider, AIProvider, RemoteOpenAIProvider, REMOTE_PRESETS
 from bot_core import bot, reload_ai_provider, gui_event_queue
 from utils import load_app_config, save_app_config
 import config
@@ -61,6 +61,8 @@ class WorkerSignals(QObject):
     model_download_progress = Signal(int, str)
     model_download_finished = Signal()
     backend_detected = Signal(dict)
+    remote_test_finished = Signal(bool, str)
+    remote_models_fetched = Signal(list)
 
 class MainWindow(QMainWindow):
     """
@@ -98,6 +100,8 @@ class MainWindow(QMainWindow):
         self.signals.model_download_progress.connect(self.on_model_download_progress)
         self.signals.model_download_finished.connect(self.on_model_download_finished)
         self.signals.backend_detected.connect(self.on_backend_detected)
+        self.signals.remote_test_finished.connect(self.on_remote_test_finished)
+        self.signals.remote_models_fetched.connect(self.on_remote_models_fetched)
 
         # Build tabs
         self.setup_status_tab()
@@ -298,16 +302,22 @@ class MainWindow(QMainWindow):
         self.provider_btn_group = QButtonGroup(self)
         self.rb_ollama = QRadioButton("Ollama (Local or Remote Server)")
         self.rb_llamacpp = QRadioButton("Llama.cpp (llama-server / OpenAI-compatible)")
+        self.rb_remote = QRadioButton("Remote OpenAI-Compatible API (Xiaomi MiMo, OpenAI, OpenRouter, Groq, DeepSeek, xAI)")
         self.provider_btn_group.addButton(self.rb_ollama, 1)
         self.provider_btn_group.addButton(self.rb_llamacpp, 2)
+        self.provider_btn_group.addButton(self.rb_remote, 3)
 
-        if self.app_cfg.get("backend_type", "ollama") == "llamacpp":
+        backend_type = self.app_cfg.get("backend_type", "ollama").lower()
+        if backend_type in ("llamacpp", "llama.cpp", "llama_cpp"):
             self.rb_llamacpp.setChecked(True)
+        elif backend_type in ("remote", "remote_openai", "openai", "remote_api"):
+            self.rb_remote.setChecked(True)
         else:
             self.rb_ollama.setChecked(True)
 
         provider_layout.addWidget(self.rb_ollama)
         provider_layout.addWidget(self.rb_llamacpp)
+        provider_layout.addWidget(self.rb_remote)
         provider_group.setLayout(provider_layout)
         layout.addWidget(provider_group)
 
@@ -374,7 +384,78 @@ class MainWindow(QMainWindow):
         self.llamacpp_group.setLayout(llamacpp_layout)
         layout.addWidget(self.llamacpp_group)
 
-        # 4. Direct Message (DM) Policy
+        # 4. Remote OpenAI-Compatible API Settings
+        self.remote_group = QGroupBox("Remote OpenAI-Compatible API Configuration (Xiaomi MiMo, OpenAI, etc.)")
+        remote_layout = QVBoxLayout()
+
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Provider Preset:"))
+        self.remote_preset_combo = QComboBox()
+        for p_name in REMOTE_PRESETS.keys():
+            self.remote_preset_combo.addItem(p_name)
+        saved_preset = self.app_cfg.get("remote_preset", "Xiaomi MiMo")
+        if saved_preset in REMOTE_PRESETS:
+            self.remote_preset_combo.setCurrentText(saved_preset)
+        self.remote_preset_combo.currentTextChanged.connect(self.on_remote_preset_changed)
+        preset_row.addWidget(self.remote_preset_combo, 1)
+        remote_layout.addLayout(preset_row)
+
+        r_url_row = QHBoxLayout()
+        r_url_row.addWidget(QLabel("Endpoint URL:"))
+        self.remote_url_input = QLineEdit(self.app_cfg.get("remote_base_url", "https://api.xiaomimimo.com/v1"))
+        self.remote_url_input.setPlaceholderText("https://api.xiaomimimo.com/v1 or https://openrouter.ai/api/v1")
+        r_url_row.addWidget(self.remote_url_input, 1)
+        remote_layout.addLayout(r_url_row)
+
+        r_key_row = QHBoxLayout()
+        r_key_row.addWidget(QLabel("API Key / Bearer Token:"))
+        self.remote_key_input = QLineEdit(self.app_cfg.get("remote_api_key", ""))
+        self.remote_key_input.setEchoMode(QLineEdit.Password)
+        self.remote_key_input.setPlaceholderText("miMo-sk-... or sk-...")
+        self.toggle_remote_key_btn = QPushButton("👁 Show")
+        self.toggle_remote_key_btn.setFixedWidth(75)
+        self.toggle_remote_key_btn.clicked.connect(self.toggle_remote_key_visibility)
+        r_key_row.addWidget(self.remote_key_input, 1)
+        r_key_row.addWidget(self.toggle_remote_key_btn)
+        remote_layout.addLayout(r_key_row)
+
+        r_model_row = QHBoxLayout()
+        r_model_row.addWidget(QLabel("Default Model:"))
+        self.remote_model_input = QLineEdit(self.app_cfg.get("remote_model", "mimo-v2.6-pro"))
+        self.remote_model_input.setPlaceholderText("e.g. mimo-v2.6-pro, gpt-4o-mini")
+        self.fetch_remote_models_btn = QPushButton("📡 Fetch Models")
+        self.fetch_remote_models_btn.setToolTip("Query GET /v1/models from endpoint")
+        self.fetch_remote_models_btn.clicked.connect(self.fetch_remote_models)
+        r_model_row.addWidget(self.remote_model_input, 1)
+        r_model_row.addWidget(self.fetch_remote_models_btn)
+        remote_layout.addLayout(r_model_row)
+
+        r_test_row = QHBoxLayout()
+        self.test_remote_btn = QPushButton("⚡ Test Connection")
+        self.test_remote_btn.setStyleSheet("font-weight: bold; padding: 4px 10px;")
+        self.test_remote_btn.clicked.connect(self.test_remote_connection)
+        self.remote_test_status = QLabel("")
+        r_test_row.addWidget(self.test_remote_btn)
+        r_test_row.addWidget(self.remote_test_status, 1)
+        remote_layout.addLayout(r_test_row)
+
+        self.remote_group.setLayout(remote_layout)
+        layout.addWidget(self.remote_group)
+
+        # 5. System Prompt / Bot Persona
+        persona_group = QGroupBox("System Prompt / Bot Persona")
+        persona_layout = QVBoxLayout()
+        persona_layout.addWidget(QLabel("Instructions sent to the AI backend defining personality and behavior:"))
+        self.system_prompt_input = QTextEdit()
+        self.system_prompt_input.setPlaceholderText("You are Silas Blue, a helpful and knowledgeable AI Discord assistant...")
+        default_persona = self.app_cfg.get("system_prompt", "You are Silas Blue, a helpful and knowledgeable AI Discord assistant.")
+        self.system_prompt_input.setPlainText(default_persona)
+        self.system_prompt_input.setMaximumHeight(70)
+        persona_layout.addWidget(self.system_prompt_input)
+        persona_group.setLayout(persona_layout)
+        layout.addWidget(persona_group)
+
+        # 6. Direct Message (DM) Policy
         dm_group = QGroupBox("Direct Message (DM) Policy")
         dm_layout = QVBoxLayout()
         self.allow_dms_checkbox = QCheckBox("Allow bot to respond to Direct Messages (DMs)")
@@ -418,14 +499,119 @@ class MainWindow(QMainWindow):
         if file_path:
             self.llamacpp_model_input.setText(file_path)
 
+    def on_remote_preset_changed(self, preset_name: str):
+        if preset_name in REMOTE_PRESETS:
+            preset_data = REMOTE_PRESETS[preset_name]
+            if preset_name != "Custom":
+                self.remote_url_input.setText(preset_data.get("base_url", ""))
+                default_m = preset_data.get("default_model", "")
+                if default_m:
+                    self.remote_model_input.setText(default_m)
+
+    def toggle_remote_key_visibility(self):
+        if self.remote_key_input.echoMode() == QLineEdit.Password:
+            self.remote_key_input.setEchoMode(QLineEdit.Normal)
+            self.toggle_remote_key_btn.setText("🔒 Hide")
+        else:
+            self.remote_key_input.setEchoMode(QLineEdit.Password)
+            self.toggle_remote_key_btn.setText("👁 Show")
+
+    def test_remote_connection(self):
+        self.test_remote_btn.setEnabled(False)
+        self.remote_test_status.setText("Testing connection...")
+        self.remote_test_status.setStyleSheet("color: #ffaa00; font-weight: bold;")
+
+        base_url = self.remote_url_input.text().strip()
+        api_key = self.remote_key_input.text().strip()
+        preset = self.remote_preset_combo.currentText()
+
+        def run_test():
+            test_provider = RemoteOpenAIProvider(
+                base_url=base_url,
+                api_key=api_key,
+                preset=preset
+            )
+            return test_provider.test_connection_sync()
+
+        future = self.executor.submit(run_test)
+
+        def poll():
+            if future.done():
+                self.test_remote_btn.setEnabled(True)
+                try:
+                    success, msg = future.result()
+                except Exception as e:
+                    success, msg = False, str(e)
+                self.signals.remote_test_finished.emit(success, msg)
+            else:
+                QTimer.singleShot(100, poll)
+        QTimer.singleShot(100, poll)
+
+    @Slot(bool, str)
+    def on_remote_test_finished(self, success: bool, msg: str):
+        color = "#00ff88" if success else "#ff4466"
+        self.remote_test_status.setText(msg)
+        self.remote_test_status.setStyleSheet(f"color: {color}; font-weight: bold;")
+
+    def fetch_remote_models(self):
+        self.fetch_remote_models_btn.setEnabled(False)
+        base_url = self.remote_url_input.text().strip()
+        api_key = self.remote_key_input.text().strip()
+        preset = self.remote_preset_combo.currentText()
+
+        def run_fetch():
+            test_provider = RemoteOpenAIProvider(
+                base_url=base_url,
+                api_key=api_key,
+                preset=preset
+            )
+            return test_provider.list_models_sync()
+
+        future = self.executor.submit(run_fetch)
+
+        def poll():
+            if future.done():
+                self.fetch_remote_models_btn.setEnabled(True)
+                try:
+                    models = future.result()
+                except Exception:
+                    models = []
+                self.signals.remote_models_fetched.emit(models)
+            else:
+                QTimer.singleShot(100, poll)
+        QTimer.singleShot(100, poll)
+
+    @Slot(list)
+    def on_remote_models_fetched(self, models: list):
+        if models:
+            self.remote_model_input.setText(models[0])
+            self.system_log_output.append(f"[REMOTE] Retrieved {len(models)} models from API.")
+            self.show_feedback(self.fetch_remote_models_btn, f"Found {len(models)} models!")
+        else:
+            self.show_feedback(self.fetch_remote_models_btn, "No models retrieved")
+
     def save_backend_settings(self):
-        backend_type = "llamacpp" if self.rb_llamacpp.isChecked() else "ollama"
+        if self.rb_llamacpp.isChecked():
+            backend_type = "llamacpp"
+        elif self.rb_remote.isChecked():
+            backend_type = "remote_openai"
+        else:
+            backend_type = "ollama"
+
         self.app_cfg["backend_type"] = backend_type
         self.app_cfg["ollama_url"] = self.ollama_url_input.text().strip()
         self.app_cfg["api_key"] = self.api_key_input.text().strip()
         self.app_cfg["llamacpp_url"] = self.llamacpp_url_input.text().strip()
         self.app_cfg["llamacpp_binary_path"] = self.llamacpp_binary_input.text().strip()
         self.app_cfg["llamacpp_model_path"] = self.llamacpp_model_input.text().strip()
+
+        # Remote LLM settings
+        self.app_cfg["remote_preset"] = self.remote_preset_combo.currentText()
+        self.app_cfg["remote_base_url"] = self.remote_url_input.text().strip()
+        self.app_cfg["remote_api_key"] = self.remote_key_input.text().strip()
+        self.app_cfg["remote_model"] = self.remote_model_input.text().strip()
+        self.app_cfg["system_prompt"] = self.system_prompt_input.toPlainText().strip()
+
         self.app_cfg["allow_dms"] = self.allow_dms_checkbox.isChecked()
         self.app_cfg["dm_default_model"] = self.dm_model_input.text().strip()
         self.app_cfg["dm_disabled_message"] = self.dm_disabled_msg_input.text().strip()
@@ -444,6 +630,9 @@ class MainWindow(QMainWindow):
 
     def auto_detect_on_startup(self):
         """If configured AI backend is offline, runs auto-detection in background."""
+        if not self.provider.is_local():
+            return
+
         def check_and_detect():
             if not self.provider.status_sync():
                 from ai_providers.detector import detect_all_ai_providers
