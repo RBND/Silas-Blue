@@ -512,7 +512,41 @@ async def set_pagination(ctx, max_chars: int):
     config["pagination_max_chars"] = max_chars
     save_config(guild_id, config)
     server_configs[guild_id] = config
-    await ctx.send(f"Pagination character limit set to {max_chars}.")
+@bot.command(name="setnick", aliases=["setname"])
+async def set_nick(ctx, *, new_name: str):
+    """Changes the bot's nickname in this server (Admin only)."""
+    if not (ctx.author.guild_permissions.administrator or ctx.author == ctx.guild.owner):
+        await ctx.send("You need Administrator permissions to change the bot's nickname.")
+        return
+    new_name = new_name.strip()
+    if not new_name:
+        await ctx.send("Please provide a new nickname.")
+        return
+    try:
+        await ctx.guild.me.edit(nick=new_name)
+        await ctx.send(f"Bot nickname updated to **{new_name}** in this server.")
+    except discord.Forbidden:
+        await ctx.send("I don't have permission to change my nickname. Please grant the 'Change Nickname' or 'Manage Nicknames' permission.")
+    except Exception as e:
+        await ctx.send(f"Error changing nickname: {e}")
+
+@bot.command(name="setglobalname")
+async def set_global_name(ctx, *, new_name: str):
+    """Changes the bot's global Discord username (Bot owner only, rate-limited by Discord)."""
+    if ctx.author != ctx.guild.owner and not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need Administrator permissions to use this command.")
+        return
+    new_name = new_name.strip()
+    if len(new_name) < 2 or len(new_name) > 32:
+        await ctx.send("Discord usernames must be between 2 and 32 characters.")
+        return
+    try:
+        await bot.user.edit(username=new_name)
+        await ctx.send(f"Global bot username changed to **{new_name}**.")
+    except discord.HTTPException as e:
+        await ctx.send(f"Discord rejected the username change ({e}). Note that Discord rate-limits global username changes (usually max 2 per hour). You can also change it directly on the Discord Developer Portal: https://discord.com/developers/applications")
+    except Exception as e:
+        await ctx.send(f"Error changing global username: {e}")
 
 @bot.command(name="help")
 async def help_command(ctx):
@@ -531,6 +565,7 @@ async def help_command(ctx):
         f"{prefix}invite - Get invite link to add Silas Blue to a server\n"
         f"{prefix}setmodel <name> - Set default model for this server\n"
         f"{prefix}models - List available models on AI backend\n"
+        f"{prefix}setnick <name> - Change bot nickname in this server\n"
         f"{prefix}setpagination <500-1900> - Set pagination limit\n"
         f"{prefix}config - Show server config (Admin only)\n"
         f"{prefix}help - Show this message\n"
