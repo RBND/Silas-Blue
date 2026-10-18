@@ -122,6 +122,12 @@ Silas Blue is a versatile Discord bot powered by local AI models through Ollama.
    - Type `!help` or `@BotName help` to see available commands
 
 
+## Legal & Policies
+
+- [License](license.md) (RBND-NC License 1.1)
+- [Terms of Service](TERMS_OF_SERVICE.md)
+- [Privacy Policy](PRIVACY_POLICY.md)
+
 ## Need Help?
 
-Contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) (preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)
+Contact RobotsNeverDie via [Discord](https://discord.com/users/296353246920835074) (preferred) or [Reddit](https://www.reddit.com/user/Robots_Never_Die/)

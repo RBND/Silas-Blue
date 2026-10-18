@@ -5,14 +5,16 @@ import concurrent.futures
 import json
 import traceback
 import queue
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QComboBox, QLineEdit, QProgressBar, QCheckBox, QTabWidget,
-    QTextEdit, QSpinBox, QFileDialog, QGroupBox, QRadioButton, QButtonGroup
+    QPushButton, QComboBox, QLineEdit, QProgressBar, QCheckBox, QStackedWidget,
+    QTextEdit, QSpinBox, QFileDialog, QGroupBox, QRadioButton, QButtonGroup,
+    QFrame, QScrollArea, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QUrl
+from PySide6.QtGui import QFont, QDesktopServices
 
 from .theme_manager import ThemeManager
 from .server_config_page import ServerConfigPage
@@ -64,32 +66,31 @@ class WorkerSignals(QObject):
     remote_test_finished = Signal(bool, str)
     remote_models_fetched = Signal(list)
 
+
 class MainWindow(QMainWindow):
     """
-    Main GUI window for Silas Blue.
-    Provides controls for bot and AI backend status, remote/local configuration, and server management.
+    Modern Discord-grade Control Panel for Silas Blue.
+    Features a sidebar navigation rail, KPI dashboard, dynamic AI backend configuration,
+    and a dedicated dual-panel logging console.
     """
 
     def __init__(self, start_bot=None, stop_bot=None, restart_bot=None):
         super().__init__()
         self.setWindowTitle("Silas Blue Control Panel")
-        self.setMinimumSize(700, 650)
+        self.setMinimumSize(980, 700)
+        self.resize(1020, 740)
 
         self._start_bot_func = start_bot
         self._stop_bot_func = stop_bot
         self._restart_bot_func = restart_bot
 
-        self._bot_status = "Unknown"
+        self._bot_status = "Stopped"
         self._bot_status_error = None
-
-        self.theme_manager = ThemeManager()
-        self.theme_manager.apply_theme(self, "themes/retrowave.json")
 
         self.app_cfg = load_app_config()
         self.provider: AIProvider = get_ai_provider(self.app_cfg)
 
-        self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.theme_manager = ThemeManager()
 
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
@@ -103,11 +104,24 @@ class MainWindow(QMainWindow):
         self.signals.remote_test_finished.connect(self.on_remote_test_finished)
         self.signals.remote_models_fetched.connect(self.on_remote_models_fetched)
 
-        # Build tabs
-        self.setup_status_tab()
-        self.server_config_tab = ServerConfigPage(self)
-        self.tabs.addTab(self.server_config_tab, "Server Config")
-        self.setup_backend_settings_tab()
+        # Compatibility widgets (in case external modules query them)
+        self.bot_status_label = QLabel("Bot Status: Stopped")
+        self.ai_status_label = QLabel(f"{self.provider.name} Status: Checking...")
+        self.servers_list = QComboBox()
+        self.servers_list.setVisible(False)
+
+        # Build Main UI Shell
+        self.setup_ui_shell()
+
+        # Apply saved or default theme
+        saved_theme = self.app_cfg.get("theme", "retrowave").lower()
+        theme_path = f"themes/{saved_theme}.json"
+        if not os.path.exists(theme_path):
+            theme_path = "themes/retrowave.json"
+        self.theme_manager.apply_theme(self, theme_path)
+
+        # Setup Logging Handlers
+        self.setup_logging_handlers()
 
         # Timers
         self.server_list_timer = QTimer(self)
@@ -132,120 +146,791 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(500, self.refresh_models_async)
         QTimer.singleShot(1200, self.auto_detect_on_startup)
 
-    def setup_status_tab(self):
-        self.status_tab = QWidget()
-        self.tabs.addTab(self.status_tab, "Status & Controls")
-        layout = QVBoxLayout()
-        self.status_tab.setLayout(layout)
+    # -------------------------------------------------------------------------
+    # UI SHELL & SIDEBAR NAVIGATION
+    # -------------------------------------------------------------------------
+    def setup_ui_shell(self):
+        root_widget = QWidget()
+        root_layout = QHBoxLayout(root_widget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        self.setCentralWidget(root_widget)
 
-        # Status row
-        status_row = QHBoxLayout()
+        # 1. Left Sidebar
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(10, 14, 10, 14)
+        sidebar_layout.setSpacing(6)
 
-        # Bot Controls
-        bot_col = QVBoxLayout()
-        self.bot_status_label = QLabel("Bot Status: <b>Stopped</b>")
-        bot_col.addWidget(self.bot_status_label)
-        bot_btn_layout = QHBoxLayout()
-        self.start_bot_btn = QPushButton("Start Bot")
-        self.stop_bot_btn = QPushButton("Stop Bot")
-        self.restart_bot_btn = QPushButton("Restart Bot")
-        bot_btn_layout.addWidget(self.start_bot_btn)
-        bot_btn_layout.addWidget(self.stop_bot_btn)
-        bot_btn_layout.addWidget(self.restart_bot_btn)
-        bot_col.addLayout(bot_btn_layout)
-        status_row.addLayout(bot_col, 3)
+        # App branding header
+        header_frame = QFrame()
+        header_frame.setObjectName("sidebarHeader")
+        h_layout = QVBoxLayout(header_frame)
+        h_layout.setContentsMargins(4, 0, 4, 8)
+        h_layout.setSpacing(2)
 
-        # AI Backend Controls
-        ai_col = QVBoxLayout()
-        self.ai_status_label = QLabel(f"{self.provider.name} Status: <b>Checking...</b>")
-        ai_col.addWidget(self.ai_status_label)
-        ai_btn_layout = QHBoxLayout()
+        app_title = QLabel("SILAS BLUE")
+        app_title.setObjectName("appTitle")
+        app_sub = QLabel("AI Discord Assistant")
+        app_sub.setObjectName("appSubtitle")
+        h_layout.addWidget(app_title)
+        h_layout.addWidget(app_sub)
+
+        # Sidebar status pill indicator
+        self.sidebar_bot_pill = QLabel("● Stopped")
+        self.sidebar_bot_pill.setObjectName("statusPillOffline")
+        self.sidebar_bot_pill.setAlignment(Qt.AlignCenter)
+        h_layout.addWidget(self.sidebar_bot_pill)
+
+        sidebar_layout.addWidget(header_frame)
+        sidebar_layout.addSpacing(10)
+
+        # Navigation buttons
+        self.nav_buttons = []
+
+        self.btn_nav_dash = QPushButton("  📊  Dashboard")
+        self.btn_nav_ai = QPushButton("  🧠  AI & Models")
+        self.btn_nav_servers = QPushButton("  🛡️  Server Config")
+        self.btn_nav_logs = QPushButton("  📜  Logs & Console")
+        self.btn_nav_settings = QPushButton("  ⚙️  Settings")
+
+        for idx, btn in enumerate([self.btn_nav_dash, self.btn_nav_ai, self.btn_nav_servers, self.btn_nav_logs, self.btn_nav_settings]):
+            btn.setObjectName("navButton")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, i=idx: self.switch_page(i))
+            sidebar_layout.addWidget(btn)
+            self.nav_buttons.append(btn)
+
+        sidebar_layout.addStretch(1)
+
+        # Sidebar footer
+        footer_card = QFrame()
+        footer_card.setObjectName("card")
+        f_layout = QVBoxLayout(footer_card)
+        f_layout.setContentsMargins(8, 8, 8, 8)
+        f_layout.setSpacing(4)
+
+        self.sidebar_model_label = QLabel(f"Model: {self.app_cfg.get('active_model', 'None')[:16]}")
+        self.sidebar_model_label.setStyleSheet("font-size: 11px; opacity: 0.8;")
+        f_layout.addWidget(self.sidebar_model_label)
+
+        invite_shortcut_btn = QPushButton("➕ Invite Bot")
+        invite_shortcut_btn.setCursor(Qt.PointingHandCursor)
+        invite_shortcut_btn.clicked.connect(self.open_invite_dialog)
+        f_layout.addWidget(invite_shortcut_btn)
+
+        sidebar_layout.addWidget(footer_card)
+        root_layout.addWidget(self.sidebar)
+
+        # 2. Central Content Area (QStackedWidget)
+        self.content_stack = QStackedWidget()
+        root_layout.addWidget(self.content_stack, 1)
+
+        # Build each page
+        self.setup_dashboard_page()
+        self.setup_ai_models_page()
+
+        self.server_config_tab = ServerConfigPage(self)
+        self.content_stack.addWidget(self.server_config_tab)  # Page 2
+
+        self.setup_logs_page()       # Page 3
+        self.setup_settings_page()   # Page 4
+
+        # Select initial page (Dashboard)
+        self.switch_page(0)
+
+    def switch_page(self, page_index: int):
+        self.content_stack.setCurrentIndex(page_index)
+        for idx, btn in enumerate(self.nav_buttons):
+            is_active = (idx == page_index)
+            btn.setChecked(is_active)
+            if is_active:
+                btn.setStyleSheet("border-left: 3px solid #ff5ecb; font-weight: bold; background-color: rgba(255, 94, 203, 0.15);")
+            else:
+                btn.setStyleSheet("")
+
+    # -------------------------------------------------------------------------
+    # PAGE 0: DASHBOARD
+    # -------------------------------------------------------------------------
+    def setup_dashboard_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+
+        # Header Title
+        title_row = QHBoxLayout()
+        page_title = QLabel("Dashboard")
+        page_title.setStyleSheet("font-size: 20px; font-weight: 700;")
+        title_row.addWidget(page_title)
+        title_row.addStretch(1)
+
+        refresh_all_btn = QPushButton("🔄 Refresh Status")
+        refresh_all_btn.clicked.connect(lambda: [self.update_ai_status(), self.update_bot_status(), self.refresh_models_async()])
+        title_row.addWidget(refresh_all_btn)
+        layout.addLayout(title_row)
+
+        # --- Section 1: KPI Cards Grid (4 Cards) ---
+        kpi_row = QHBoxLayout()
+        kpi_row.setSpacing(12)
+
+        # KPI 1: Bot Status
+        self.kpi_bot_card = QFrame()
+        self.kpi_bot_card.setObjectName("kpiCard")
+        b_lay = QVBoxLayout(self.kpi_bot_card)
+        b_lay.setContentsMargins(12, 10, 12, 10)
+        b_title = QLabel("BOT DAEMON")
+        b_title.setObjectName("kpiTitle")
+        self.kpi_bot_pill = QLabel("STOPPED")
+        self.kpi_bot_pill.setObjectName("statusPillOffline")
+        self.kpi_bot_pill.setAlignment(Qt.AlignCenter)
+        self.kpi_bot_subtext = QLabel("Discord Gateway Offline")
+        self.kpi_bot_subtext.setObjectName("kpiSubtext")
+        b_lay.addWidget(b_title)
+        b_lay.addWidget(self.kpi_bot_pill)
+        b_lay.addWidget(self.kpi_bot_subtext)
+        kpi_row.addWidget(self.kpi_bot_card)
+
+        # KPI 2: AI Backend
+        self.kpi_ai_card = QFrame()
+        self.kpi_ai_card.setObjectName("kpiCard")
+        ai_lay = QVBoxLayout(self.kpi_ai_card)
+        ai_lay.setContentsMargins(12, 10, 12, 10)
+        ai_title = QLabel("AI BACKEND")
+        ai_title.setObjectName("kpiTitle")
+        self.kpi_ai_val = QLabel(self.provider.name)
+        self.kpi_ai_val.setObjectName("kpiValue")
+        self.kpi_ai_pill = QLabel("CHECKING...")
+        self.kpi_ai_pill.setObjectName("statusPillWarning")
+        self.kpi_ai_pill.setAlignment(Qt.AlignCenter)
+        self.kpi_ai_subtext = QLabel(self.provider.base_url)
+        self.kpi_ai_subtext.setObjectName("kpiSubtext")
+        ai_lay.addWidget(ai_title)
+        ai_lay.addWidget(self.kpi_ai_pill)
+        ai_lay.addWidget(self.kpi_ai_subtext)
+        kpi_row.addWidget(self.kpi_ai_card)
+
+        # KPI 3: Active Model
+        self.kpi_model_card = QFrame()
+        self.kpi_model_card.setObjectName("kpiCard")
+        m_lay = QVBoxLayout(self.kpi_model_card)
+        m_lay.setContentsMargins(12, 10, 12, 10)
+        m_title = QLabel("ACTIVE MODEL")
+        m_title.setObjectName("kpiTitle")
+        self.kpi_model_val = QLabel(self.app_cfg.get("active_model", "None"))
+        self.kpi_model_val.setObjectName("kpiValue")
+        m_sub = QLabel("Inference Engine")
+        m_sub.setObjectName("kpiSubtext")
+        m_lay.addWidget(m_title)
+        m_lay.addWidget(self.kpi_model_val)
+        m_lay.addWidget(m_sub)
+        kpi_row.addWidget(self.kpi_model_card)
+
+        # KPI 4: Connected Servers
+        self.kpi_servers_card = QFrame()
+        self.kpi_servers_card.setObjectName("kpiCard")
+        s_lay = QVBoxLayout(self.kpi_servers_card)
+        s_lay.setContentsMargins(12, 10, 12, 10)
+        s_title = QLabel("SERVERS")
+        s_title.setObjectName("kpiTitle")
+        self.kpi_servers_val = QLabel("0 Guilds")
+        self.kpi_servers_val.setObjectName("kpiValue")
+        s_sub = QLabel("Connected Discord Servers")
+        s_sub.setObjectName("kpiSubtext")
+        s_lay.addWidget(s_title)
+        s_lay.addWidget(self.kpi_servers_val)
+        s_lay.addWidget(s_sub)
+        kpi_row.addWidget(self.kpi_servers_card)
+
+        layout.addLayout(kpi_row)
+
+        # --- Section 2: Quick Control Cards (Two Columns) ---
+        controls_row = QHBoxLayout()
+        controls_row.setSpacing(14)
+
+        # Column 1: Bot & AI Controls Card
+        daemon_card = QFrame()
+        daemon_card.setObjectName("card")
+        d_layout = QVBoxLayout(daemon_card)
+        d_layout.setContentsMargins(14, 12, 14, 12)
+        d_layout.setSpacing(10)
+
+        d_title = QLabel("Bot & Service Controls")
+        d_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        d_layout.addWidget(d_title)
+
+        # Bot actions row
+        bot_btn_row = QHBoxLayout()
+        self.start_bot_btn = QPushButton("▶  Start Bot")
+        self.start_bot_btn.setObjectName("successBtn")
+        self.stop_bot_btn = QPushButton("⏹  Stop Bot")
+        self.stop_bot_btn.setObjectName("dangerBtn")
+        self.restart_bot_btn = QPushButton("🔄  Restart Bot")
+
+        bot_btn_row.addWidget(self.start_bot_btn)
+        bot_btn_row.addWidget(self.stop_bot_btn)
+        bot_btn_row.addWidget(self.restart_bot_btn)
+        d_layout.addLayout(bot_btn_row)
+
+        # AI Backend actions row
+        ai_btn_row = QHBoxLayout()
         self.start_ai_btn = QPushButton(f"Start {self.provider.name}")
         self.stop_ai_btn = QPushButton(f"Stop {self.provider.name}")
         self.check_ai_btn = QPushButton("Check Status")
-        ai_btn_layout.addWidget(self.start_ai_btn)
-        ai_btn_layout.addWidget(self.stop_ai_btn)
-        ai_btn_layout.addWidget(self.check_ai_btn)
-        ai_col.addLayout(ai_btn_layout)
-        status_row.addLayout(ai_col, 3)
+        ai_btn_row.addWidget(self.start_ai_btn)
+        ai_btn_row.addWidget(self.stop_ai_btn)
+        ai_btn_row.addWidget(self.check_ai_btn)
+        d_layout.addLayout(ai_btn_row)
 
-        # Auto-restart controls
-        restart_col = QVBoxLayout()
-        self.auto_restart_checkbox = QCheckBox("Auto-Restart Bot")
+        controls_row.addWidget(daemon_card, 1)
+
+        # Column 2: Quick Model Switcher Card
+        model_card = QFrame()
+        model_card.setObjectName("card")
+        m_card_layout = QVBoxLayout(model_card)
+        m_card_layout.setContentsMargins(14, 12, 14, 12)
+        m_card_layout.setSpacing(8)
+
+        m_card_title = QLabel("Active Model & Quick Download")
+        m_card_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        m_card_layout.addWidget(m_card_title)
+
+        # Model select row
+        m_select_row = QHBoxLayout()
+        m_select_row.addWidget(QLabel("Model:"))
+        self.model_select = QComboBox()
+        self.model_select.setMinimumWidth(180)
+        m_select_row.addWidget(self.model_select, 1)
+        self.refresh_models_btn = QPushButton("🔄")
+        self.refresh_models_btn.setToolTip("Refresh models list")
+        self.refresh_models_btn.clicked.connect(self.refresh_models_async)
+        m_select_row.addWidget(self.refresh_models_btn)
+        m_card_layout.addLayout(m_select_row)
+
+        # Pull model row
+        m_pull_row = QHBoxLayout()
+        self.model_download_input = QLineEdit()
+        self.model_download_input.setPlaceholderText("Download model (e.g. llama3:8b)")
+        self.model_download_btn = QPushButton("Pull Model")
+        m_pull_row.addWidget(self.model_download_input, 1)
+        m_pull_row.addWidget(self.model_download_btn)
+        m_card_layout.addLayout(m_pull_row)
+
+        self.model_download_progress = QProgressBar()
+        self.model_download_progress.setVisible(False)
+        m_card_layout.addWidget(self.model_download_progress)
+
+        controls_row.addWidget(model_card, 1)
+        layout.addLayout(controls_row)
+
+        # --- Section 3: Recent Activity Stream Card ---
+        activity_card = QFrame()
+        activity_card.setObjectName("card")
+        act_layout = QVBoxLayout(activity_card)
+        act_layout.setContentsMargins(14, 12, 14, 12)
+        act_layout.setSpacing(8)
+
+        act_header = QHBoxLayout()
+        act_title = QLabel("Live Bot Activity")
+        act_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        act_header.addWidget(act_title)
+        act_header.addStretch(1)
+
+        view_full_logs_btn = QPushButton("Open Full Console ↗")
+        view_full_logs_btn.setCursor(Qt.PointingHandCursor)
+        view_full_logs_btn.clicked.connect(lambda: self.switch_page(3))
+        act_header.addWidget(view_full_logs_btn)
+        act_layout.addLayout(act_header)
+
+        self.recent_activity_output = QTextEdit()
+        self.recent_activity_output.setReadOnly(True)
+        self.recent_activity_output.setFont(QFont("Consolas", 10))
+        self.recent_activity_output.setPlaceholderText("Bot events, user prompts, and AI responses will stream here in real-time...")
+        act_layout.addWidget(self.recent_activity_output, 1)
+
+        layout.addWidget(activity_card, 1)
+
+        # Connect actions
+        self.start_bot_btn.clicked.connect(self.start_bot)
+        self.stop_bot_btn.clicked.connect(self.stop_bot)
+        self.restart_bot_btn.clicked.connect(self.restart_bot)
+
+        self.start_ai_btn.clicked.connect(self.start_ai_service)
+        self.stop_ai_btn.clicked.connect(self.stop_ai_service)
+        self.check_ai_btn.clicked.connect(self.update_ai_status)
+
+        self.model_download_btn.clicked.connect(self.download_model)
+        self.model_select.currentTextChanged.connect(self.on_active_model_changed)
+
+        self.content_stack.addWidget(page)  # Page 0
+
+    # -------------------------------------------------------------------------
+    # PAGE 1: AI & MODELS CONFIGURATION
+    # -------------------------------------------------------------------------
+    def setup_ai_models_page(self):
+        page = QWidget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        # Header Title
+        title_row = QHBoxLayout()
+        page_title = QLabel("AI Backend & Model Configuration")
+        page_title.setStyleSheet("font-size: 20px; font-weight: 700;")
+        title_row.addWidget(page_title)
+        title_row.addStretch(1)
+
+        # Auto-Detect Local AI Button in header
+        self.autodetect_btn = QPushButton("🔍  Auto-Detect Local AI")
+        self.autodetect_btn.setStyleSheet("font-weight: 600; padding: 6px 12px;")
+        self.autodetect_btn.setToolTip("Scan local machine for active Llama.cpp or Ollama instances")
+        self.autodetect_btn.clicked.connect(self.run_auto_detect_all)
+        title_row.addWidget(self.autodetect_btn)
+        layout.addLayout(title_row)
+
+        self.autodetect_status = QLabel("")
+        self.autodetect_status.setStyleSheet("color: #00ff88; font-weight: 600;")
+        layout.addWidget(self.autodetect_status)
+
+        # --- 1. Backend Selector Card ---
+        provider_card = QFrame()
+        provider_card.setObjectName("card")
+        p_layout = QVBoxLayout(provider_card)
+        p_layout.setContentsMargins(14, 12, 14, 12)
+        p_layout.setSpacing(8)
+
+        p_title = QLabel("Select Active AI Provider")
+        p_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        p_layout.addWidget(p_title)
+
+        self.provider_btn_group = QButtonGroup(self)
+        self.rb_ollama = QRadioButton("🦙 Ollama (Local Daemon or Remote Server)")
+        self.rb_llamacpp = QRadioButton("⚡ Llama.cpp (llama-server / OpenAI-compatible)")
+        self.rb_remote = QRadioButton("☁️ Remote OpenAI-Compatible Cloud API (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, etc.)")
+
+        self.provider_btn_group.addButton(self.rb_ollama, 0)
+        self.provider_btn_group.addButton(self.rb_llamacpp, 1)
+        self.provider_btn_group.addButton(self.rb_remote, 2)
+
+        backend_type = self.app_cfg.get("backend_type", "ollama").lower()
+        if backend_type in ("llamacpp", "llama.cpp", "llama_cpp"):
+            self.rb_llamacpp.setChecked(True)
+        elif backend_type in ("remote", "remote_openai", "openai", "remote_api"):
+            self.rb_remote.setChecked(True)
+        else:
+            self.rb_ollama.setChecked(True)
+
+        p_layout.addWidget(self.rb_ollama)
+        p_layout.addWidget(self.rb_llamacpp)
+        p_layout.addWidget(self.rb_remote)
+        layout.addWidget(provider_card)
+
+        # --- 2. Dynamic Provider Settings Stack ---
+        self.provider_stack = QStackedWidget()
+
+        # View 0: Ollama Settings
+        self.ollama_group = QFrame()
+        self.ollama_group.setObjectName("card")
+        o_layout = QVBoxLayout(self.ollama_group)
+        o_layout.setContentsMargins(14, 12, 14, 12)
+        o_layout.setSpacing(10)
+
+        o_title = QLabel("Ollama Settings")
+        o_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        o_layout.addWidget(o_title)
+
+        o_url_row = QHBoxLayout()
+        o_url_row.addWidget(QLabel("Server URL:"))
+        self.ollama_url_input = QLineEdit(self.app_cfg.get("ollama_url", "http://localhost:11434"))
+        self.ollama_url_input.setPlaceholderText("http://localhost:11434 or http://192.168.1.100:11434")
+        o_url_row.addWidget(self.ollama_url_input, 1)
+        o_layout.addLayout(o_url_row)
+
+        o_key_row = QHBoxLayout()
+        o_key_row.addWidget(QLabel("API Key / Bearer Token (Optional):"))
+        self.api_key_input = QLineEdit(self.app_cfg.get("api_key", ""))
+        self.api_key_input.setEchoMode(QLineEdit.Password)
+        o_key_row.addWidget(self.api_key_input, 1)
+        o_layout.addLayout(o_key_row)
+
+        self.provider_stack.addWidget(self.ollama_group)
+
+        # View 1: Llama.cpp Settings
+        self.llamacpp_group = QFrame()
+        self.llamacpp_group.setObjectName("card")
+        l_layout = QVBoxLayout(self.llamacpp_group)
+        l_layout.setContentsMargins(14, 12, 14, 12)
+        l_layout.setSpacing(10)
+
+        l_title = QLabel("Llama.cpp (llama-server) Settings")
+        l_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        l_layout.addWidget(l_title)
+
+        l_url_row = QHBoxLayout()
+        l_url_row.addWidget(QLabel("Server URL:"))
+        self.llamacpp_url_input = QLineEdit(self.app_cfg.get("llamacpp_url", "http://localhost:8080"))
+        self.llamacpp_url_input.setPlaceholderText("http://localhost:8080 or http://127.0.0.1:9931")
+        self.detect_llama_btn = QPushButton("🔍 Auto-Detect")
+        self.detect_llama_btn.clicked.connect(self.run_auto_detect_llama)
+        l_url_row.addWidget(self.llamacpp_url_input, 1)
+        l_url_row.addWidget(self.detect_llama_btn)
+        l_layout.addLayout(l_url_row)
+
+        binary_row = QHBoxLayout()
+        binary_row.addWidget(QLabel("Local llama.exe Binary:"))
+        self.llamacpp_binary_input = QLineEdit(self.app_cfg.get("llamacpp_binary_path", ""))
+        self.locate_binary_btn = QPushButton("Auto-Find")
+        self.locate_binary_btn.clicked.connect(self.auto_find_llama_binary)
+        self.browse_binary_btn = QPushButton("Browse...")
+        self.browse_binary_btn.clicked.connect(self.browse_llama_binary)
+        binary_row.addWidget(self.llamacpp_binary_input, 1)
+        binary_row.addWidget(self.locate_binary_btn)
+        binary_row.addWidget(self.browse_binary_btn)
+        l_layout.addLayout(binary_row)
+
+        model_file_row = QHBoxLayout()
+        model_file_row.addWidget(QLabel("Local .gguf Model:"))
+        self.llamacpp_model_input = QLineEdit(self.app_cfg.get("llamacpp_model_path", ""))
+        self.locate_model_btn = QPushButton("Auto-Find")
+        self.locate_model_btn.clicked.connect(self.auto_find_llama_model)
+        self.browse_model_btn = QPushButton("Browse...")
+        self.browse_model_btn.clicked.connect(self.browse_llama_model)
+        model_file_row.addWidget(self.llamacpp_model_input, 1)
+        model_file_row.addWidget(self.locate_model_btn)
+        model_file_row.addWidget(self.browse_model_btn)
+        l_layout.addLayout(model_file_row)
+
+        self.provider_stack.addWidget(self.llamacpp_group)
+
+        # View 2: Remote OpenAI-Compatible API Settings
+        self.remote_group = QFrame()
+        self.remote_group.setObjectName("card")
+        r_layout = QVBoxLayout(self.remote_group)
+        r_layout.setContentsMargins(14, 12, 14, 12)
+        r_layout.setSpacing(10)
+
+        r_title = QLabel("Remote OpenAI-Compatible API Settings")
+        r_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        r_layout.addWidget(r_title)
+
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Provider Preset:"))
+        self.remote_preset_combo = QComboBox()
+        for p_name in REMOTE_PRESETS.keys():
+            self.remote_preset_combo.addItem(p_name)
+        saved_preset = self.app_cfg.get("remote_preset", "Xiaomi MiMo")
+        if saved_preset in REMOTE_PRESETS:
+            self.remote_preset_combo.setCurrentText(saved_preset)
+        self.remote_preset_combo.currentTextChanged.connect(self.on_remote_preset_changed)
+        preset_row.addWidget(self.remote_preset_combo, 1)
+        r_layout.addLayout(preset_row)
+
+        r_url_row = QHBoxLayout()
+        r_url_row.addWidget(QLabel("Endpoint URL:"))
+        self.remote_url_input = QLineEdit(self.app_cfg.get("remote_base_url", "https://api.xiaomimimo.com/v1"))
+        r_url_row.addWidget(self.remote_url_input, 1)
+        r_layout.addLayout(r_url_row)
+
+        r_key_row = QHBoxLayout()
+        r_key_row.addWidget(QLabel("API Key:"))
+        self.remote_key_input = QLineEdit(self.app_cfg.get("remote_api_key", ""))
+        self.remote_key_input.setEchoMode(QLineEdit.Password)
+        self.toggle_remote_key_btn = QPushButton("👁 Show")
+        self.toggle_remote_key_btn.setFixedWidth(75)
+        self.toggle_remote_key_btn.clicked.connect(self.toggle_remote_key_visibility)
+        r_key_row.addWidget(self.remote_key_input, 1)
+        r_key_row.addWidget(self.toggle_remote_key_btn)
+        r_layout.addLayout(r_key_row)
+
+        r_model_row = QHBoxLayout()
+        r_model_row.addWidget(QLabel("Default Model:"))
+        self.remote_model_input = QLineEdit(self.app_cfg.get("remote_model", "mimo-v2.6-pro"))
+        self.fetch_remote_models_btn = QPushButton("📡 Fetch Models")
+        self.fetch_remote_models_btn.clicked.connect(self.fetch_remote_models)
+        r_model_row.addWidget(self.remote_model_input, 1)
+        r_model_row.addWidget(self.fetch_remote_models_btn)
+        r_layout.addLayout(r_model_row)
+
+        r_test_row = QHBoxLayout()
+        self.test_remote_btn = QPushButton("⚡ Test Connection")
+        self.test_remote_btn.setObjectName("primaryBtn")
+        self.test_remote_btn.clicked.connect(self.test_remote_connection)
+        self.remote_test_status = QLabel("")
+        r_test_row.addWidget(self.test_remote_btn)
+        r_test_row.addWidget(self.remote_test_status, 1)
+        r_layout.addLayout(r_test_row)
+
+        self.provider_stack.addWidget(self.remote_group)
+        layout.addWidget(self.provider_stack)
+
+        # Wire radio buttons to dynamic stack switching
+        def update_stack_view(btn_id):
+            self.provider_stack.setCurrentIndex(btn_id)
+
+        self.provider_btn_group.idClicked.connect(update_stack_view)
+        # Set initial stack index
+        if self.rb_llamacpp.isChecked():
+            self.provider_stack.setCurrentIndex(1)
+        elif self.rb_remote.isChecked():
+            self.provider_stack.setCurrentIndex(2)
+        else:
+            self.provider_stack.setCurrentIndex(0)
+
+        # --- 3. Bot Persona Card ---
+        persona_card = QFrame()
+        persona_card.setObjectName("card")
+        per_layout = QVBoxLayout(persona_card)
+        per_layout.setContentsMargins(14, 12, 14, 12)
+        per_layout.setSpacing(6)
+
+        per_title = QLabel("System Prompt / Bot Persona")
+        per_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        per_layout.addWidget(per_title)
+        per_layout.addWidget(QLabel("Defines Silas Blue's personality and instructions sent to the AI backend:"))
+
+        self.system_prompt_input = QTextEdit()
+        default_persona = self.app_cfg.get("system_prompt", "You are Silas Blue, a helpful and knowledgeable AI Discord assistant.")
+        self.system_prompt_input.setPlainText(default_persona)
+        self.system_prompt_input.setMaximumHeight(80)
+        per_layout.addWidget(self.system_prompt_input)
+        layout.addWidget(persona_card)
+
+        # --- 4. Direct Message Policy Card ---
+        dm_card = QFrame()
+        dm_card.setObjectName("card")
+        dm_layout = QVBoxLayout(dm_card)
+        dm_layout.setContentsMargins(14, 12, 14, 12)
+        dm_layout.setSpacing(8)
+
+        dm_title = QLabel("Direct Message (DM) Policy")
+        dm_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        dm_layout.addWidget(dm_title)
+
+        self.allow_dms_checkbox = QCheckBox("Allow bot to respond to Direct Messages (DMs)")
+        self.allow_dms_checkbox.setChecked(bool(self.app_cfg.get("allow_dms", True)))
+        dm_layout.addWidget(self.allow_dms_checkbox)
+
+        dm_model_row = QHBoxLayout()
+        dm_model_row.addWidget(QLabel("DM Dedicated Model:"))
+        self.dm_model_input = QLineEdit(self.app_cfg.get("dm_default_model", ""))
+        self.dm_model_input.setPlaceholderText("Leave empty to use active model")
+        dm_model_row.addWidget(self.dm_model_input, 1)
+        dm_layout.addLayout(dm_model_row)
+
+        dm_msg_row = QHBoxLayout()
+        dm_msg_row.addWidget(QLabel("Disabled Notice:"))
+        self.dm_disabled_msg_input = QLineEdit(self.app_cfg.get("dm_disabled_message", "Direct messages with the bot are disabled."))
+        dm_msg_row.addWidget(self.dm_disabled_msg_input, 1)
+        dm_layout.addLayout(dm_msg_row)
+
+        layout.addWidget(dm_card)
+
+        # --- Save Settings Button ---
+        save_btn_row = QHBoxLayout()
+        self.save_settings_btn = QPushButton("Save AI & Bot Settings")
+        self.save_settings_btn.setObjectName("primaryBtn")
+        self.save_settings_btn.setMinimumHeight(38)
+        self.save_settings_btn.clicked.connect(self.save_backend_settings)
+
+        save_btn_row.addStretch(1)
+        save_btn_row.addWidget(self.save_settings_btn, 2)
+        save_btn_row.addStretch(1)
+        layout.addLayout(save_btn_row)
+
+        scroll.setWidget(container)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(scroll)
+
+        self.content_stack.addWidget(page)  # Page 1
+
+    # -------------------------------------------------------------------------
+    # PAGE 3: LOGS & CONSOLE
+    # -------------------------------------------------------------------------
+    def setup_logs_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        # Page Header
+        title_row = QHBoxLayout()
+        page_title = QLabel("Logs & Console")
+        page_title.setStyleSheet("font-size: 20px; font-weight: 700;")
+        title_row.addWidget(page_title)
+        title_row.addStretch(1)
+
+        self.clear_system_log_btn = QPushButton("Clear System Log")
+        self.clear_bot_log_btn = QPushButton("Clear Discord Log")
+        self.clear_system_log_btn.clicked.connect(lambda: self.system_log_output.clear())
+        self.clear_bot_log_btn.clicked.connect(lambda: self.bot_log_output.clear())
+
+        title_row.addWidget(self.clear_system_log_btn)
+        title_row.addWidget(self.clear_bot_log_btn)
+        layout.addLayout(title_row)
+
+        # Search filter and options toolbar card
+        tools_card = QFrame()
+        tools_card.setObjectName("card")
+        tools_layout = QHBoxLayout(tools_card)
+        tools_layout.setContentsMargins(12, 8, 12, 8)
+        tools_layout.setSpacing(12)
+
+        self.system_log_to_file_checkbox = QCheckBox("Write System Log to File")
+        self.bot_log_to_file_checkbox = QCheckBox("Write Bot Log to File")
+        self.debug_checkbox = QCheckBox("Debug Mode")
+        self.debug_checkbox.setChecked(bool(self.app_cfg.get("debug", False)))
+        self.debug_checkbox.stateChanged.connect(self.on_debug_checkbox_changed)
+
+        tools_layout.addWidget(self.system_log_to_file_checkbox)
+        tools_layout.addWidget(self.bot_log_to_file_checkbox)
+        tools_layout.addWidget(self.debug_checkbox)
+        tools_layout.addStretch(1)
+
+        layout.addWidget(tools_card)
+
+        # Dual Terminal Logs Layout
+        log_split_layout = QHBoxLayout()
+        log_split_layout.setSpacing(12)
+
+        # System Log
+        sys_box = QFrame()
+        sys_box.setObjectName("card")
+        sys_box_layout = QVBoxLayout(sys_box)
+        sys_box_layout.setContentsMargins(10, 10, 10, 10)
+        sys_lbl = QLabel("System & AI Service Logs")
+        sys_lbl.setStyleSheet("font-weight: 600; color: #00f0ff;")
+        sys_box_layout.addWidget(sys_lbl)
+
+        self.system_log_output = QTextEdit()
+        self.system_log_output.setReadOnly(True)
+        self.system_log_output.setFont(QFont("Consolas", 10))
+        sys_box_layout.addWidget(self.system_log_output)
+        log_split_layout.addWidget(sys_box, 1)
+
+        # Bot Log
+        bot_box = QFrame()
+        bot_box.setObjectName("card")
+        bot_box_layout = QVBoxLayout(bot_box)
+        bot_box_layout.setContentsMargins(10, 10, 10, 10)
+        bot_lbl = QLabel("Discord Activity & Prompts")
+        bot_lbl.setStyleSheet("font-weight: 600; color: #ff5ecb;")
+        bot_box_layout.addWidget(bot_lbl)
+
+        self.bot_log_output = QTextEdit()
+        self.bot_log_output.setReadOnly(True)
+        self.bot_log_output.setFont(QFont("Consolas", 10))
+        bot_box_layout.addWidget(self.bot_log_output)
+        log_split_layout.addWidget(bot_box, 1)
+
+        layout.addLayout(log_split_layout, 1)
+
+        self.content_stack.addWidget(page)  # Page 3
+
+    # -------------------------------------------------------------------------
+    # PAGE 4: APP SETTINGS
+    # -------------------------------------------------------------------------
+    def setup_settings_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+
+        # Header Title
+        title_row = QHBoxLayout()
+        page_title = QLabel("Settings & Diagnostics")
+        page_title.setStyleSheet("font-size: 20px; font-weight: 700;")
+        title_row.addWidget(page_title)
+        layout.addLayout(title_row)
+
+        # --- Appearance Card ---
+        theme_card = QFrame()
+        theme_card.setObjectName("card")
+        t_layout = QVBoxLayout(theme_card)
+        t_layout.setContentsMargins(14, 12, 14, 12)
+        t_layout.setSpacing(10)
+
+        t_title = QLabel("Theme & Appearance")
+        t_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        t_layout.addWidget(t_title)
+
+        theme_row = QHBoxLayout()
+        theme_row.addWidget(QLabel("Active Theme:"))
+        self.theme_select = QComboBox()
+        for t in self.theme_manager.available_themes():
+            self.theme_select.addItem(t.capitalize(), userData=t)
+        cur_t = self.app_cfg.get("theme", "retrowave").capitalize()
+        self.theme_select.setCurrentText(cur_t)
+        self.theme_select.currentTextChanged.connect(self.change_theme)
+        theme_row.addWidget(self.theme_select, 1)
+        t_layout.addLayout(theme_row)
+        layout.addWidget(theme_card)
+
+        # --- Auto-Restart & Daemon Management Card ---
+        restart_card = QFrame()
+        restart_card.setObjectName("card")
+        r_layout = QVBoxLayout(restart_card)
+        r_layout.setContentsMargins(14, 12, 14, 12)
+        r_layout.setSpacing(10)
+
+        r_title = QLabel("Bot Daemon Reliability & Auto-Restart")
+        r_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        r_layout.addWidget(r_title)
+
+        restart_row = QHBoxLayout()
+        self.auto_restart_checkbox = QCheckBox("Enable Periodic Auto-Restart")
         self.auto_restart_interval = QComboBox()
         interval_labels = ["30 Min", "1 Hour", "2 Hours", "4 Hours", "8 Hours", "12 Hours", "24 Hours"]
         self.auto_restart_interval.addItems(interval_labels)
-        restart_col.addWidget(self.auto_restart_checkbox)
-        restart_col.addWidget(self.auto_restart_interval)
-        status_row.addLayout(restart_col, 1)
+        restart_row.addWidget(self.auto_restart_checkbox)
+        restart_row.addWidget(QLabel("Interval:"))
+        restart_row.addWidget(self.auto_restart_interval)
+        restart_row.addStretch(1)
+        r_layout.addLayout(restart_row)
+        layout.addWidget(restart_card)
 
-        layout.addLayout(status_row)
+        # --- File Storage & Diagnostics Card ---
+        diag_card = QFrame()
+        diag_card.setObjectName("card")
+        diag_layout = QVBoxLayout(diag_card)
+        diag_layout.setContentsMargins(14, 12, 14, 12)
+        diag_layout.setSpacing(10)
 
-        # Model row
-        model_row = QHBoxLayout()
-        self.model_select = QComboBox()
-        self.model_select.setEditable(False)
-        self.model_download_input = QLineEdit()
-        self.model_download_input.setPlaceholderText("Enter model to download (e.g. llama3:8b)")
-        self.model_download_btn = QPushButton("Pull Model")
-        self.model_download_progress = QProgressBar()
-        self.model_download_progress.setVisible(False)
+        d_title = QLabel("Folders & Diagnostics")
+        d_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        diag_layout.addWidget(d_title)
 
-        model_row.addWidget(QLabel("Active Model:"))
-        model_row.addWidget(self.model_select, 2)
-        model_row.addWidget(self.model_download_input, 2)
-        model_row.addWidget(self.model_download_btn, 1)
-        layout.addLayout(model_row)
-        layout.addWidget(self.model_download_progress)
+        diag_btns_row = QHBoxLayout()
+        open_logs_btn = QPushButton("📂 Open Logs Folder")
+        open_logs_btn.clicked.connect(lambda: self.open_folder("logs"))
+        open_config_btn = QPushButton("📂 Open Config Folder")
+        open_config_btn.clicked.connect(lambda: self.open_folder("config"))
 
-        # Servers & Theme row
-        servers_theme_row = QHBoxLayout()
-        self.servers_label = QLabel("Connected Servers:")
-        self.servers_list = QComboBox()
-        self.invite_bot_btn = QPushButton("➕ Invite Bot")
-        self.invite_bot_btn.setToolTip("Invite Silas Blue to a Discord server")
-        self.invite_bot_btn.clicked.connect(self.open_invite_dialog)
-        servers_theme_row.addWidget(self.servers_label)
-        servers_theme_row.addWidget(self.servers_list, 2)
-        servers_theme_row.addWidget(self.invite_bot_btn, 1)
-        servers_theme_row.addWidget(QLabel("Theme:"))
-        self.theme_select = QComboBox()
-        for t in self.theme_manager.available_themes():
-            self.theme_select.addItem(t.capitalize())
-        self.theme_select.currentTextChanged.connect(self.change_theme)
-        servers_theme_row.addWidget(self.theme_select, 1)
-        layout.addLayout(servers_theme_row)
+        diag_btns_row.addWidget(open_logs_btn)
+        diag_btns_row.addWidget(open_config_btn)
+        diag_btns_row.addStretch(1)
+        diag_layout.addLayout(diag_btns_row)
+        layout.addWidget(diag_card)
 
-        # Logs
-        log_layout = QHBoxLayout()
-        self.system_log_output = QTextEdit()
-        self.system_log_output.setReadOnly(True)
-        self.bot_log_output = QTextEdit()
-        self.bot_log_output.setReadOnly(True)
-        log_layout.addWidget(self.system_log_output)
-        log_layout.addWidget(self.bot_log_output)
+        layout.addStretch(1)
+        self.content_stack.addWidget(page)  # Page 4
 
-        clear_log_layout = QHBoxLayout()
-        self.clear_system_log_btn = QPushButton("Clear System Log")
-        self.clear_bot_log_btn = QPushButton("Clear Bot Log")
-        clear_log_layout.addWidget(self.clear_system_log_btn)
-        clear_log_layout.addWidget(self.clear_bot_log_btn)
+    def open_folder(self, folder_name: str):
+        path = os.path.abspath(folder_name)
+        os.makedirs(path, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
-        layout.addWidget(QLabel("System Log (Left) & Bot / Discord Activity (Right):"))
-        layout.addLayout(log_layout)
-        layout.addLayout(clear_log_layout)
-
-        checkboxes_layout = QHBoxLayout()
-        self.system_log_to_file_checkbox = QCheckBox("Write System Log to File")
-        self.bot_log_to_file_checkbox = QCheckBox("Write Bot Log to File")
-        self.debug_checkbox = QCheckBox("Enable Debug Mode")
-        self.debug_checkbox.setChecked(bool(self.app_cfg.get("debug", False)))
-        checkboxes_layout.addWidget(self.system_log_to_file_checkbox)
-        checkboxes_layout.addWidget(self.bot_log_to_file_checkbox)
-        checkboxes_layout.addWidget(self.debug_checkbox)
-        layout.addLayout(checkboxes_layout)
-
-        # Connect logging
+    # -------------------------------------------------------------------------
+    # LOGGING INITIALIZATION
+    # -------------------------------------------------------------------------
+    def setup_logging_handlers(self):
         self.system_log_handler = QTextEditLogger(self.system_log_output, logger_name=None)
         self.bot_log_handler = QTextEditLogger(self.bot_log_output, logger_name="silasblue")
         self.system_file_handler = FileLogger(os.path.join("logs", "system.log"), lambda: self.system_log_to_file_checkbox.isChecked())
@@ -260,235 +945,12 @@ class MainWindow(QMainWindow):
             if h not in bot_logger.handlers:
                 bot_logger.addHandler(h)
 
-        # Connect buttons
-        self.start_bot_btn.clicked.connect(self.start_bot)
-        self.stop_bot_btn.clicked.connect(self.stop_bot)
-        self.restart_bot_btn.clicked.connect(self.restart_bot)
+    def append_system_log(self, text: str):
+        self.system_log_output.append(text)
 
-        self.start_ai_btn.clicked.connect(self.start_ai_service)
-        self.stop_ai_btn.clicked.connect(self.stop_ai_service)
-        self.check_ai_btn.clicked.connect(self.update_ai_status)
-
-        self.model_download_btn.clicked.connect(self.download_model)
-        self.model_select.currentTextChanged.connect(self.on_active_model_changed)
-        self.clear_system_log_btn.clicked.connect(lambda: self.system_log_output.clear())
-        self.clear_bot_log_btn.clicked.connect(lambda: self.bot_log_output.clear())
-        self.debug_checkbox.stateChanged.connect(self.on_debug_checkbox_changed)
-
-    def setup_backend_settings_tab(self):
-        """Settings tab for configuring Ollama/Llama.cpp, Remote URLs, and DM Policy."""
-        self.backend_tab = QWidget()
-        self.tabs.addTab(self.backend_tab, "AI & Bot Settings")
-        layout = QVBoxLayout()
-        self.backend_tab.setLayout(layout)
-
-        # 0. Auto-Detect Local AI
-        detect_box = QGroupBox("Local AI Auto-Detection")
-        detect_layout = QHBoxLayout()
-        self.autodetect_btn = QPushButton("🔍 Auto-Detect Local AI (Llama.cpp / Ollama)")
-        self.autodetect_btn.setStyleSheet("font-weight: bold; padding: 6px;")
-        self.autodetect_btn.setToolTip("Scan local machine for running Llama.cpp or Ollama instances, executables, and models")
-        self.autodetect_btn.clicked.connect(self.run_auto_detect_all)
-        self.autodetect_status = QLabel("")
-        self.autodetect_status.setStyleSheet("color: #00ff88; font-weight: bold;")
-        detect_layout.addWidget(self.autodetect_btn)
-        detect_layout.addWidget(self.autodetect_status, 1)
-        detect_box.setLayout(detect_layout)
-        layout.addWidget(detect_box)
-
-        # 1. AI Provider Selection
-        provider_group = QGroupBox("Active AI Backend")
-        provider_layout = QVBoxLayout()
-        self.provider_btn_group = QButtonGroup(self)
-        self.rb_ollama = QRadioButton("Ollama (Local or Remote Server)")
-        self.rb_llamacpp = QRadioButton("Llama.cpp (llama-server / OpenAI-compatible)")
-        self.rb_remote = QRadioButton("Remote OpenAI-Compatible API (Xiaomi MiMo, OpenAI, OpenRouter, Groq, DeepSeek, xAI)")
-        self.provider_btn_group.addButton(self.rb_ollama, 1)
-        self.provider_btn_group.addButton(self.rb_llamacpp, 2)
-        self.provider_btn_group.addButton(self.rb_remote, 3)
-
-        backend_type = self.app_cfg.get("backend_type", "ollama").lower()
-        if backend_type in ("llamacpp", "llama.cpp", "llama_cpp"):
-            self.rb_llamacpp.setChecked(True)
-        elif backend_type in ("remote", "remote_openai", "openai", "remote_api"):
-            self.rb_remote.setChecked(True)
-        else:
-            self.rb_ollama.setChecked(True)
-
-        provider_layout.addWidget(self.rb_ollama)
-        provider_layout.addWidget(self.rb_llamacpp)
-        provider_layout.addWidget(self.rb_remote)
-        provider_group.setLayout(provider_layout)
-        layout.addWidget(provider_group)
-
-        # 2. Ollama Settings
-        self.ollama_group = QGroupBox("Ollama Configuration (Supports Remote Servers - Issue #13)")
-        ollama_layout = QVBoxLayout()
-        ollama_url_row = QHBoxLayout()
-        ollama_url_row.addWidget(QLabel("Server URL:"))
-        self.ollama_url_input = QLineEdit(self.app_cfg.get("ollama_url", "http://localhost:11434"))
-        self.ollama_url_input.setPlaceholderText("http://localhost:11434 or http://192.168.1.100:11434")
-        ollama_url_row.addWidget(self.ollama_url_input)
-        ollama_layout.addLayout(ollama_url_row)
-
-        api_key_row = QHBoxLayout()
-        api_key_row.addWidget(QLabel("API Key / Bearer Token (Optional for Reverse Proxies):"))
-        self.api_key_input = QLineEdit(self.app_cfg.get("api_key", ""))
-        self.api_key_input.setEchoMode(QLineEdit.Password)
-        api_key_row.addWidget(self.api_key_input)
-        ollama_layout.addLayout(api_key_row)
-        self.ollama_group.setLayout(ollama_layout)
-        layout.addWidget(self.ollama_group)
-
-        # 3. Llama.cpp Settings
-        self.llamacpp_group = QGroupBox("Llama.cpp (llama-server) Configuration")
-        llamacpp_layout = QVBoxLayout()
-        llama_url_row = QHBoxLayout()
-        llama_url_row.addWidget(QLabel("Server URL:"))
-        self.llamacpp_url_input = QLineEdit(self.app_cfg.get("llamacpp_url", "http://localhost:8080"))
-        self.llamacpp_url_input.setPlaceholderText("http://localhost:8080 or http://127.0.0.1:9931")
-        llama_url_row.addWidget(self.llamacpp_url_input)
-        self.detect_llama_btn = QPushButton("🔍 Auto-Detect")
-        self.detect_llama_btn.setToolTip("Auto-detect running Llama.cpp instance and settings")
-        self.detect_llama_btn.clicked.connect(self.run_auto_detect_llama)
-        llama_url_row.addWidget(self.detect_llama_btn)
-        llamacpp_layout.addLayout(llama_url_row)
-
-        # Optional local launcher
-        binary_row = QHBoxLayout()
-        binary_row.addWidget(QLabel("Local llama.exe / llama-server.exe (Optional):"))
-        self.llamacpp_binary_input = QLineEdit(self.app_cfg.get("llamacpp_binary_path", ""))
-        self.locate_binary_btn = QPushButton("Auto-Find")
-        self.locate_binary_btn.setToolTip("Search system for llama.exe or llama-server.exe")
-        self.locate_binary_btn.clicked.connect(self.auto_find_llama_binary)
-        self.browse_binary_btn = QPushButton("Browse...")
-        self.browse_binary_btn.clicked.connect(self.browse_llama_binary)
-        binary_row.addWidget(self.llamacpp_binary_input)
-        binary_row.addWidget(self.locate_binary_btn)
-        binary_row.addWidget(self.browse_binary_btn)
-        llamacpp_layout.addLayout(binary_row)
-
-        model_file_row = QHBoxLayout()
-        model_file_row.addWidget(QLabel("Local .gguf Model File (Optional):"))
-        self.llamacpp_model_input = QLineEdit(self.app_cfg.get("llamacpp_model_path", ""))
-        self.locate_model_btn = QPushButton("Auto-Find")
-        self.locate_model_btn.setToolTip("Search system for local GGUF models")
-        self.locate_model_btn.clicked.connect(self.auto_find_llama_model)
-        self.browse_model_btn = QPushButton("Browse...")
-        self.browse_model_btn.clicked.connect(self.browse_llama_model)
-        model_file_row.addWidget(self.llamacpp_model_input)
-        model_file_row.addWidget(self.locate_model_btn)
-        model_file_row.addWidget(self.browse_model_btn)
-        llamacpp_layout.addLayout(model_file_row)
-
-        self.llamacpp_group.setLayout(llamacpp_layout)
-        layout.addWidget(self.llamacpp_group)
-
-        # 4. Remote OpenAI-Compatible API Settings
-        self.remote_group = QGroupBox("Remote OpenAI-Compatible API Configuration (Xiaomi MiMo, OpenAI, etc.)")
-        remote_layout = QVBoxLayout()
-
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("Provider Preset:"))
-        self.remote_preset_combo = QComboBox()
-        for p_name in REMOTE_PRESETS.keys():
-            self.remote_preset_combo.addItem(p_name)
-        saved_preset = self.app_cfg.get("remote_preset", "Xiaomi MiMo")
-        if saved_preset in REMOTE_PRESETS:
-            self.remote_preset_combo.setCurrentText(saved_preset)
-        self.remote_preset_combo.currentTextChanged.connect(self.on_remote_preset_changed)
-        preset_row.addWidget(self.remote_preset_combo, 1)
-        remote_layout.addLayout(preset_row)
-
-        r_url_row = QHBoxLayout()
-        r_url_row.addWidget(QLabel("Endpoint URL:"))
-        self.remote_url_input = QLineEdit(self.app_cfg.get("remote_base_url", "https://api.xiaomimimo.com/v1"))
-        self.remote_url_input.setPlaceholderText("https://api.xiaomimimo.com/v1 or https://openrouter.ai/api/v1")
-        r_url_row.addWidget(self.remote_url_input, 1)
-        remote_layout.addLayout(r_url_row)
-
-        r_key_row = QHBoxLayout()
-        r_key_row.addWidget(QLabel("API Key / Bearer Token:"))
-        self.remote_key_input = QLineEdit(self.app_cfg.get("remote_api_key", ""))
-        self.remote_key_input.setEchoMode(QLineEdit.Password)
-        self.remote_key_input.setPlaceholderText("miMo-sk-... or sk-...")
-        self.toggle_remote_key_btn = QPushButton("👁 Show")
-        self.toggle_remote_key_btn.setFixedWidth(75)
-        self.toggle_remote_key_btn.clicked.connect(self.toggle_remote_key_visibility)
-        r_key_row.addWidget(self.remote_key_input, 1)
-        r_key_row.addWidget(self.toggle_remote_key_btn)
-        remote_layout.addLayout(r_key_row)
-
-        r_model_row = QHBoxLayout()
-        r_model_row.addWidget(QLabel("Default Model:"))
-        self.remote_model_input = QLineEdit(self.app_cfg.get("remote_model", "mimo-v2.6-pro"))
-        self.remote_model_input.setPlaceholderText("e.g. mimo-v2.6-pro, gpt-4o-mini")
-        self.fetch_remote_models_btn = QPushButton("📡 Fetch Models")
-        self.fetch_remote_models_btn.setToolTip("Query GET /v1/models from endpoint")
-        self.fetch_remote_models_btn.clicked.connect(self.fetch_remote_models)
-        r_model_row.addWidget(self.remote_model_input, 1)
-        r_model_row.addWidget(self.fetch_remote_models_btn)
-        remote_layout.addLayout(r_model_row)
-
-        r_test_row = QHBoxLayout()
-        self.test_remote_btn = QPushButton("⚡ Test Connection")
-        self.test_remote_btn.setStyleSheet("font-weight: bold; padding: 4px 10px;")
-        self.test_remote_btn.clicked.connect(self.test_remote_connection)
-        self.remote_test_status = QLabel("")
-        r_test_row.addWidget(self.test_remote_btn)
-        r_test_row.addWidget(self.remote_test_status, 1)
-        remote_layout.addLayout(r_test_row)
-
-        self.remote_group.setLayout(remote_layout)
-        layout.addWidget(self.remote_group)
-
-        # 5. System Prompt / Bot Persona
-        persona_group = QGroupBox("System Prompt / Bot Persona")
-        persona_layout = QVBoxLayout()
-        persona_layout.addWidget(QLabel("Instructions sent to the AI backend defining personality and behavior:"))
-        self.system_prompt_input = QTextEdit()
-        self.system_prompt_input.setPlaceholderText("You are Silas Blue, a helpful and knowledgeable AI Discord assistant...")
-        default_persona = self.app_cfg.get("system_prompt", "You are Silas Blue, a helpful and knowledgeable AI Discord assistant.")
-        self.system_prompt_input.setPlainText(default_persona)
-        self.system_prompt_input.setMaximumHeight(70)
-        persona_layout.addWidget(self.system_prompt_input)
-        persona_group.setLayout(persona_layout)
-        layout.addWidget(persona_group)
-
-        # 6. Direct Message (DM) Policy
-        dm_group = QGroupBox("Direct Message (DM) Policy")
-        dm_layout = QVBoxLayout()
-        self.allow_dms_checkbox = QCheckBox("Allow bot to respond to Direct Messages (DMs)")
-        self.allow_dms_checkbox.setChecked(bool(self.app_cfg.get("allow_dms", True)))
-        dm_layout.addWidget(self.allow_dms_checkbox)
-
-        dm_model_row = QHBoxLayout()
-        dm_model_row.addWidget(QLabel("DM Default Model:"))
-        self.dm_model_input = QLineEdit(self.app_cfg.get("dm_default_model", ""))
-        self.dm_model_input.setPlaceholderText("Leave empty to use active model")
-        dm_model_row.addWidget(self.dm_model_input)
-        dm_layout.addLayout(dm_model_row)
-
-        dm_msg_row = QHBoxLayout()
-        dm_msg_row.addWidget(QLabel("Disabled Notice Message:"))
-        self.dm_disabled_msg_input = QLineEdit(self.app_cfg.get("dm_disabled_message", "Direct messages with the bot are disabled."))
-        dm_msg_row.addWidget(self.dm_disabled_msg_input)
-        dm_layout.addLayout(dm_msg_row)
-
-        dm_group.setLayout(dm_layout)
-        layout.addWidget(dm_group)
-
-        # Save Settings Button
-        save_btn_layout = QHBoxLayout()
-        self.save_settings_btn = QPushButton("Save AI & Bot Settings")
-        self.save_settings_btn.setStyleSheet("font-weight: bold; padding: 8px;")
-        self.save_settings_btn.clicked.connect(self.save_backend_settings)
-        save_btn_layout.addStretch(1)
-        save_btn_layout.addWidget(self.save_settings_btn, 2)
-        save_btn_layout.addStretch(1)
-        layout.addLayout(save_btn_layout)
-        layout.addStretch(1)
-
+    # -------------------------------------------------------------------------
+    # AI BACKEND & MODEL METHODS
+    # -------------------------------------------------------------------------
     def browse_llama_binary(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select llama executable", "", "Executables (*.exe);;All Files (*)")
         if file_path:
@@ -624,7 +1086,7 @@ class MainWindow(QMainWindow):
         self.stop_ai_btn.setText(f"Stop {self.provider.name}")
 
         self.system_log_output.append(f"[SETTINGS] Saved! Switched to {self.provider.name} at {self.provider.base_url}")
-        self.show_feedback(self.save_settings_btn, "Settings Saved!")
+        self.show_feedback(self.save_settings_btn, "✓ Settings Saved!")
         self.update_ai_status()
         self.refresh_models_async()
 
@@ -687,6 +1149,7 @@ class MainWindow(QMainWindow):
                 running, binary, models = future.result()
                 if running:
                     self.rb_llamacpp.setChecked(True)
+                    self.provider_stack.setCurrentIndex(1)
                     self.llamacpp_url_input.setText(running["url"])
                     if running.get("binary_path"):
                         self.llamacpp_binary_input.setText(running["binary_path"])
@@ -734,6 +1197,7 @@ class MainWindow(QMainWindow):
 
         if rec == "llamacpp" or llama_info.get("running"):
             self.rb_llamacpp.setChecked(True)
+            self.provider_stack.setCurrentIndex(1)
             self.llamacpp_url_input.setText(llama_info.get("url", "http://localhost:8080"))
             if llama_info.get("binary_path"):
                 self.llamacpp_binary_input.setText(llama_info["binary_path"])
@@ -744,6 +1208,7 @@ class MainWindow(QMainWindow):
             self.save_backend_settings()
         elif rec == "ollama" or ollama_info.get("running"):
             self.rb_ollama.setChecked(True)
+            self.provider_stack.setCurrentIndex(0)
             self.ollama_url_input.setText(ollama_info.get("url", "http://localhost:11434"))
             self.autodetect_status.setText(f"✓ Detected running Ollama ({ollama_info.get('url')})")
             self.system_log_output.append(f"[AI Backend] Auto-detected running Ollama at {ollama_info.get('url')}!")
@@ -772,10 +1237,23 @@ class MainWindow(QMainWindow):
     def on_ai_status_checked(self, running: bool, name: str):
         is_local = self.provider.is_local()
         locality = "Local" if is_local else "Remote"
+        endpoint = getattr(self.provider, 'base_url', '')
+
         if running:
-            self.ai_status_label.setText(f"{name} ({locality}): <b style='color:#00ff88;'>Online</b>")
+            self.ai_status_label.setText(f"{name} ({locality}): Online")
+            self.kpi_ai_pill.setText("ONLINE")
+            self.kpi_ai_pill.setObjectName("statusPillOnline")
         else:
-            self.ai_status_label.setText(f"{name} ({locality}): <b style='color:#ff4466;'>Offline / Unreachable</b>")
+            self.ai_status_label.setText(f"{name} ({locality}): Offline / Unreachable")
+            self.kpi_ai_pill.setText("OFFLINE")
+            self.kpi_ai_pill.setObjectName("statusPillOffline")
+
+        self.kpi_ai_val.setText(f"{name} ({locality})")
+        self.kpi_ai_subtext.setText(endpoint[:28])
+
+        # Force re-styling of the status pill
+        self.kpi_ai_pill.style().unpolish(self.kpi_ai_pill)
+        self.kpi_ai_pill.style().polish(self.kpi_ai_pill)
 
         # Disable local process controls if remote
         self.start_ai_btn.setEnabled(is_local)
@@ -824,15 +1302,21 @@ class MainWindow(QMainWindow):
         self.model_select.clear()
         if not models:
             self.model_select.addItem("No models found")
+            self.kpi_model_val.setText("None")
+            self.sidebar_model_label.setText("Model: None")
         else:
             for m in models:
                 self.model_select.addItem(m)
             saved_active = self.app_cfg.get("active_model", "")
             if saved_active in models:
                 self.model_select.setCurrentText(saved_active)
+                self.kpi_model_val.setText(saved_active)
+                self.sidebar_model_label.setText(f"Model: {saved_active[:14]}")
             else:
                 self.model_select.setCurrentIndex(0)
                 self.app_cfg["active_model"] = models[0]
+                self.kpi_model_val.setText(models[0])
+                self.sidebar_model_label.setText(f"Model: {models[0][:14]}")
                 save_app_config(self.app_cfg)
         self.model_select.blockSignals(False)
 
@@ -840,6 +1324,8 @@ class MainWindow(QMainWindow):
         if not model_name or model_name in ("No models found", f"{self.provider.name} not reachable"):
             return
         self.app_cfg["active_model"] = model_name
+        self.kpi_model_val.setText(model_name)
+        self.sidebar_model_label.setText(f"Model: {model_name[:14]}")
         save_app_config(self.app_cfg)
         self.system_log_output.append(f"[MODEL] Active model set to: {model_name}")
 
@@ -874,6 +1360,9 @@ class MainWindow(QMainWindow):
     def on_model_download_finished(self):
         self.model_download_progress.setVisible(False)
 
+    # -------------------------------------------------------------------------
+    # BOT DAEMON STATUS & LIFECYCLE
+    # -------------------------------------------------------------------------
     def update_bot_status(self):
         try:
             from bot_core import _bot_thread
@@ -886,10 +1375,25 @@ class MainWindow(QMainWindow):
             self._bot_status = "Error"
             self._bot_status_error = str(e)
 
-        status_text = f"Bot Status: <b>{self._bot_status}</b>"
-        if self._bot_status_error:
-            status_text += f" <span style='color:red;'>({self._bot_status_error})</span>"
-        self.bot_status_label.setText(status_text)
+        self.bot_status_label.setText(f"Bot Status: {self._bot_status}")
+
+        if self._bot_status == "Running":
+            self.kpi_bot_pill.setText("ONLINE")
+            self.kpi_bot_pill.setObjectName("statusPillOnline")
+            self.kpi_bot_subtext.setText("Discord Gateway Connected")
+            self.sidebar_bot_pill.setText("● Online")
+            self.sidebar_bot_pill.setObjectName("statusPillOnline")
+        else:
+            self.kpi_bot_pill.setText("STOPPED")
+            self.kpi_bot_pill.setObjectName("statusPillOffline")
+            self.kpi_bot_subtext.setText("Discord Gateway Offline")
+            self.sidebar_bot_pill.setText("● Stopped")
+            self.sidebar_bot_pill.setObjectName("statusPillOffline")
+
+        # Repolish status pill styling
+        for pill in [self.kpi_bot_pill, self.sidebar_bot_pill]:
+            pill.style().unpolish(pill)
+            pill.style().polish(pill)
 
     def start_bot(self):
         try:
@@ -897,6 +1401,7 @@ class MainWindow(QMainWindow):
                 self._start_bot_func()
                 self.system_log_output.append("[INFO] Start Bot requested.")
                 self.show_feedback(self.start_bot_btn, "Bot Started!")
+                QTimer.singleShot(1500, self.update_bot_status)
         except Exception as e:
             self.system_log_output.append(f"[ERROR] Failed to start bot: {e}")
 
@@ -915,6 +1420,7 @@ class MainWindow(QMainWindow):
                 self.system_log_output.append("[INFO] Restarting bot...")
                 self._restart_bot_func()
                 self.show_feedback(self.restart_bot_btn, "Bot Restarted!")
+                QTimer.singleShot(2000, self.update_bot_status)
         except Exception as e:
             self.system_log_output.append(f"[ERROR] Failed to restart bot: {e}")
 
@@ -926,6 +1432,12 @@ class MainWindow(QMainWindow):
                 self.servers_list.clear()
                 for name, gid in new_servers:
                     self.servers_list.addItem(f"{name} ({gid})", userData=gid)
+
+            # Update KPI card
+            server_count = len(new_servers)
+            suffix = "Guild" if server_count == 1 else "Guilds"
+            self.kpi_servers_val.setText(f"{server_count} {suffix}")
+
             if hasattr(self, "server_config_tab"):
                 self.server_config_tab.update_guilds()
         except Exception:
@@ -933,29 +1445,40 @@ class MainWindow(QMainWindow):
 
     def process_gui_events(self):
         """Processes logs and events directly from the thread-safe queue."""
+        now_str = datetime.now().strftime("%H:%M:%S")
         while not gui_event_queue.empty():
             try:
                 entry = gui_event_queue.get_nowait()
                 event = entry.get("event")
                 data = entry.get("data", {})
                 if event == "config_change":
-                    self.system_log_output.append(f"[Config Change] Guild: {data.get('guild_id')} Field: {data.get('field')} -> {data.get('value')}")
+                    msg = f"[{now_str}] [Config Change] Guild {data.get('guild_id')}: {data.get('field')} -> {data.get('value')}"
+                    self.system_log_output.append(msg)
+                    self.recent_activity_output.append(msg)
                 elif event == "prompt":
                     guild = data.get("guild_name") or data.get("guild_id")
-                    self.bot_log_output.append(f"[{guild}] {data.get('user')}: {data.get('prompt')}")
+                    msg = f"[{now_str}] [{guild}] {data.get('user')}: {data.get('prompt')}"
+                    self.bot_log_output.append(msg)
+                    self.recent_activity_output.append(msg)
                 elif event == "reply":
                     guild = data.get("guild_name") or data.get("guild_id")
                     reply_snippet = data.get("reply", "")[:180]
-                    self.bot_log_output.append(f"[{guild}] Silas Blue -> {reply_snippet}...")
+                    msg = f"[{now_str}] [{guild}] Silas Blue -> {reply_snippet}..."
+                    self.bot_log_output.append(msg)
+                    self.recent_activity_output.append(msg)
                 elif event == "server_joined":
                     guild_name = data.get("guild_name", "Unknown Server")
                     guild_id = data.get("guild_id", "")
-                    self.system_log_output.append(f"[Discord] Silas Blue joined new server: {guild_name} ({guild_id})")
+                    msg = f"[{now_str}] [Discord] Silas Blue joined server: {guild_name} ({guild_id})"
+                    self.system_log_output.append(msg)
+                    self.recent_activity_output.append(msg)
                     self.update_servers_list()
                 elif event == "server_left":
                     guild_name = data.get("guild_name", "Unknown Server")
                     guild_id = data.get("guild_id", "")
-                    self.system_log_output.append(f"[Discord] Silas Blue left server: {guild_name} ({guild_id})")
+                    msg = f"[{now_str}] [Discord] Silas Blue left server: {guild_name} ({guild_id})"
+                    self.system_log_output.append(msg)
+                    self.recent_activity_output.append(msg)
                     self.update_servers_list()
             except queue.Empty:
                 break
@@ -972,11 +1495,13 @@ class MainWindow(QMainWindow):
         theme_file = f"themes/{theme_name.lower()}.json"
         if os.path.exists(theme_file):
             self.theme_manager.apply_theme(self, theme_file)
+            self.app_cfg["theme"] = theme_name.lower()
+            save_app_config(self.app_cfg)
 
     def show_feedback(self, button, message):
-        orig_style = button.styleSheet()
-        button.setStyleSheet("background-color: #00f0ff; color: #181825;")
-        QTimer.singleShot(250, lambda: button.setStyleSheet(orig_style))
+        orig_text = button.text()
+        button.setText(message)
+        QTimer.singleShot(1200, lambda: button.setText(orig_text))
 
     def on_debug_checkbox_changed(self, state):
         debug_enabled = state == Qt.Checked
@@ -994,6 +1519,7 @@ class MainWindow(QMainWindow):
     def redirect_output_to_log(self):
         sys.stdout = self
         sys.stderr = self
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

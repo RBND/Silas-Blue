@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, QTextEdit, QPushButton, QTabWidget, QListWidget, QListWidgetItem, QCheckBox, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QComboBox, QSpinBox, QTextEdit, QPushButton,
+    QTabWidget, QListWidget, QListWidgetItem, QCheckBox, QHBoxLayout, QFrame
 )
 from PySide6.QtCore import QTimer, Qt
 import json
@@ -12,40 +13,67 @@ logger = logging.getLogger("silasblue")
 
 class ServerConfigPage(QWidget):
     """
-    GUI page for editing per-server configuration.
+    GUI page for editing per-server configuration with modern card layouts.
     """
 
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(14)
         self.setLayout(main_layout)
 
+        # --- Top Header / Server Selector Card ---
+        header_card = QFrame()
+        header_card.setObjectName("card")
+        header_layout = QHBoxLayout(header_card)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+
+        server_label = QLabel("Active Discord Server:")
+        server_label.setStyleSheet("font-weight: 600; font-size: 13px;")
+        header_layout.addWidget(server_label)
+
         self.guild_select = QComboBox()
-        server_select_row = QHBoxLayout()
-        server_select_row.addWidget(QLabel("Select Server:"))
-        server_select_row.addWidget(self.guild_select, 3)
+        self.guild_select.setMinimumWidth(260)
+        header_layout.addWidget(self.guild_select, 3)
+
         self.invite_btn = QPushButton("➕ Invite Bot to Server")
         self.invite_btn.setToolTip("Invite Silas Blue to a Discord server")
         self.invite_btn.clicked.connect(self.open_invite_dialog)
-        server_select_row.addWidget(self.invite_btn, 1)
-        main_layout.addLayout(server_select_row)
+        header_layout.addWidget(self.invite_btn, 1)
 
-        # Tab widget for GUI/Raw JSON
+        main_layout.addWidget(header_card)
+
+        # Tab widget for GUI / Raw JSON
         self.tabs = QTabWidget()
-        main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.tabs, 1)
 
         # --- GUI Editor Tab ---
         self.gui_tab = QWidget()
         gui_layout = QVBoxLayout()
+        gui_layout.setContentsMargins(8, 12, 8, 8)
+        gui_layout.setSpacing(14)
         self.gui_tab.setLayout(gui_layout)
 
-        # --- Permission selections in a row ---
+        # --- Permissions Card ---
+        perm_card = QFrame()
+        perm_card.setObjectName("card")
+        perm_card_layout = QVBoxLayout(perm_card)
+        perm_card_layout.setContentsMargins(12, 12, 12, 12)
+
+        perm_title = QLabel("Role-Based Access Control")
+        perm_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff; margin-bottom: 4px;")
+        perm_card_layout.addWidget(perm_title)
+
         permissions_row = QHBoxLayout()
+        permissions_row.setSpacing(12)
 
         # Reply roles
         reply_col = QVBoxLayout()
-        reply_col.addWidget(QLabel("Who can the bot reply to?"))
+        reply_label = QLabel("Who can the bot reply to?")
+        reply_label.setStyleSheet("font-weight: 500; font-size: 12px;")
+        reply_col.addWidget(reply_label)
         self.reply_roles_list = QListWidget()
         self.reply_roles_list.setSelectionMode(QListWidget.MultiSelection)
         reply_col.addWidget(self.reply_roles_list)
@@ -53,43 +81,72 @@ class ServerConfigPage(QWidget):
 
         # Change model roles
         model_col = QVBoxLayout()
-        model_col.addWidget(QLabel("Who can change the current model?"))
+        model_label = QLabel("Who can switch AI models?")
+        model_label.setStyleSheet("font-weight: 500; font-size: 12px;")
+        model_col.addWidget(model_label)
         self.change_model_roles_list = QListWidget()
         self.change_model_roles_list.setSelectionMode(QListWidget.MultiSelection)
         model_col.addWidget(self.change_model_roles_list)
         permissions_row.addLayout(model_col)
 
         # Change permission roles
-        perm_col = QVBoxLayout()
-        perm_col.addWidget(QLabel("Who can change permission settings?"))
+        perm_role_col = QVBoxLayout()
+        perm_role_label = QLabel("Who can edit server settings?")
+        perm_role_label.setStyleSheet("font-weight: 500; font-size: 12px;")
+        perm_role_col.addWidget(perm_role_label)
         self.change_permission_roles_list = QListWidget()
         self.change_permission_roles_list.setSelectionMode(QListWidget.MultiSelection)
-        perm_col.addWidget(self.change_permission_roles_list)
-        permissions_row.addLayout(perm_col)
+        perm_role_col.addWidget(self.change_permission_roles_list)
+        permissions_row.addLayout(perm_role_col)
 
-        gui_layout.addLayout(permissions_row)
+        perm_card_layout.addLayout(permissions_row)
+        gui_layout.addWidget(perm_card, 2)
 
-        # Pagination and random prompt controls
+        # --- Options & Behaviors Card ---
+        options_card = QFrame()
+        options_card.setObjectName("card")
+        options_layout = QVBoxLayout(options_card)
+        options_layout.setContentsMargins(12, 12, 12, 12)
+
+        options_title = QLabel("Server Response Settings")
+        options_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff; margin-bottom: 4px;")
+        options_layout.addWidget(options_title)
+
         pag_rand_row = QHBoxLayout()
-        self.pagination_enabled = QCheckBox("Enable Pagination")
-        pag_rand_row.addWidget(self.pagination_enabled, 1)
-        pag_rand_row.addWidget(QLabel("Max characters per page (max 1900):"))
+        self.pagination_enabled = QCheckBox("Enable Message Pagination")
+        pag_rand_row.addWidget(self.pagination_enabled)
+
+        pag_rand_row.addWidget(QLabel("Max chars/page (≤1900):"))
         self.pagination_max_chars = QSpinBox()
         self.pagination_max_chars.setRange(500, 1900)
         self.pagination_max_chars.setValue(1900)
-        pag_rand_row.addWidget(self.pagination_max_chars, 2)
-        self.random_prompt_enabled = QCheckBox("Enable random prompt mode")
-        pag_rand_row.addWidget(self.random_prompt_enabled, 1)
+        pag_rand_row.addWidget(self.pagination_max_chars)
+
+        pag_rand_row.addSpacing(20)
+
+        self.random_prompt_enabled = QCheckBox("Random Prompt Mode")
+        pag_rand_row.addWidget(self.random_prompt_enabled)
+
         pag_rand_row.addWidget(QLabel("Probability:"))
         self.random_prompt_probability = QComboBox()
         self.random_prompt_probability.addItems([f"{x}%" for x in range(0, 101, 5)])
-        pag_rand_row.addWidget(self.random_prompt_probability, 2)
-        gui_layout.addLayout(pag_rand_row)
+        pag_rand_row.addWidget(self.random_prompt_probability)
 
-        self.save_btn = QPushButton("Save Config")
+        pag_rand_row.addStretch(1)
+        options_layout.addLayout(pag_rand_row)
+        gui_layout.addWidget(options_card)
+
+        # Save Button Row
+        self.save_btn = QPushButton("Save Server Settings")
+        self.save_btn.setObjectName("primaryBtn")
+        self.save_btn.setMinimumHeight(34)
+        self.save_status_label = QLabel("")
+        self.save_status_label.setStyleSheet("font-weight: 600; color: #00ff88;")
+
         save_btn_row = QHBoxLayout()
         save_btn_row.addStretch(2)
-        save_btn_row.addWidget(self.save_btn, 1)
+        save_btn_row.addWidget(self.save_btn, 2)
+        save_btn_row.addWidget(self.save_status_label)
         save_btn_row.addStretch(2)
         gui_layout.addLayout(save_btn_row)
 
@@ -98,10 +155,24 @@ class ServerConfigPage(QWidget):
         # --- Raw JSON Tab ---
         self.raw_tab = QWidget()
         raw_layout = QVBoxLayout()
+        raw_layout.setContentsMargins(12, 12, 12, 12)
         self.raw_tab.setLayout(raw_layout)
-        raw_layout.addWidget(QLabel("Raw Config (JSON):"))
+
+        raw_header = QLabel("Raw Server JSON Configuration:")
+        raw_header.setStyleSheet("font-weight: 600;")
+        raw_layout.addWidget(raw_header)
+
         self.raw_config = QTextEdit()
-        raw_layout.addWidget(self.raw_config)
+        raw_layout.addWidget(self.raw_config, 1)
+
+        raw_save_btn = QPushButton("Save Raw JSON")
+        raw_save_btn.setObjectName("primaryBtn")
+        raw_save_btn.clicked.connect(self.save_config)
+        raw_save_row = QHBoxLayout()
+        raw_save_row.addStretch(1)
+        raw_save_row.addWidget(raw_save_btn)
+        raw_layout.addLayout(raw_save_row)
+
         self.tabs.addTab(self.raw_tab, "Raw JSON")
 
         # Connect signals
@@ -242,15 +313,16 @@ class ServerConfigPage(QWidget):
 
         self.raw_config.setPlainText(json.dumps(config, indent=2))
         logger.info(f"Config for server {guild_id} saved and applied.")
-        self.show_feedback(self.save_btn, "Config Saved & Applied!")
+        self.show_feedback(self.save_btn, "✓ Saved!")
         self.reload_config_from_disk()
 
     def show_feedback(self, button, message):
-        orig_style = button.styleSheet()
-        button.setStyleSheet("background-color: #00f0ff; color: #181825;")
-        QTimer.singleShot(200, lambda: button.setStyleSheet(orig_style))
-        if hasattr(self.main_window, "system_log_output"):
-            self.main_window.system_log_output.append(message)
+        orig_text = button.text()
+        button.setText(message)
+        button.setStyleSheet("background-color: #2ea043; color: #ffffff;")
+        QTimer.singleShot(1200, lambda: [button.setText(orig_text), button.setStyleSheet("")])
+        if hasattr(self.main_window, "append_system_log"):
+            self.main_window.append_system_log(f"[Server Config] Saved settings for active server.")
 
     def reload_config_from_disk(self):
         guild_id = self.guild_select.currentData()
