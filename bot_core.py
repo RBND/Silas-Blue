@@ -303,7 +303,11 @@ async def handle_ai_prompt(message: discord.Message, config: dict):
     })
 
     # Show Discord typing indicator during model inference
-    system_prompt = app_cfg.get("system_prompt") or None
+    # Server-specific system prompt takes precedence over global default
+    server_prompt = (config.get("system_prompt") or "").strip() if config else ""
+    global_prompt = (app_cfg.get("system_prompt") or "").strip()
+    system_prompt = server_prompt if server_prompt else (global_prompt or None)
+
     try:
         async with message.channel.typing():
             response = await provider.send_prompt(prompt, default_model, system_prompt=system_prompt)
@@ -515,6 +519,35 @@ async def set_pagination(ctx, max_chars: int):
     server_configs[guild_id] = config
     await ctx.send(f"Pagination character limit set to {max_chars}.")
 
+@bot.command(name="setprompt", aliases=["systemprompt", "setpersona"])
+async def set_prompt(ctx, *, prompt: str = ""):
+    """Sets a custom system prompt / persona for this server, or resets to default if empty."""
+    if not ctx.guild:
+        await ctx.send("This command can only be used within a server.")
+        return
+    guild_id = ctx.guild.id
+    config = server_configs.get(guild_id, {})
+    roles = config.get("change_permission_roles", ["admin", "owner"])
+
+    is_admin = ctx.author.guild_permissions.administrator or (ctx.author == ctx.guild.owner)
+    has_role = any(r.name.lower() in [x.lower() for x in roles] for r in getattr(ctx.author, "roles", []))
+    if not (is_admin or has_role):
+        await ctx.send("You do not have permission to change this server's system prompt.")
+        return
+
+    prompt = prompt.strip()
+    if not prompt or prompt.lower() in ("reset", "default", "none"):
+        config["system_prompt"] = ""
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        await ctx.send("✓ Server system prompt reset to global default.")
+    else:
+        config["system_prompt"] = prompt
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        snippet = prompt[:80] + "..." if len(prompt) > 80 else prompt
+        await ctx.send(f"✓ Server system prompt updated:\n> *{snippet}*")
+
 @bot.command(name="setnick", aliases=["setname"])
 async def set_nick(ctx, *, new_name: str):
     """Changes the bot's nickname in this server (Admin only)."""
@@ -568,6 +601,7 @@ async def help_command(ctx):
         f"{prefix}invite - Get invite link to add Silas Blue to a server\n"
         f"{prefix}setmodel <name> - Set default model for this server\n"
         f"{prefix}models - List available models on AI backend\n"
+        f"{prefix}setprompt <text> - Set custom AI persona for this server (use 'reset' for default)\n"
         f"{prefix}setnick <name> - Change bot nickname in this server\n"
         f"{prefix}setpagination <500-1900> - Set pagination limit\n"
         f"{prefix}config - Show server config (Admin only)\n"

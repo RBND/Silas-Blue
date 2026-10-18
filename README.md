@@ -38,6 +38,7 @@ Silas Blue v3.0.0 introduces a **Discord-grade desktop control panel** alongside
 | **Dual Management UIs** | Desktop application built with PySide6 + responsive Single-Page App (SPA) web dashboard. |
 | **Discord OAuth2 Login** | Access-controlled web management locked to designated Discord User IDs. |
 | **Per-Server Role Permissions** | Define who can prompt the bot, switch AI models, or adjust server settings on a per-guild basis. |
+| **Custom Server Personas** | Set dedicated AI system prompts / personas per Discord server to tailor bot behavior to specific server communities. |
 | **Model Manager & Puller** | Discover installed models, switch active models on the fly, or pull new models from Ollama / HuggingFace. |
 | **Smart Response Pagination** | Intelligently breaks long AI responses into readable, Discord-safe paginated embeds (up to 1900 chars). |
 | **Live WebSocket Logging** | Real-time monitoring of user prompts, AI completions, and gateway status without page refreshing. |
@@ -206,11 +207,17 @@ Silas Blue responds to mentions or standard prefix commands:
   !model llama3:8b
   !models
   ```
+* **Custom Server Personas (System Prompts)**:
+  ```text
+  !setprompt You are a helpful assistant for the Coding Club. Keep answers concise.
+  !setprompt reset   (resets back to the global default persona)
+  ```
 * **Help & Server Info**:
   ```text
   !help       - View available commands and usage
   !invite     - Generate an invitation link to add Silas Blue to a server
   !ping       - Check bot gateway latency
+  !config     - View active server configuration (Admin only)
   ```
 
 ---

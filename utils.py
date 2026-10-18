@@ -39,7 +39,8 @@ DEFAULT_GUILD_CONFIG = {
     "pagination_enabled": True,
     "pagination_max_chars": 1900,
     "random_prompt_enabled": False,
-    "random_prompt_probability": 0
+    "random_prompt_probability": 0,
+    "system_prompt": ""
 }
 
 def _atomic_write_json(file_path: str, data: dict):

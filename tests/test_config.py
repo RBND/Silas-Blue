@@ -37,5 +37,28 @@ class TestConfig(unittest.TestCase):
         except Exception:
             pass
 
+    def test_guild_config_server_system_prompt(self):
+        guild_id = "test_guild_prompt_123"
+        custom_prompt = "You are a specialized coding bot for this server."
+
+        # Default should have empty string
+        default_cfg = load_config(guild_id)
+        self.assertIn("system_prompt", default_cfg)
+        self.assertEqual(default_cfg["system_prompt"], "")
+
+        # Save custom prompt
+        default_cfg["system_prompt"] = custom_prompt
+        save_config(guild_id, default_cfg)
+
+        # Reload and verify
+        reloaded = load_config(guild_id)
+        self.assertEqual(reloaded.get("system_prompt"), custom_prompt)
+
+        # Cleanup
+        try:
+            os.remove(os.path.join("config", f"{guild_id}.json"))
+        except Exception:
+            pass
+
 if __name__ == "__main__":
     unittest.main()

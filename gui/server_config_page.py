@@ -102,6 +102,26 @@ class ServerConfigPage(QWidget):
         perm_card_layout.addLayout(permissions_row)
         gui_layout.addWidget(perm_card, 2)
 
+        # --- Server System Prompt Card ---
+        prompt_card = QFrame()
+        prompt_card.setObjectName("card")
+        prompt_card_layout = QVBoxLayout(prompt_card)
+        prompt_card_layout.setContentsMargins(12, 12, 12, 12)
+
+        prompt_title = QLabel("Server System Prompt / Persona Override")
+        prompt_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff; margin-bottom: 2px;")
+        prompt_card_layout.addWidget(prompt_title)
+
+        prompt_desc = QLabel("Custom instructions/persona for this server. Leave empty to use the global bot persona.")
+        prompt_desc.setStyleSheet("font-size: 11px; opacity: 0.8; margin-bottom: 4px;")
+        prompt_card_layout.addWidget(prompt_desc)
+
+        self.server_system_prompt_input = QTextEdit()
+        self.server_system_prompt_input.setPlaceholderText("e.g. You are a server assistant for the Coding Club. Keep answers concise and technical.")
+        self.server_system_prompt_input.setMaximumHeight(70)
+        prompt_card_layout.addWidget(self.server_system_prompt_input)
+        gui_layout.addWidget(prompt_card)
+
         # --- Options & Behaviors Card ---
         options_card = QFrame()
         options_card.setObjectName("card")
@@ -222,6 +242,7 @@ class ServerConfigPage(QWidget):
         self.pagination_max_chars.setValue(min(config.get("pagination_max_chars", 1900), 1900))
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
+        self.server_system_prompt_input.setPlainText(config.get("system_prompt", ""))
         self.raw_config.setPlainText(json.dumps(config, indent=2))
 
     def set_roles_list(self, list_widget, guild, selected_roles):
@@ -261,7 +282,8 @@ class ServerConfigPage(QWidget):
             "pagination_enabled": self.pagination_enabled.isChecked(),
             "pagination_max_chars": max_chars,
             "random_prompt_enabled": self.random_prompt_enabled.isChecked(),
-            "random_prompt_probability": int(self.random_prompt_probability.currentText().replace("%", ""))
+            "random_prompt_probability": int(self.random_prompt_probability.currentText().replace("%", "")),
+            "system_prompt": self.server_system_prompt_input.toPlainText().strip()
         }
 
     def on_tab_changed(self, idx):
@@ -289,6 +311,7 @@ class ServerConfigPage(QWidget):
         self.pagination_max_chars.setValue(min(config.get("pagination_max_chars", 1900), 1900))
         self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
         self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
+        self.server_system_prompt_input.setPlainText(config.get("system_prompt", ""))
 
     def save_config(self):
         guild_id = self.guild_select.currentData()

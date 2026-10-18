@@ -358,6 +358,7 @@ async function loadSelectedGuildConfig() {
 
         document.getElementById('cfg-pagination').checked = cfg.pagination_enabled !== false;
         document.getElementById('cfg-max-chars').value = cfg.pagination_max_chars || 1900;
+        document.getElementById('cfg-server-system-prompt').value = cfg.system_prompt || '';
     } catch (e) {
         console.error('Failed to load guild config:', e);
     }
@@ -400,7 +401,8 @@ async function saveServerConfig() {
         change_model_roles: getSelectedRoles('roles-model'),
         change_permission_roles: getSelectedRoles('roles-perm'),
         pagination_enabled: document.getElementById('cfg-pagination').checked,
-        pagination_max_chars: parseInt(document.getElementById('cfg-max-chars').value) || 1900
+        pagination_max_chars: parseInt(document.getElementById('cfg-max-chars').value) || 1900,
+        system_prompt: document.getElementById('cfg-server-system-prompt').value.trim()
     };
 
     try {
