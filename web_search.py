@@ -356,26 +356,42 @@ class SearchService:
 # --- Auto-Search Intent Detection & Query Formulation ---
 
 TEMPORAL_PATTERNS = [
-    r"\b(latest|current|recent|today|now|tonight|yesterday|tomorrow)\b",
-    r"\b(this week|this month|this year|upcoming|newest)\b",
-    r"\b(202[4-9]|203[0-9])\b",
+    r"\b(right now|as of (?:today|now)|at the moment|happening now|currently happening)\b",
+    r"\b(?:latest|current|recent|newest|upcoming)\s+(?:news|updates?|version|release|patch|price|score|events?|info|information|specs?|status|data|stats?|trends?|developments?)\b",
+    r"\b(?:today|tonight|yesterday|tomorrow)(?:'s)?\s+(?:news|weather|scores?|games?|stock|market|events?|headlines?|updates?|matches?|results?)\b",
+    r"\b(?:news|weather|scores?|price|stock|events?|matches?|results?)\s+(?:today|tonight|yesterday|tomorrow|this week|this month|this year)\b",
+    r"\b(?:who won|what happened|results? for|schedule for|winner of|champion of)\s+(?:today|tonight|yesterday|this week|202[4-9]|203[0-9])\b",
+    r"\b(?:released?|announced?|unveiled?|launched?)\s+(?:today|yesterday|recently|in 202[4-9]|in 203[0-9])\b",
+    r"\b202[4-9]\s+(?:news|release|specs|features|election|championship|winner|schedule|update|games?|movies?)\b",
+    r"^(?:what|who|when|where|how|which)\b.*\b202[4-9]\b.*\?",
 ]
 
 LOOKUP_PATTERNS = [
-    r"^(what|who|when|where|why|how)\b.*(today|now|recently|current|latest|202[4-9])",
-    r"\b(news|headline|headlines|breaking|update|updates|patch notes|changelog)\b",
-    r"\b(release date|released|version|specs|specifications|price of|price for|weather in|score of|who won)\b",
+    r"^(?:what|who|when|where|how|which)\b\s+(?:is|was|are|were|happened|occurred|announced|released|won|leads|plays)\b.*(?:today|tonight|recently|current|latest|this week|202[4-9]|203[0-9])",
+    r"\b(news|headline|headlines|breaking news|patch notes|changelog)\b",
+    r"\b(release date|released|specs|specifications|price of|price for|weather in|score of|who won)\b",
     r"\b(search the web|search for|google|look up|lookup|find info on|browse for|check online)\b",
     r"\b(part number|part numbers|model number|model numbers|sku|skus|datasheet|datasheets|pinout|pinouts)\b",
     r"\b(benchmark|benchmarks|cost of|how much is|where to buy|msrp|in stock)\b",
     r"\b(to search|can you search|can you look up|can you find|give me a part number|give me a model|give me the model|give me the part)\b",
+    r"\brecent\s+[A-Za-z0-9]+\s+(?:launch|flight|mission|test|event|game|update)\b",
+    r"\bmost\s+recent\b",
 ]
 
 NON_SEARCH_PATTERNS = [
     r"^(hi|hello|hey|greetings|howdy|yo|good morning|good evening|good afternoon)\b",
     r"\b(write a poem|write a song|write a story|tell me a joke|compose a)\b",
+    r"^(?:write|create|generate|code|debug)\s+(?:a\s+)?(?:python|javascript|script|code|program|function|class|algorithm)\b",
     r"\b(repeat after me|translate this|ignore previous instructions)\b",
     r"^(ping|test|echo)\b",
+    r"\b(?:shut\s*down|turn\s+off|power\s+off|reboot|restart)\s+(?:your|the|this)?\s*(?:computer|pc|system|server|machine|host|bot)\b",
+    r"^now\s+(?:that|then|listen|look|what|why|how|tell|let|i|we|you)\b",
+    r"\bnow\s+that\s+you\b",
+    r"\b(?:from\s+now\s+on|for\s+now|until\s+now|by\s+now|just\s+now)\b",
+    r"^(?:why|how|what)\s+(?:did\s+you|are\s+you|were\s+those|made\s+you)\s+(?:show|give|send|link|search|say|mention)\b",
+    r"\bwhy\s+did\s+you\s+(?:show|give|send|link|search|say)\b",
+    r"^(?:how\s+are\s+you|how\s+do\s+you\s+feel|how's\s+it\s+going|what\s+are\s+you\s+doing|what\s+can\s+you\s+do)\b",
+    r"^(?:who\s+are\s+you|what\s+is\s+your\s+name|introduce\s+yourself|tell\s+me\s+about\s+yourself)\b",
 ]
 
 GENERIC_LOOKUP_WORDS = {
@@ -532,7 +548,8 @@ def format_grounded_prompt(
         "- The above search results provide current, factual information relevant to the user's question.\n"
         "- Synthesize a comprehensive, direct, and well-structured answer based on these real-time web results.\n"
         "- When citing specific facts or quotes, refer to the corresponding source index or title.\n"
-        "- If the search results do not contain enough information, acknowledge what is known and clarify the limitation."
+        "- If the search results do not contain enough information, acknowledge what is known and clarify the limitation.\n"
+        "- If the search results are irrelevant to the user's request, disregard them and respond directly without citing them."
     )
 
     if base_system_prompt:

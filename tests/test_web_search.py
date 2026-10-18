@@ -179,6 +179,20 @@ class TestWebSearch(unittest.TestCase):
             "repeat after me: foo bar",
             "ping",
             "echo test",
+            "now that you won the game its time to shutdown your computer.",
+            "why did you show me those search results?",
+            "Why did you link those websites?",
+            "What are you doing today?",
+            "How are you feeling today?",
+            "Today was a great day.",
+            "Now I get it.",
+            "From now on, speak in Spanish.",
+            "In 2026 I will visit Japan.",
+            "Shutdown the server please.",
+            "Write a python script to sort a list",
+            "Tell me about yourself Silas",
+            "Now why would you do that?",
+            "What did you say?",
         ]
         for query in negatives:
             with self.subTest(query=query):

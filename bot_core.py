@@ -358,9 +358,7 @@ async def handle_ai_prompt(
     auto_search_enabled = search_enabled and guild_auto_search and app_auto_search
 
     can_search = permissions.can_search(message.author, message.guild, config)
-    has_auto_search = auto_search_enabled and (
-        should_auto_search(raw_prompt) or (bool(replied_context) and should_auto_search(effective_prompt))
-    )
+    has_auto_search = auto_search_enabled and should_auto_search(raw_prompt)
     do_web_search = can_search and (force_web_search or has_auto_search)
 
     search_results = []
@@ -416,7 +414,17 @@ async def handle_ai_prompt(
 
     if not is_error_response:
         if citations_footer:
-            response = response.strip() + citations_footer
+            should_append_citations = True
+            if not force_web_search:
+                refusal_check = re.search(
+                    r"\b(?:i cannot|i can't|i am unable to|i am not able to|do not have the ability|don't have the ability|do not have permission|don't have permission)\s+to\s+(?:shut down|shutdown|turn off|power off|restart|reboot|execute|run|access)\b",
+                    response,
+                    flags=re.IGNORECASE
+                )
+                if refusal_check:
+                    should_append_citations = False
+            if should_append_citations:
+                response = response.strip() + citations_footer
     elif force_web_search and search_results:
         # Fallback if model fails during explicit search command
         fallback_lines = ["⚠️ *AI service is currently unavailable, but here are the top search results for your query:*\n"]

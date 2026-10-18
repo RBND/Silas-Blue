@@ -19,7 +19,7 @@ class ConversationMemory:
     - Smart compression truncates verbose historical AI replies to conserve model context tokens.
     """
 
-    def __init__(self, default_ttl_minutes: int = 30, max_assistant_chars: int = 400):
+    def __init__(self, default_ttl_minutes: int = 30, max_assistant_chars: int = 1500):
         self._default_ttl = default_ttl_minutes * 60
         self._max_assistant_chars = max_assistant_chars
         self._lock = threading.Lock()
@@ -67,14 +67,23 @@ class ConversationMemory:
     def add_turn(self, key: str, user_prompt: str, assistant_response: str, max_turns: int = 10):
         """
         Adds a user prompt and assistant response turn to the conversation history.
-        Applies smart compression to the historical assistant response.
+        Applies smart compression to the historical assistant response while preserving
+        source citations for contextual grounding across multiple turns.
         """
         if max_turns <= 0:
             return
 
         compressed_assistant = assistant_response.strip()
         if len(compressed_assistant) > self._max_assistant_chars:
-            compressed_assistant = compressed_assistant[:self._max_assistant_chars].rstrip() + "... [truncated for brevity]"
+            if "\n\n**Sources:**" in compressed_assistant:
+                body, sources_part = compressed_assistant.split("\n\n**Sources:**", 1)
+                sources_suffix = "\n\n**Sources:**" + sources_part
+                budget_for_body = max(100, self._max_assistant_chars - len(sources_suffix) - 30)
+                if len(body) > budget_for_body:
+                    body = body[:budget_for_body].rstrip() + "... [truncated for brevity]"
+                compressed_assistant = body + sources_suffix
+            else:
+                compressed_assistant = compressed_assistant[:self._max_assistant_chars].rstrip() + "... [truncated for brevity]"
 
         with self._lock:
             now = time.time()

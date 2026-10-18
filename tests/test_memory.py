@@ -50,6 +50,23 @@ class TestConversationMemory(unittest.TestCase):
         self.assertTrue(assistant_turn.endswith("... [truncated for brevity]"))
         self.assertLessEqual(len(assistant_turn), 150)
 
+    def test_sources_preserved_during_compression(self):
+        """Verify source citations footer is retained in history even when response body is compressed."""
+        mem = ConversationMemory(default_ttl_minutes=30, max_assistant_chars=250)
+        key = "test_sources_comp"
+        long_body = "Important detailed explanation about Python 3.14 features. " * 10
+        sources = "\n\n**Sources:**\n• [Python Docs](https://docs.python.org)\n• [Release Notes](https://python.org/release)"
+        full_response = long_body + sources
+
+        mem.add_turn(key, "What is new in Python?", full_response)
+        hist = mem.get_history(key)
+        self.assertEqual(len(hist), 2)
+        stored_content = hist[1]["content"]
+        self.assertIn("**Sources:**", stored_content)
+        self.assertIn("Python Docs", stored_content)
+        self.assertIn("Release Notes", stored_content)
+        self.assertIn("[truncated for brevity]", stored_content)
+
     def test_turns_sliding_window(self):
         """Verify buffer trims to requested turn limits."""
         key = "test_window"

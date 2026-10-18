@@ -1,6 +1,6 @@
-# Silas Blue v3.3.0
+# Silas Blue v3.3.1
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.3.1-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,7 +9,22 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.3.0 introduces a major **GUI and Access Control Overhaul**: resolving layout crushing bugs with responsive scroll areas, scaling permissions for 10,000+ member Discord servers via interactive FlowLayout chip clouds and direct Snowflake ID inputs, hardening security against global name takeovers, and eliminating background performance bottlenecks.
+Silas Blue v3.3.1 delivers precision **Web Search Intent Detection & Multi-Turn Memory Grounding**: eliminating false-positive web searches on conversational phrasing (e.g. "now that...", "how are you today"), preventing quoted reply context leaks from triggering auto-search, preserving citation footers across conversation memory compression, and guarding against attaching search sources to command refusals.
+
+---
+
+## 🚀 What's New in Version 3.3.1
+
+* **Precision Search Intent Detection**:
+  * Eliminated false-positive search triggers on conversational connectives (`"now that..."`, `"from now on"`, `"now I see"`, `"today was great"`) and host command attempts (`"shutdown your computer"`).
+  * Temporal search indicators now strictly require informational inquiry pairing (e.g. news, weather, release dates, market data, sports scores).
+* **Quoted Context Auto-Search Guard**:
+  * Resolved an issue where replying to a prior message containing temporal words inadvertently triggered auto-search; intent detection now evaluates only the user's active message prompt.
+* **Contextual Memory & Citation Retention**:
+  * Increased default assistant history buffer from 400 to 1,500 characters, preventing premature conversational amnesia.
+  * Added smart compression that preserves `**Sources:**` footers in memory, ensuring the bot retains full awareness of cited links in follow-up turns.
+* **Refusal & Command Defense-in-Depth**:
+  * Prevents attaching search citation footers to system command refusals or inability notices.
 
 ---
 
