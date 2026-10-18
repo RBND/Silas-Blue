@@ -512,6 +512,8 @@ async def set_pagination(ctx, max_chars: int):
     config["pagination_max_chars"] = max_chars
     save_config(guild_id, config)
     server_configs[guild_id] = config
+    await ctx.send(f"Pagination character limit set to {max_chars}.")
+
 @bot.command(name="setnick", aliases=["setname"])
 async def set_nick(ctx, *, new_name: str):
     """Changes the bot's nickname in this server (Admin only)."""
