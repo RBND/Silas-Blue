@@ -3,7 +3,7 @@ Silas Blue - Discord Bot powered by local AI models via Ollama or Llama.cpp
 Main entry point: launches Discord bot with either desktop GUI or headless web management.
 """
 
-__version__ = "3.2.1"
+__version__ = "3.3.0"
 
 import sys
 import threading
@@ -47,8 +47,13 @@ def start_gui_and_bot(enable_web: bool = True, web_host: str = "127.0.0.1", web_
     """Starts the PySide6 GUI and triggers bot startup and optional web dashboard."""
     from gui.main_window import MainWindow
     from PySide6.QtWidgets import QApplication, QSplashScreen
-    from PySide6.QtCore import QTimer
-    from PySide6.QtGui import QPixmap
+    from PySide6.QtCore import QTimer, Qt
+    from PySide6.QtGui import QPixmap, QGuiApplication
+
+    # Enable fractional High-DPI Pass-Through scaling to prevent layout clipping
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
 
     app = QApplication(sys.argv)
 

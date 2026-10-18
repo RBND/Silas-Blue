@@ -37,6 +37,7 @@ class TestPermissions(unittest.TestCase):
         msg.guild = MagicMock()
         role = MagicMock()
         role.name = "Moderator"
+        role.id = 111222333444555666
         msg.author.roles = [role]
         msg.author.guild_permissions.administrator = False
 
@@ -47,6 +48,50 @@ class TestPermissions(unittest.TestCase):
         # Config has uppercase "MODERATOR"
         config = {"reply_roles": ["MODERATOR"]}
         self.assertTrue(self.pm.can_reply(msg, config))
+
+        # Config has role Snowflake ID string
+        config = {"reply_roles": ["111222333444555666"]}
+        self.assertTrue(self.pm.can_reply(msg, config))
+
+    def test_user_snowflake_authorization(self):
+        msg = MagicMock()
+        msg.guild = MagicMock()
+        msg.author.id = 295767175426473984
+        msg.author.roles = []
+        msg.author.guild_permissions.administrator = False
+        msg.guild.owner = MagicMock()
+
+        # Reply users whitelist
+        config = {"reply_roles": [], "reply_users": ["295767175426473984"]}
+        self.assertTrue(self.pm.can_reply(msg, config))
+
+        # Unauthorized user
+        msg.author.id = 999999999999999999
+        self.assertFalse(self.pm.can_reply(msg, config))
+
+    def test_user_privilege_separation(self):
+        guild = MagicMock()
+        user = MagicMock()
+        user.id = 295767175426473984
+        user.roles = []
+        user.guild_permissions.administrator = False
+        guild.owner = MagicMock()
+
+        # User is only granted reply access, NOT model or permission access
+        config = {
+            "reply_users": ["295767175426473984"],
+            "change_model_users": [],
+            "change_permission_users": [],
+            "change_model_roles": [],
+            "change_permission_roles": []
+        }
+        self.assertFalse(self.pm.can_change_model(user, guild, config))
+        self.assertFalse(self.pm.can_change_permissions(user, guild, config))
+
+        # When explicitly granted model switching
+        config["change_model_users"] = ["295767175426473984"]
+        self.assertTrue(self.pm.can_change_model(user, guild, config))
+        self.assertFalse(self.pm.can_change_permissions(user, guild, config))
 
     def test_can_change_model_owner(self):
         guild = MagicMock()

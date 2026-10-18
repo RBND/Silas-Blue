@@ -7,6 +7,7 @@ import os
 import json
 import tempfile
 import logging
+import re
 
 logger = logging.getLogger("silasblue")
 CONFIG_DIR = "config"
@@ -72,9 +73,13 @@ DEFAULT_APP_CONFIG = {
 DEFAULT_GUILD_CONFIG = {
     "default_model": "",
     "reply_roles": ["everyone"],
-    "change_model_roles": ["admin", "owner"],
-    "change_permission_roles": ["admin", "owner"],
+    "reply_users": [],
+    "change_model_roles": [],
+    "change_model_users": [],
+    "change_permission_roles": [],
+    "change_permission_users": [],
     "search_roles": ["everyone"],
+    "search_users": [],
     "web_search_enabled": True,
     "web_search_auto": True,
     "pagination_enabled": True,
@@ -85,6 +90,70 @@ DEFAULT_GUILD_CONFIG = {
     "memory_turns": 6,
     "memory_ttl_minutes": 30
 }
+
+SNOWFLAKE_REGEX = re.compile(r"^[1-9]\d{16,19}$")
+
+def validate_and_sanitize_guild_config(data: dict) -> dict:
+    """Validates and sanitizes a guild configuration dict against the canonical schema."""
+    sanitized = dict(DEFAULT_GUILD_CONFIG)
+    if not isinstance(data, dict):
+        return sanitized
+
+    # List fields: roles
+    for field in ["reply_roles", "change_model_roles", "change_permission_roles", "search_roles"]:
+        if isinstance(data.get(field), list):
+            sanitized[field] = [str(x).strip() for x in data[field] if str(x).strip()]
+
+    # List fields: users (only valid snowflakes)
+    for field in ["reply_users", "change_model_users", "change_permission_users", "search_users"]:
+        if isinstance(data.get(field), list):
+            valid_users = []
+            for u in data[field]:
+                su = str(u).strip()
+                if SNOWFLAKE_REGEX.match(su) and su not in valid_users:
+                    valid_users.append(su)
+            sanitized[field] = valid_users
+
+    # Numerical boundaries
+    if "pagination_max_chars" in data:
+        try:
+            val = int(data["pagination_max_chars"])
+            sanitized["pagination_max_chars"] = max(500, min(val, 1900))
+        except (ValueError, TypeError):
+            pass
+
+    if "random_prompt_probability" in data:
+        try:
+            val = int(data["random_prompt_probability"])
+            sanitized["random_prompt_probability"] = max(0, min(val, 100))
+        except (ValueError, TypeError):
+            pass
+
+    if "memory_turns" in data:
+        try:
+            val = int(data["memory_turns"])
+            sanitized["memory_turns"] = max(0, min(val, 50))
+        except (ValueError, TypeError):
+            pass
+
+    if "memory_ttl_minutes" in data:
+        try:
+            val = int(data["memory_ttl_minutes"])
+            sanitized["memory_ttl_minutes"] = max(1, min(val, 1440))
+        except (ValueError, TypeError):
+            pass
+
+    for bool_field in ["pagination_enabled", "random_prompt_enabled", "web_search_enabled", "web_search_auto"]:
+        if bool_field in data:
+            sanitized[bool_field] = bool(data[bool_field])
+
+    if "system_prompt" in data and isinstance(data["system_prompt"], str):
+        sanitized["system_prompt"] = data["system_prompt"][:4000]
+
+    if "default_model" in data and isinstance(data["default_model"], str):
+        sanitized["default_model"] = data["default_model"].strip()
+
+    return sanitized
 
 def _atomic_write_json(file_path: str, data: dict):
     """Writes JSON data atomically to prevent file corruption."""
@@ -129,6 +198,12 @@ def save_app_config(config: dict):
     """Saves global application settings atomically."""
     path = get_app_config_path()
     _atomic_write_json(path, config)
+    try:
+        import config as cfg_module
+        if hasattr(cfg_module, "invalidate_cache"):
+            cfg_module.invalidate_cache()
+    except Exception:
+        pass
 
 def get_config_path(guild_id) -> str:
     return os.path.join(CONFIG_DIR, f"{guild_id}.json")
@@ -155,12 +230,7 @@ def load_config(guild_id) -> dict:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            merged = dict(DEFAULT_GUILD_CONFIG)
-            merged.update(data)
-            # Enforce max chars boundary
-            if merged.get("pagination_max_chars", 1900) > 1900:
-                merged["pagination_max_chars"] = 1900
-            return merged
+            return validate_and_sanitize_guild_config(data)
     except Exception as e:
         logger.error(f"Error loading config for guild {guild_id}: {e}")
         return dict(DEFAULT_GUILD_CONFIG)
@@ -169,5 +239,6 @@ def save_config(guild_id, config: dict):
     """Saves the config for a given guild atomically."""
     if guild_id is None:
         return
+    sanitized = validate_and_sanitize_guild_config(config)
     path = get_config_path(guild_id)
-    _atomic_write_json(path, config)
+    _atomic_write_json(path, sanitized)

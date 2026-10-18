@@ -60,5 +60,25 @@ class TestConfig(unittest.TestCase):
         except Exception:
             pass
 
+    def test_validate_and_sanitize_guild_config(self):
+        from utils import validate_and_sanitize_guild_config
+
+        raw = {
+            "reply_users": ["295767175426473984", "not_a_snowflake", "123", "295767175426473984"],
+            "pagination_max_chars": 5000,
+            "random_prompt_probability": 250,
+            "memory_turns": -5,
+            "memory_ttl_minutes": 99999
+        }
+        sanitized = validate_and_sanitize_guild_config(raw)
+
+        # Only the valid 18-digit snowflake should remain, deduplicated
+        self.assertEqual(sanitized["reply_users"], ["295767175426473984"])
+        # Boundaries clamped
+        self.assertEqual(sanitized["pagination_max_chars"], 1900)
+        self.assertEqual(sanitized["random_prompt_probability"], 100)
+        self.assertEqual(sanitized["memory_turns"], 0)
+        self.assertEqual(sanitized["memory_ttl_minutes"], 1440)
+
 if __name__ == "__main__":
     unittest.main()

@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.2.1")
+        app_sub = QLabel("AI Discord Assistant v3.3.0")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -1369,21 +1369,21 @@ class MainWindow(QMainWindow):
         locality = "Local" if is_local else "Remote"
         endpoint = getattr(self.provider, 'base_url', '')
 
+        new_pill_id = "statusPillOnline" if running else "statusPillOffline"
         if running:
             self.ai_status_label.setText(f"{name} ({locality}): Online")
             self.kpi_ai_pill.setText("ONLINE")
-            self.kpi_ai_pill.setObjectName("statusPillOnline")
         else:
             self.ai_status_label.setText(f"{name} ({locality}): Offline / Unreachable")
             self.kpi_ai_pill.setText("OFFLINE")
-            self.kpi_ai_pill.setObjectName("statusPillOffline")
+
+        if self.kpi_ai_pill.objectName() != new_pill_id:
+            self.kpi_ai_pill.setObjectName(new_pill_id)
+            self.kpi_ai_pill.style().unpolish(self.kpi_ai_pill)
+            self.kpi_ai_pill.style().polish(self.kpi_ai_pill)
 
         self.kpi_ai_val.setText(f"{name} ({locality})")
         self.kpi_ai_subtext.setText(endpoint[:28])
-
-        # Force re-styling of the status pill
-        self.kpi_ai_pill.style().unpolish(self.kpi_ai_pill)
-        self.kpi_ai_pill.style().polish(self.kpi_ai_pill)
 
         # Disable local process controls if remote
         self.start_ai_btn.setEnabled(is_local)
@@ -1507,23 +1507,22 @@ class MainWindow(QMainWindow):
 
         self.bot_status_label.setText(f"Bot Status: {self._bot_status}")
 
+        new_pill_id = "statusPillOnline" if self._bot_status == "Running" else "statusPillOffline"
         if self._bot_status == "Running":
             self.kpi_bot_pill.setText("ONLINE")
-            self.kpi_bot_pill.setObjectName("statusPillOnline")
             self.kpi_bot_subtext.setText("Discord Gateway Connected")
             self.sidebar_bot_pill.setText("● Online")
-            self.sidebar_bot_pill.setObjectName("statusPillOnline")
         else:
             self.kpi_bot_pill.setText("STOPPED")
-            self.kpi_bot_pill.setObjectName("statusPillOffline")
             self.kpi_bot_subtext.setText("Discord Gateway Offline")
             self.sidebar_bot_pill.setText("● Stopped")
-            self.sidebar_bot_pill.setObjectName("statusPillOffline")
 
-        # Repolish status pill styling
-        for pill in [self.kpi_bot_pill, self.sidebar_bot_pill]:
-            pill.style().unpolish(pill)
-            pill.style().polish(pill)
+        if self.kpi_bot_pill.objectName() != new_pill_id:
+            self.kpi_bot_pill.setObjectName(new_pill_id)
+            self.sidebar_bot_pill.setObjectName(new_pill_id)
+            for pill in [self.kpi_bot_pill, self.sidebar_bot_pill]:
+                pill.style().unpolish(pill)
+                pill.style().polish(pill)
 
     def start_bot(self):
         try:

@@ -23,6 +23,19 @@ class ThemeManager:
         except Exception:
             return hex_color
 
+    def _is_light_theme(self, hex_color: str) -> bool:
+        """Determines if a hex color has light background luminance (>0.5) for WCAG contrast."""
+        hex_color = hex_color.lstrip('#')
+        if len(hex_color) == 3:
+            hex_color = ''.join(c * 2 for c in hex_color)
+        try:
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            return ((0.299 * r + 0.587 * g + 0.114 * b) / 255) > 0.5
+        except Exception:
+            return False
+
     def apply_theme(self, window, theme_file):
         """
         Apply a theme from a JSON file to the given window with modern cards,
@@ -50,6 +63,29 @@ class ThemeManager:
         nav_hover = self._hex_to_rgba(button_hover, 0.18)
         nav_active_bg = self._hex_to_rgba(accent1, 0.22)
         accent_focus = self._hex_to_rgba(accent2, 0.8)
+
+        # Dynamic contrast palette for status pills (WCAG 2.1 AA >= 4.5:1)
+        is_light = self._is_light_theme(base)
+        if is_light:
+            pill_online_fg = "#1a7f37"
+            pill_online_bg = "rgba(26, 127, 55, 0.15)"
+            pill_online_border = "rgba(26, 127, 55, 0.45)"
+            pill_offline_fg = "#cf222e"
+            pill_offline_bg = "rgba(207, 34, 46, 0.15)"
+            pill_offline_border = "rgba(207, 34, 46, 0.45)"
+            pill_warn_fg = "#9a6700"
+            pill_warn_bg = "rgba(154, 103, 0, 0.15)"
+            pill_warn_border = "rgba(154, 103, 0, 0.45)"
+        else:
+            pill_online_fg = "#2ecc71"
+            pill_online_bg = "rgba(46, 204, 113, 0.20)"
+            pill_online_border = "rgba(46, 204, 113, 0.50)"
+            pill_offline_fg = "#ff5252"
+            pill_offline_bg = "rgba(255, 82, 82, 0.20)"
+            pill_offline_border = "rgba(255, 82, 82, 0.50)"
+            pill_warn_fg = "#ffb142"
+            pill_warn_bg = "rgba(255, 177, 66, 0.20)"
+            pill_warn_border = "rgba(255, 177, 66, 0.50)"
 
         stylesheet = f"""
             /* Global Application Window */
@@ -366,36 +402,62 @@ class ThemeManager:
                 border-radius: 4px;
             }}
 
-            /* Status Pills */
-            QLabel#statusPillOnline {{
-                background-color: rgba(46, 204, 113, 0.20);
-                color: #2ecc71;
-                border: 1px solid rgba(46, 204, 113, 0.50);
+            /* Status Pills with Dynamic WCAG AA Contrast */
+            QLabel#statusPillOnline {
+                background-color: {pill_online_bg};
+                color: {pill_online_fg};
+                border: 1px solid {pill_online_border};
                 border-radius: 10px;
                 padding: 3px 9px;
                 font-size: 11px;
                 font-weight: 700;
-            }}
+            }
 
-            QLabel#statusPillOffline {{
-                background-color: rgba(231, 76, 60, 0.20);
-                color: #e74c3c;
-                border: 1px solid rgba(231, 76, 60, 0.50);
+            QLabel#statusPillOffline {
+                background-color: {pill_offline_bg};
+                color: {pill_offline_fg};
+                border: 1px solid {pill_offline_border};
                 border-radius: 10px;
                 padding: 3px 9px;
                 font-size: 11px;
                 font-weight: 700;
-            }}
+            }
 
-            QLabel#statusPillWarning {{
-                background-color: rgba(243, 156, 18, 0.20);
-                color: #f39c12;
-                border: 1px solid rgba(243, 156, 18, 0.50);
+            QLabel#statusPillWarning {
+                background-color: {pill_warn_bg};
+                color: {pill_warn_fg};
+                border: 1px solid {pill_warn_border};
                 border-radius: 10px;
                 padding: 3px 9px;
                 font-size: 11px;
                 font-weight: 700;
-            }}
+            }
+
+            /* Permission Grants Chips */
+            QFrame#permChipRole {
+                background-color: {self._hex_to_rgba(accent1, 0.22)};
+                border: 1px solid {self._hex_to_rgba(accent1, 0.55)};
+                border-radius: 6px;
+            }
+
+            QFrame#permChipRole:hover {
+                border-color: {accent1};
+            }
+
+            QFrame#permChipUser {
+                background-color: {self._hex_to_rgba(accent2, 0.20)};
+                border: 1px solid {self._hex_to_rgba(accent2, 0.55)};
+                border-radius: 6px;
+            }
+
+            QFrame#permChipUser:hover {
+                border-color: {accent2};
+            }
+
+            /* Accessibility Focus Rings */
+            QPushButton:focus, QComboBox:focus, QSpinBox:focus {
+                border: 1px solid {accent_focus};
+            }
 
             /* Tabs (when embedded in child widgets) */
             QTabBar::tab {{

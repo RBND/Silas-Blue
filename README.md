@@ -1,6 +1,6 @@
-# Silas Blue v3.2.1
+# Silas Blue v3.3.0
 
-[![Version](https://img.shields.io/badge/version-3.2.1-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,38 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.2.1 introduces **Bing Zero-Config Search Provider** (reliable, unblocked by anti-bot systems), **Context-Aware Query Formulation** for conversational threads, expanded **Auto-Search Intent Detection** for hardware part numbers and technical lookups, and refined **Discord Pagination & Anti-Abuse System Prompt Guardrails**.
+Silas Blue v3.3.0 introduces a major **GUI and Access Control Overhaul**: resolving layout crushing bugs with responsive scroll areas, scaling permissions for 10,000+ member Discord servers via interactive FlowLayout chip clouds and direct Snowflake ID inputs, hardening security against global name takeovers, and eliminating background performance bottlenecks.
 
 ---
 
-## 🚀 What's New in Version 3.2.1
+## 🚀 What's New in Version 3.3.0
+
+* **Access Control Scalability for Large Discord Servers (10,000+ Members)**:
+  * Replaced unfeasible full-member listboxes with an on-demand **Active Grants Chip Cloud** + **Smart Search & Add** system.
+  * Instant autocomplete for server roles (`guild.roles`), with zero memory bloat or gateway rate-limiting risks on servers with tens of thousands of members.
+  * Direct 18-digit Discord Snowflake ID and `@mention` resolution (`<@!id>`, `<@&id>`) to grant access to specific individual users.
+* **Resolved 1-Line Layout Crushing Bug & High-DPI Polish**:
+  * Re-architected the Server Configuration page with a **Sticky Server Header**, root **`QScrollArea`**, and a **Sticky Action Footer**.
+  * Enabled `HighDpiScaleFactorRoundingPolicy.PassThrough` to prevent widget squishing and text clipping on Windows 125% and 150% display scaling.
+* **Four-Domain Granular Permissions**:
+  * **💬 Bot Chat & Replies** (`can_reply`): Who can prompt Silas Blue in server channels and threads.
+  * **⚡ AI Model Switching** (`can_change_model`): Who can use `!model` to switch active LLMs.
+  * **🛡️ Server Bot Administration** (`can_change_permissions`): Who can configure prompts, memory, and permissions via commands.
+  * **🌐 Web Search & Grounding** (`can_search`): Who can use `!search` or trigger live grounded web queries.
+* **Security & Concurrency Remediations**:
+  * **Eliminated Global Takeover Vector**: Locked `!setglobalname` strictly to the Bot Application Owner (`bot.is_owner()`).
+  * **Safety Guardrail Persistence**: System prompt overrides now concatenate cleanly with foundational anti-malware and jailbreak safety guardrails.
+  * **Strict Schema Sanitization**: Added `validate_and_sanitize_guild_config()` with Snowflake regex filtering and parameter boundary clamps.
+  * **Normalized Snowflake Matching**: String-normalized comparisons across all permission checks to eliminate 64-bit integer type-mismatch bypasses.
+* **Performance & Accessibility Optimizations (WCAG 2.1 AA)**:
+  * In-memory caching for `config.DEBUG`, completely eliminating repetitive disk reads of `app_config.json`.
+  * Removed timer CSS repolish thrashing on status pills.
+  * Dynamic luminance contrast calculation for status pills across dark and light themes (contrast ratio $\ge 4.5:1$).
+  * Added universal keyboard focus rings and unsaved changes confirmation modals on server switches.
+
+---
+
+## 🚀 Prior Features (v3.2.1)
 
 * **Bing Zero-Config Search Provider & Resilient Fallback**:
   * Added Bing Search as a first-class, free, zero-configuration provider that extracts clean titles, snippets, and decodes target redirect URLs without triggering anti-bot blocks.

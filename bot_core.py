@@ -177,20 +177,13 @@ def update_server_config(guild_id, config: dict):
     logger.debug(f"In-memory config updated for guild {guild_id}")
 
 def log_to_gui(event_type: str, data: dict):
-    """Pushes event to the in-memory queue and optionally appends to file."""
+    """Pushes event to the in-memory thread-safe queue without blocking event loop with disk I/O."""
     entry = {
         "event": event_type,
         "data": data,
         "timestamp": time.time()
     }
     gui_event_queue.put(entry)
-    try:
-        log_path = os.path.join("config", "gui_log.txt")
-        os.makedirs("config", exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
-    except Exception:
-        pass
 
 def paginate_text(text: str, max_chars: int = 1850) -> List[str]:
     """
@@ -376,7 +369,10 @@ async def handle_ai_prompt(
     # Base system prompt
     server_prompt = (config.get("system_prompt") or "").strip() if config else ""
     global_prompt = (app_cfg.get("system_prompt") or "").strip()
-    base_sys_prompt = server_prompt if server_prompt else (global_prompt or None)
+    if server_prompt and global_prompt:
+        base_sys_prompt = f"{global_prompt}\n\n### SERVER-SPECIFIC PERSONA & INSTRUCTIONS\n{server_prompt}"
+    else:
+        base_sys_prompt = server_prompt if server_prompt else (global_prompt or None)
 
     try:
         async with message.channel.typing():
@@ -678,11 +674,7 @@ async def set_prompt(ctx, *, prompt: str = ""):
         return
     guild_id = ctx.guild.id
     config = server_configs.get(guild_id, {})
-    roles = config.get("change_permission_roles", ["admin", "owner"])
-
-    is_admin = ctx.author.guild_permissions.administrator or (ctx.author == ctx.guild.owner)
-    has_role = any(r.name.lower() in [x.lower() for x in roles] for r in getattr(ctx.author, "roles", []))
-    if not (is_admin or has_role):
+    if not permissions.can_change_permissions(ctx.author, ctx.guild, config):
         await ctx.send("You do not have permission to change this server's system prompt.")
         return
 
@@ -720,8 +712,9 @@ async def set_nick(ctx, *, new_name: str):
 @bot.command(name="setglobalname")
 async def set_global_name(ctx, *, new_name: str):
     """Changes the bot's global Discord username (Bot owner only, rate-limited by Discord)."""
-    if ctx.author != ctx.guild.owner and not ctx.author.guild_permissions.administrator:
-        await ctx.send("You need Administrator permissions to use this command.")
+    is_owner = await bot.is_owner(ctx.author)
+    if not is_owner:
+        await ctx.send("You must be the Bot Application Owner to change the bot's global username.")
         return
     new_name = new_name.strip()
     if len(new_name) < 2 or len(new_name) > 32:
@@ -790,10 +783,7 @@ async def set_memory(ctx, turns: int):
         return
     guild_id = ctx.guild.id
     config = server_configs.get(guild_id, {})
-    roles = config.get("change_permission_roles", ["admin", "owner"])
-    is_admin = ctx.author.guild_permissions.administrator or (ctx.author == ctx.guild.owner)
-    has_role = any(r.name.lower() in [x.lower() for x in roles] for r in getattr(ctx.author, "roles", []))
-    if not (is_admin or has_role):
+    if not permissions.can_change_permissions(ctx.author, ctx.guild, config):
         await ctx.send("You do not have permission to configure memory settings.")
         return
     if turns < 0 or turns > 50:
@@ -815,10 +805,7 @@ async def set_ttl(ctx, minutes: int):
         return
     guild_id = ctx.guild.id
     config = server_configs.get(guild_id, {})
-    roles = config.get("change_permission_roles", ["admin", "owner"])
-    is_admin = ctx.author.guild_permissions.administrator or (ctx.author == ctx.guild.owner)
-    has_role = any(r.name.lower() in [x.lower() for x in roles] for r in getattr(ctx.author, "roles", []))
-    if not (is_admin or has_role):
+    if not permissions.can_change_permissions(ctx.author, ctx.guild, config):
         await ctx.send("You do not have permission to configure memory settings.")
         return
     if minutes < 1 or minutes > 1440:
