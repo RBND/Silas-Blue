@@ -60,6 +60,7 @@ class WorkerSignals(QObject):
     ai_status_checked = Signal(bool, str)
     model_download_progress = Signal(int, str)
     model_download_finished = Signal()
+    backend_detected = Signal(dict)
 
 class MainWindow(QMainWindow):
     """
@@ -96,6 +97,7 @@ class MainWindow(QMainWindow):
         self.signals.ai_status_checked.connect(self.on_ai_status_checked)
         self.signals.model_download_progress.connect(self.on_model_download_progress)
         self.signals.model_download_finished.connect(self.on_model_download_finished)
+        self.signals.backend_detected.connect(self.on_backend_detected)
 
         # Build tabs
         self.setup_status_tab()
@@ -124,6 +126,7 @@ class MainWindow(QMainWindow):
         # Initial loads
         QTimer.singleShot(200, self.update_ai_status)
         QTimer.singleShot(500, self.refresh_models_async)
+        QTimer.singleShot(1200, self.auto_detect_on_startup)
 
     def setup_status_tab(self):
         self.status_tab = QWidget()
@@ -274,6 +277,20 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         self.backend_tab.setLayout(layout)
 
+        # 0. Auto-Detect Local AI
+        detect_box = QGroupBox("Local AI Auto-Detection")
+        detect_layout = QHBoxLayout()
+        self.autodetect_btn = QPushButton("🔍 Auto-Detect Local AI (Llama.cpp / Ollama)")
+        self.autodetect_btn.setStyleSheet("font-weight: bold; padding: 6px;")
+        self.autodetect_btn.setToolTip("Scan local machine for running Llama.cpp or Ollama instances, executables, and models")
+        self.autodetect_btn.clicked.connect(self.run_auto_detect_all)
+        self.autodetect_status = QLabel("")
+        self.autodetect_status.setStyleSheet("color: #00ff88; font-weight: bold;")
+        detect_layout.addWidget(self.autodetect_btn)
+        detect_layout.addWidget(self.autodetect_status, 1)
+        detect_box.setLayout(detect_layout)
+        layout.addWidget(detect_box)
+
         # 1. AI Provider Selection
         provider_group = QGroupBox("Active AI Backend")
         provider_layout = QVBoxLayout()
@@ -318,26 +335,38 @@ class MainWindow(QMainWindow):
         llama_url_row = QHBoxLayout()
         llama_url_row.addWidget(QLabel("Server URL:"))
         self.llamacpp_url_input = QLineEdit(self.app_cfg.get("llamacpp_url", "http://localhost:8080"))
-        self.llamacpp_url_input.setPlaceholderText("http://localhost:8080 or http://192.168.1.100:8080")
+        self.llamacpp_url_input.setPlaceholderText("http://localhost:8080 or http://127.0.0.1:9931")
         llama_url_row.addWidget(self.llamacpp_url_input)
+        self.detect_llama_btn = QPushButton("🔍 Auto-Detect")
+        self.detect_llama_btn.setToolTip("Auto-detect running Llama.cpp instance and settings")
+        self.detect_llama_btn.clicked.connect(self.run_auto_detect_llama)
+        llama_url_row.addWidget(self.detect_llama_btn)
         llamacpp_layout.addLayout(llama_url_row)
 
         # Optional local launcher
         binary_row = QHBoxLayout()
-        binary_row.addWidget(QLabel("Local llama-server.exe (Optional):"))
+        binary_row.addWidget(QLabel("Local llama.exe / llama-server.exe (Optional):"))
         self.llamacpp_binary_input = QLineEdit(self.app_cfg.get("llamacpp_binary_path", ""))
+        self.locate_binary_btn = QPushButton("Auto-Find")
+        self.locate_binary_btn.setToolTip("Search system for llama.exe or llama-server.exe")
+        self.locate_binary_btn.clicked.connect(self.auto_find_llama_binary)
         self.browse_binary_btn = QPushButton("Browse...")
         self.browse_binary_btn.clicked.connect(self.browse_llama_binary)
         binary_row.addWidget(self.llamacpp_binary_input)
+        binary_row.addWidget(self.locate_binary_btn)
         binary_row.addWidget(self.browse_binary_btn)
         llamacpp_layout.addLayout(binary_row)
 
         model_file_row = QHBoxLayout()
         model_file_row.addWidget(QLabel("Local .gguf Model File (Optional):"))
         self.llamacpp_model_input = QLineEdit(self.app_cfg.get("llamacpp_model_path", ""))
+        self.locate_model_btn = QPushButton("Auto-Find")
+        self.locate_model_btn.setToolTip("Search system for local GGUF models")
+        self.locate_model_btn.clicked.connect(self.auto_find_llama_model)
         self.browse_model_btn = QPushButton("Browse...")
         self.browse_model_btn.clicked.connect(self.browse_llama_model)
         model_file_row.addWidget(self.llamacpp_model_input)
+        model_file_row.addWidget(self.locate_model_btn)
         model_file_row.addWidget(self.browse_model_btn)
         llamacpp_layout.addLayout(model_file_row)
 
@@ -379,7 +408,7 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
     def browse_llama_binary(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select llama-server executable", "", "Executables (*.exe);;All Files (*)")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select llama executable", "", "Executables (*.exe);;All Files (*)")
         if file_path:
             self.llamacpp_binary_input.setText(file_path)
 
@@ -411,6 +440,130 @@ class MainWindow(QMainWindow):
         self.show_feedback(self.save_settings_btn, "Settings Saved!")
         self.update_ai_status()
         self.refresh_models_async()
+
+    def auto_detect_on_startup(self):
+        """If configured AI backend is offline, runs auto-detection in background."""
+        def check_and_detect():
+            if not self.provider.status_sync():
+                from ai_providers.detector import detect_all_ai_providers
+                return detect_all_ai_providers()
+            return None
+
+        future = self.executor.submit(check_and_detect)
+
+        def poll():
+            if future.done():
+                res = future.result()
+                if res and (res.get("llamacpp", {}).get("running") or res.get("ollama", {}).get("running")):
+                    self.signals.backend_detected.emit(res)
+            else:
+                QTimer.singleShot(200, poll)
+        QTimer.singleShot(200, poll)
+
+    def run_auto_detect_all(self):
+        self.autodetect_btn.setEnabled(False)
+        self.autodetect_status.setText("Scanning for running local AI services...")
+
+        def detect():
+            from ai_providers.detector import detect_all_ai_providers
+            return detect_all_ai_providers()
+
+        future = self.executor.submit(detect)
+
+        def poll():
+            if future.done():
+                self.autodetect_btn.setEnabled(True)
+                res = future.result()
+                self.signals.backend_detected.emit(res)
+            else:
+                QTimer.singleShot(100, poll)
+        QTimer.singleShot(100, poll)
+
+    def run_auto_detect_llama(self):
+        self.detect_llama_btn.setEnabled(False)
+
+        def detect():
+            from ai_providers.detector import detect_running_llamacpp, detect_installed_llamacpp, detect_local_models
+            running = detect_running_llamacpp()
+            binary = detect_installed_llamacpp()
+            models = detect_local_models()
+            return running, binary, models
+
+        future = self.executor.submit(detect)
+
+        def poll():
+            if future.done():
+                self.detect_llama_btn.setEnabled(True)
+                running, binary, models = future.result()
+                if running:
+                    self.rb_llamacpp.setChecked(True)
+                    self.llamacpp_url_input.setText(running["url"])
+                    if running.get("binary_path"):
+                        self.llamacpp_binary_input.setText(running["binary_path"])
+                    if running.get("model_path"):
+                        self.llamacpp_model_input.setText(running["model_path"])
+                    self.show_feedback(self.detect_llama_btn, "Llama.cpp Found!")
+                    self.system_log_output.append(f"[AI Backend] Detected active Llama.cpp instance at {running['url']}")
+                    self.save_backend_settings()
+                else:
+                    if binary:
+                        self.llamacpp_binary_input.setText(binary)
+                    if models:
+                        self.llamacpp_model_input.setText(models[0])
+                    msg = "No running server" + (f" (Found binary: {os.path.basename(binary)})" if binary else "")
+                    self.show_feedback(self.detect_llama_btn, msg)
+            else:
+                QTimer.singleShot(100, poll)
+        QTimer.singleShot(100, poll)
+
+    def auto_find_llama_binary(self):
+        from ai_providers.detector import detect_installed_llamacpp
+        binary = detect_installed_llamacpp()
+        if binary:
+            self.llamacpp_binary_input.setText(binary)
+            self.show_feedback(self.locate_binary_btn, "Binary Found!")
+            self.system_log_output.append(f"[AI Backend] Located Llama executable: {binary}")
+        else:
+            self.show_feedback(self.locate_binary_btn, "Not Found")
+
+    def auto_find_llama_model(self):
+        from ai_providers.detector import detect_local_models
+        models = detect_local_models()
+        if models:
+            self.llamacpp_model_input.setText(models[0])
+            self.show_feedback(self.locate_model_btn, f"Found {len(models)} model(s)!")
+            self.system_log_output.append(f"[AI Backend] Located GGUF model: {models[0]}")
+        else:
+            self.show_feedback(self.locate_model_btn, "No GGUF Found")
+
+    @Slot(dict)
+    def on_backend_detected(self, result: dict):
+        rec = result.get("recommended_backend")
+        llama_info = result.get("llamacpp", {})
+        ollama_info = result.get("ollama", {})
+
+        if rec == "llamacpp" or llama_info.get("running"):
+            self.rb_llamacpp.setChecked(True)
+            self.llamacpp_url_input.setText(llama_info.get("url", "http://localhost:8080"))
+            if llama_info.get("binary_path"):
+                self.llamacpp_binary_input.setText(llama_info["binary_path"])
+            if llama_info.get("model_path"):
+                self.llamacpp_model_input.setText(llama_info["model_path"])
+            self.autodetect_status.setText(f"✓ Detected running Llama.cpp ({llama_info.get('url')})")
+            self.system_log_output.append(f"[AI Backend] Auto-detected running Llama.cpp at {llama_info.get('url')}!")
+            self.save_backend_settings()
+        elif rec == "ollama" or ollama_info.get("running"):
+            self.rb_ollama.setChecked(True)
+            self.ollama_url_input.setText(ollama_info.get("url", "http://localhost:11434"))
+            self.autodetect_status.setText(f"✓ Detected running Ollama ({ollama_info.get('url')})")
+            self.system_log_output.append(f"[AI Backend] Auto-detected running Ollama at {ollama_info.get('url')}!")
+            self.save_backend_settings()
+        else:
+            if llama_info.get("binary_path"):
+                self.llamacpp_binary_input.setText(llama_info["binary_path"])
+            if llama_info.get("model_path"):
+                self.llamacpp_model_input.setText(llama_info["model_path"])
+            self.autodetect_status.setText("No active AI servers running. Configured found binaries.")
 
     def update_ai_status(self):
         def check():

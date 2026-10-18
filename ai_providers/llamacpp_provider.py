@@ -131,6 +131,15 @@ class LlamaCppProvider(AIProvider):
         except Exception:
             pass
 
+        # Check local detected models if none returned from server yet
+        try:
+            from .detector import detect_local_models
+            local_models = detect_local_models()
+            if local_models:
+                return [os.path.basename(m) for m in local_models]
+        except Exception:
+            pass
+
         return ["default"]
 
     async def check_status(self) -> bool:
@@ -168,26 +177,41 @@ class LlamaCppProvider(AIProvider):
     def start_local_service(self) -> bool:
         """
         Optionally launches local llama-server if binary_path and model_path are configured.
+        Auto-detects llama executable if binary_path is not specified.
+        Supports both llama-server and unified llama CLI (llama.exe serve).
         """
-        if not self._binary_path or not os.path.exists(self._binary_path):
-            logger.warning("llama-server binary path not specified or file not found.")
-            return False
-        if not self._model_path or not os.path.exists(self._model_path):
-            logger.warning("llama.cpp model path not specified or file not found.")
-            return False
+        binary = self._binary_path
+        if not binary or not os.path.exists(binary):
+            from .detector import detect_installed_llamacpp
+            detected = detect_installed_llamacpp()
+            if detected:
+                binary = detected
+                self._binary_path = detected
+            else:
+                logger.warning("llama executable not specified or file not found.")
+                return False
 
         parsed = urlparse(self._base_url)
         port = str(parsed.port or 8080)
         host = parsed.hostname or "127.0.0.1"
 
+        binary_name = os.path.splitext(os.path.basename(binary))[0].lower()
+        is_unified_cli = binary_name in ("llama", "llama-cli")
+
+        cmd = [binary]
+        if is_unified_cli:
+            cmd.append("serve")
+
+        if self._model_path and os.path.exists(self._model_path):
+            cmd.extend(["-m", self._model_path])
+        elif not is_unified_cli:
+            logger.warning("llama.cpp model path not specified or file not found.")
+            return False
+
+        cmd.extend(["--host", host, "--port", port])
+
         try:
-            cmd = [
-                self._binary_path,
-                "-m", self._model_path,
-                "--host", host,
-                "--port", port
-            ]
-            logger.info(f"Starting local llama-server: {' '.join(cmd)}")
+            logger.info(f"Starting local llama server: {' '.join(cmd)}")
             self._local_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -196,7 +220,7 @@ class LlamaCppProvider(AIProvider):
             time.sleep(2)
             return True
         except Exception as e:
-            logger.error(f"Failed to start local llama-server: {e}")
+            logger.error(f"Failed to start local llama server: {e}")
             return False
 
     def stop_local_service(self) -> bool:

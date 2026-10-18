@@ -40,5 +40,36 @@ class TestProviders(unittest.TestCase):
         self.assertIsInstance(p2, LlamaCppProvider)
         self.assertEqual(p2.base_url, "http://llama-box:8080")
 
+    def test_detector_probe_invalid_port(self):
+        from ai_providers.detector import probe_tcp_port
+        # Port 59999 should not be listening
+        self.assertFalse(probe_tcp_port("127.0.0.1", 59999, timeout=0.05))
+
+    def test_detector_installed_llamacpp(self):
+        from ai_providers.detector import detect_installed_llamacpp
+        # Should return a string or None without crashing
+        res = detect_installed_llamacpp()
+        self.assertTrue(res is None or isinstance(res, str))
+
+    def test_detector_local_models(self):
+        from ai_providers.detector import detect_local_models
+        models = detect_local_models()
+        self.assertIsInstance(models, list)
+
+    def test_detect_all_ai_providers_structure(self):
+        from ai_providers.detector import detect_all_ai_providers
+        data = detect_all_ai_providers()
+        self.assertIn("llamacpp", data)
+        self.assertIn("ollama", data)
+        self.assertIn("recommended_backend", data)
+        self.assertIn("running", data["llamacpp"])
+        self.assertIn("url", data["llamacpp"])
+        self.assertIn("running", data["ollama"])
+
+    def test_factory_auto_mode(self):
+        p = get_ai_provider({"backend_type": "auto"})
+        self.assertIsNotNone(p)
+        self.assertIn(p.name, ("Ollama", "Llama.cpp"))
+
 if __name__ == "__main__":
     unittest.main()

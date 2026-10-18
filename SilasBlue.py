@@ -73,19 +73,66 @@ def start_gui_and_bot():
 
 def ensure_ai_service_running():
     """
-    If configured for local Ollama, checks if Ollama service is active and starts it if needed.
-    Does nothing if configured for a remote server or Llama.cpp.
+    Checks if active AI provider is running. If not, attempts to start it locally
+    or auto-detects another running local AI backend (e.g. Llama.cpp or Ollama).
     """
+    from utils import load_app_config, save_app_config
+    from bot_core import reload_ai_provider
+    from ai_providers.detector import detect_all_ai_providers
+
     provider = get_provider()
-    if provider.name == "Ollama" and provider.is_local():
-        if not provider.status_sync():
-            logger.info("Local Ollama is not running. Attempting to start local Ollama service...")
-            if provider.start_local_service():
-                logger.info("Local Ollama service started successfully.")
-            else:
-                logger.warning("Failed to start local Ollama. The bot may not function until Ollama is started.")
+
+    # 1. If currently configured provider is already responsive, nothing to do
+    if provider.status_sync():
+        logger.info(f"{provider.name} service is running and responsive.")
+        return
+
+    # 2. Attempt to start configured local service
+    if provider.is_local():
+        logger.info(f"Local {provider.name} is not running. Attempting to start local {provider.name} service...")
+        if provider.start_local_service():
+            logger.info(f"Local {provider.name} service started successfully.")
+            return
         else:
-            logger.info("Local Ollama service is running.")
+            logger.warning(f"Failed to start local {provider.name}.")
+
+    # 3. If configured provider is still offline, check if another local AI backend is running
+    logger.info("Scanning for active local AI backends...")
+    detected = detect_all_ai_providers()
+
+    app_cfg = load_app_config()
+    current_backend = app_cfg.get("backend_type", "ollama").lower()
+
+    if detected["llamacpp"]["running"] and current_backend != "llamacpp":
+        llama_info = detected["llamacpp"]
+        logger.info(f"Auto-detected running Llama.cpp instance at {llama_info['url']}! Switching backend...")
+        app_cfg["backend_type"] = "llamacpp"
+        app_cfg["llamacpp_url"] = llama_info["url"]
+        if llama_info.get("binary_path"):
+            app_cfg["llamacpp_binary_path"] = llama_info["binary_path"]
+        if llama_info.get("model_path") and not app_cfg.get("llamacpp_model_path"):
+            app_cfg["llamacpp_model_path"] = llama_info["model_path"]
+        save_app_config(app_cfg)
+        reload_ai_provider()
+        logger.info("Successfully switched to Llama.cpp backend.")
+    elif detected["ollama"]["running"] and current_backend != "ollama":
+        ollama_info = detected["ollama"]
+        logger.info(f"Auto-detected running Ollama instance at {ollama_info['url']}! Switching backend...")
+        app_cfg["backend_type"] = "ollama"
+        app_cfg["ollama_url"] = ollama_info["url"]
+        save_app_config(app_cfg)
+        reload_ai_provider()
+        logger.info("Successfully switched to Ollama backend.")
+    elif detected["llamacpp"]["running"] and current_backend == "llamacpp":
+        # Update URL if port changed (e.g. 9931 vs 8080)
+        llama_info = detected["llamacpp"]
+        if app_cfg.get("llamacpp_url") != llama_info["url"]:
+            logger.info(f"Updating Llama.cpp URL to active endpoint: {llama_info['url']}")
+            app_cfg["llamacpp_url"] = llama_info["url"]
+            if llama_info.get("binary_path") and not app_cfg.get("llamacpp_binary_path"):
+                app_cfg["llamacpp_binary_path"] = llama_info["binary_path"]
+            save_app_config(app_cfg)
+            reload_ai_provider()
 
 if __name__ == "__main__":
     try:
