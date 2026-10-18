@@ -139,7 +139,7 @@ class ServerConfigPage(QWidget):
         pag_rand_row.addWidget(QLabel("Max chars/page (≤1900):"))
         self.pagination_max_chars = QSpinBox()
         self.pagination_max_chars.setRange(500, 1900)
-        self.pagination_max_chars.setValue(1900)
+        self.pagination_max_chars.setValue(1000)
         pag_rand_row.addWidget(self.pagination_max_chars)
 
         pag_rand_row.addSpacing(20)
