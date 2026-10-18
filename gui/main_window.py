@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.2.0")
+        app_sub = QLabel("AI Discord Assistant v3.2.1")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -756,10 +756,11 @@ class MainWindow(QMainWindow):
         prov_row = QHBoxLayout()
         prov_row.addWidget(QLabel("Search Provider:"))
         self.web_search_provider_select = QComboBox()
+        self.web_search_provider_select.addItem("Bing (Free, Zero-Config)", userData="bing")
         self.web_search_provider_select.addItem("DuckDuckGo (Free, Zero-Config)", userData="duckduckgo")
         self.web_search_provider_select.addItem("Tavily AI Search (API Key)", userData="tavily")
         self.web_search_provider_select.addItem("Brave Search (API Key)", userData="brave")
-        current_sp = self.app_cfg.get("web_search_provider", "duckduckgo").lower()
+        current_sp = self.app_cfg.get("web_search_provider", "bing").lower()
         for idx in range(self.web_search_provider_select.count()):
             if self.web_search_provider_select.itemData(idx) == current_sp:
                 self.web_search_provider_select.setCurrentIndex(idx)
@@ -1152,7 +1153,7 @@ class MainWindow(QMainWindow):
         # Web Search settings
         self.app_cfg["web_search_enabled"] = self.web_search_enabled_checkbox.isChecked()
         self.app_cfg["web_search_auto"] = self.web_search_auto_checkbox.isChecked()
-        self.app_cfg["web_search_provider"] = self.web_search_provider_select.currentData() or "duckduckgo"
+        self.app_cfg["web_search_provider"] = self.web_search_provider_select.currentData() or "bing"
         self.app_cfg["web_search_max_results"] = self.web_search_max_results_input.value()
         self.app_cfg["tavily_api_key"] = self.tavily_api_key_input.text().strip()
         self.app_cfg["brave_api_key"] = self.brave_api_key_input.text().strip()
@@ -1171,7 +1172,7 @@ class MainWindow(QMainWindow):
 
     def test_web_search_async(self):
         query = self.test_search_input.text().strip() or "Python release"
-        provider_name = self.web_search_provider_select.currentData() or "duckduckgo"
+        provider_name = self.web_search_provider_select.currentData() or "bing"
         tavily_key = self.tavily_api_key_input.text().strip()
         brave_key = self.brave_api_key_input.text().strip()
         max_res = self.web_search_max_results_input.value()

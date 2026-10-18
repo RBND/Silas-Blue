@@ -1,6 +1,6 @@
-# Silas Blue v3.2.0
+# Silas Blue v3.2.1
 
-[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.2.1-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,20 +9,21 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.2.0 introduces **Real-Time Web Search & Smart Auto-Search Grounding (RAG)**, zero-configuration **DuckDuckGo search**, optional **Tavily** and **Brave Search** integrations, dedicated **GUI controls & diagnostics**, and explicit search commands (`!search`, `!links`, `!autosearch`, `!setwebsearch`).
+Silas Blue v3.2.1 introduces **Bing Zero-Config Search Provider** (reliable, unblocked by anti-bot systems), **Context-Aware Query Formulation** for conversational threads, expanded **Auto-Search Intent Detection** for hardware part numbers and technical lookups, and refined **Discord Pagination & Anti-Abuse System Prompt Guardrails**.
 
 ---
 
-## 🚀 What's New in Version 3.2.0
+## 🚀 What's New in Version 3.2.1
 
-* **Real-Time Web Search & Auto-Grounding (RAG)**:
-  * **Smart Auto-Search Mode**: Automatically evaluates user prompts for search intent or temporal/real-time requirements (e.g. news, releases, scores, current facts) and fetches live web context in the background before generating a response.
-  * **Zero-Config DuckDuckGo Search**: Built-in async search requiring no external API keys or accounts.
-  * **API Search Integrations**: Optional high-speed search via Tavily AI Search and Brave Search APIs.
-  * **Source Citations**: Model synthesizes grounded answers with clean, clickable Discord markdown links to the sources used.
-  * **Search Caching**: In-memory query caching (5-minute TTL) prevents redundant search queries.
-* **New Discord Search Commands**:
-  * `!search <query>` / `!web <query>`: Forces a live web search and synthesizes an answer citing sources.
+* **Bing Zero-Config Search Provider & Resilient Fallback**:
+  * Added Bing Search as a first-class, free, zero-configuration provider that extracts clean titles, snippets, and decodes target redirect URLs without triggering anti-bot blocks.
+  * Resilient cross-provider fallback: if any search provider fails or returns zero results, Silas Blue automatically fails over to Bing (or DuckDuckGo).
+* **Context-Aware Search Query Formulation**:
+  * When a user replies to an ongoing conversation thread (e.g. asking *"Give me a part number to search"*), Silas Blue automatically inspects the referenced message and conversation history to formulate a grounded, high-signal query (e.g. *"Mellanox ConnectX-3 10Gbps SFP PCIe 3.0 x8 part number"*).
+* **Broadened Auto-Search Intent Detection**:
+  * Detects hardware parts, model numbers, SKUs, datasheets, pinouts, benchmarks, specs, and conversational lookup queries.
+* **Refined Discord System Prompt & Safety Guardrails**:
+  * Optimized strictly for Discord's exact 1,000-character line-based pagination, clean paragraph breaks, and anti-abuse / prompt injection guardrails.
   * `!links <query>` / `!rawsearch <query>`: Fetches raw web links and snippets directly without calling the AI model.
   * `!autosearch [on|off]`: Server admin command to toggle auto-search for live questions.
   * `!setwebsearch [on|off]`: Server admin command to enable or disable web search features server-wide.

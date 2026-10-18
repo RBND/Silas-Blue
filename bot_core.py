@@ -25,6 +25,7 @@ from web_search import (
     SearchService,
     WebSearchResult,
     should_auto_search,
+    build_search_query,
     format_grounded_prompt
 )
 
@@ -364,9 +365,10 @@ async def handle_ai_prompt(
     auto_search_enabled = search_enabled and guild_auto_search and app_auto_search
 
     can_search = permissions.can_search(message.author, message.guild, config)
-    do_web_search = can_search and (
-        force_web_search or (auto_search_enabled and should_auto_search(raw_prompt))
+    has_auto_search = auto_search_enabled and (
+        should_auto_search(raw_prompt) or (bool(replied_context) and should_auto_search(effective_prompt))
     )
+    do_web_search = can_search and (force_web_search or has_auto_search)
 
     search_results = []
     citations_footer = ""
@@ -382,17 +384,18 @@ async def handle_ai_prompt(
             if do_web_search:
                 try:
                     search_service = get_search_service()
-                    search_results = await search_service.search(raw_prompt)
+                    search_query = build_search_query(raw_prompt, replied_context=replied_context, history=history)
+                    search_results = await search_service.search(search_query)
                     if search_results:
                         log_to_gui("web_search", {
                             "guild_id": guild_id,
                             "guild_name": guild_name,
                             "user": str(message.author),
-                            "query": raw_prompt,
+                            "query": search_query,
                             "results_count": len(search_results)
                         })
                         system_prompt, citations_footer = format_grounded_prompt(
-                            raw_prompt, search_results, base_system_prompt=base_sys_prompt
+                            search_query, search_results, base_system_prompt=base_sys_prompt
                         )
                     else:
                         system_prompt = base_sys_prompt

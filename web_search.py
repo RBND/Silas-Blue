@@ -10,6 +10,8 @@ import re
 import time
 import logging
 import urllib.parse
+import html
+import base64
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -127,6 +129,71 @@ class DuckDuckGoSearchProvider(SearchProvider):
             return []
 
 
+class BingSearchProvider(SearchProvider):
+    """
+    Zero-config search provider querying Bing search.
+    Fast, reliable, does not trigger bot blocks, and requires no API key.
+    """
+    SEARCH_URL = "https://www.bing.com/search"
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+    @property
+    def name(self) -> str:
+        return "Bing"
+
+    async def search(self, query: str, max_results: int = 5) -> List[WebSearchResult]:
+        headers = {
+            "User-Agent": self.USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        params = {"q": query}
+        timeout = aiohttp.ClientTimeout(total=12)
+
+        results: List[WebSearchResult] = []
+        try:
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                async with session.get(self.SEARCH_URL, params=params) as resp:
+                    if resp.status != 200:
+                        logger.warning(f"Bing search returned status {resp.status} for query: {query}")
+                        return []
+                    body = await resp.text()
+
+            items = re.findall(r'<li class="b_algo"[^>]*>(.*?)</li>', body, re.DOTALL)
+            for item in items:
+                t_match = re.search(r'<h2[^>]*><a[^>]+href="([^"]+)"[^>]*>(.*?)</a></h2>', item)
+                p_match = re.search(r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>', item, re.DOTALL) or re.search(r'<p[^>]*>(.*?)</p>', item, re.DOTALL)
+                if t_match:
+                    raw_url = html.unescape(t_match.group(1))
+                    final_url = raw_url
+                    # Unpack Bing tracking/redirect URLs: /ck/a?!&&p=...&u=a1<base64>...
+                    if "&u=" in raw_url or "?u=" in raw_url:
+                        m = re.search(r'[?&]u=a1([a-zA-Z0-9_-]+)', raw_url)
+                        if m:
+                            raw_b64 = m.group(1).replace('-', '+').replace('_', '/')
+                            pad = '=' * (-len(raw_b64) % 4)
+                            try:
+                                decoded = base64.b64decode((raw_b64 + pad).encode()).decode('utf-8', errors='ignore')
+                                if decoded.startswith("http://") or decoded.startswith("https://"):
+                                    final_url = decoded
+                            except Exception:
+                                pass
+                    title = re.sub(r'<[^>]+>', '', t_match.group(2)).strip()
+                    title = " ".join(html.unescape(title).split())
+                    snippet = ""
+                    if p_match:
+                        raw_snip = re.sub(r'<[^>]+>', '', p_match.group(1)).strip()
+                        snippet = " ".join(html.unescape(raw_snip).split())
+                    if title and final_url:
+                        results.append(WebSearchResult(title=title, url=final_url, snippet=snippet))
+                        if len(results) >= max_results:
+                            break
+            return results
+        except Exception as e:
+            logger.error(f"Error querying Bing search: {e}")
+            return []
+
+
 class TavilySearchProvider(SearchProvider):
     """
     Search provider using the Tavily AI Search API (POST https://api.tavily.com/search).
@@ -233,18 +300,20 @@ class SearchService:
         self._cache_ttl = 300  # 5 minutes cache TTL
 
     def _get_provider(self) -> SearchProvider:
-        provider_name = (self.config.get("web_search_provider") or "duckduckgo").lower()
-        if provider_name == "tavily":
+        provider_name = (self.config.get("web_search_provider") or "bing").lower()
+        if provider_name == "duckduckgo":
+            return DuckDuckGoSearchProvider()
+        elif provider_name == "tavily":
             key = self.config.get("tavily_api_key", "")
             if key:
                 return TavilySearchProvider(key)
-            logger.info("Tavily API key not configured, falling back to DuckDuckGo.")
+            logger.info("Tavily API key not configured, falling back to Bing.")
         elif provider_name == "brave":
             key = self.config.get("brave_api_key", "")
             if key:
                 return BraveSearchProvider(key)
-            logger.info("Brave API key not configured, falling back to DuckDuckGo.")
-        return DuckDuckGoSearchProvider()
+            logger.info("Brave API key not configured, falling back to Bing.")
+        return BingSearchProvider()
 
     async def search(self, query: str, max_results: Optional[int] = None) -> List[WebSearchResult]:
         query = query.strip()
@@ -264,11 +333,16 @@ class SearchService:
         provider = self._get_provider()
         results = await provider.search(query, max_results=limit)
 
-        # Fallback to DuckDuckGo if a third-party API returned empty results
-        if not results and not isinstance(provider, DuckDuckGoSearchProvider):
-            logger.info(f"{provider.name} returned 0 results. Falling back to DuckDuckGo.")
-            ddg = DuckDuckGoSearchProvider()
-            results = await ddg.search(query, max_results=limit)
+        # Resilient fallback if primary provider returned empty results or failed
+        if not results:
+            if not isinstance(provider, BingSearchProvider):
+                logger.info(f"{provider.name} returned 0 results or failed. Falling back to Bing.")
+                fallback_prov = BingSearchProvider()
+                results = await fallback_prov.search(query, max_results=limit)
+            else:
+                logger.info("Bing returned 0 results. Trying DuckDuckGo fallback.")
+                fallback_prov = DuckDuckGoSearchProvider()
+                results = await fallback_prov.search(query, max_results=limit)
 
         if results:
             self._cache[cache_key] = (now, results)
@@ -279,7 +353,7 @@ class SearchService:
         self._cache.clear()
 
 
-# --- Auto-Search Intent Detection ---
+# --- Auto-Search Intent Detection & Query Formulation ---
 
 TEMPORAL_PATTERNS = [
     r"\b(latest|current|recent|today|now|tonight|yesterday|tomorrow)\b",
@@ -290,8 +364,11 @@ TEMPORAL_PATTERNS = [
 LOOKUP_PATTERNS = [
     r"^(what|who|when|where|why|how)\b.*(today|now|recently|current|latest|202[4-9])",
     r"\b(news|headline|headlines|breaking|update|updates|patch notes|changelog)\b",
-    r"\b(release date|released|version|specs|price of|weather in|score of|who won)\b",
-    r"\b(search the web|search for|google|look up|find info on|browse for)\b",
+    r"\b(release date|released|version|specs|specifications|price of|price for|weather in|score of|who won)\b",
+    r"\b(search the web|search for|google|look up|lookup|find info on|browse for|check online)\b",
+    r"\b(part number|part numbers|model number|model numbers|sku|skus|datasheet|datasheets|pinout|pinouts)\b",
+    r"\b(benchmark|benchmarks|cost of|how much is|where to buy|msrp|in stock)\b",
+    r"\b(to search|can you search|can you look up|can you find|give me a part number|give me a model|give me the model|give me the part)\b",
 ]
 
 NON_SEARCH_PATTERNS = [
@@ -300,6 +377,99 @@ NON_SEARCH_PATTERNS = [
     r"\b(repeat after me|translate this|ignore previous instructions)\b",
     r"^(ping|test|echo)\b",
 ]
+
+GENERIC_LOOKUP_WORDS = {
+    "part", "number", "part number", "model", "model number", "sku", "skus",
+    "datasheet", "specs", "specifications", "price", "cost", "link", "url",
+    "pinout", "search", "where", "buy", "online", "details", "info", "information",
+    "a", "an", "the", "me", "to", "for", "give", "need", "you"
+}
+
+FILLER_PREFIXES = [
+    r"^(?:no\s*,?\s*)?(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|i\s+need\s+you\s+to\s+|i\s+need\s+|give\s+me\s+|tell\s+me\s+|show\s+me\s+|what\s+is\s+|what\s+are\s+)+",
+    r"^[!?/]*(?:search\s+(?:the\s+web\s+for|the\s+internet\s+for|for|online\s+for)?|google|look\s+up|find\s+info\s+on|browse\s+for)\s+",
+]
+
+def clean_query_text(text: str) -> str:
+    cleaned = text.strip()
+    for pat in FILLER_PREFIXES:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\s+to\s+(?:search|look\s+up|google|find)\.?$", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^[?!.,;:]+|[?!.,;:]+$", "", cleaned).strip()
+    return cleaned
+
+def extract_context_keywords(context_text: str) -> str:
+    """Extracts high-signal subject keywords from context text."""
+    if not context_text:
+        return ""
+    stripped = re.sub(r"^\[Replying to [^:]+:\s*\"?", "", context_text)
+    stripped = re.sub(r"\"?\]\s*$", "", stripped)
+    stripped = re.sub(r"\bPage\s+\d+(?:/\d+)?\b", "", stripped, flags=re.IGNORECASE)
+    stripped = stripped.replace("\\n", " ").replace("\n", " ")
+    stripped = re.sub(r"[*_`#~>\[\]\(\)|]", " ", stripped)
+
+    tokens = re.findall(r"\b[A-Za-z0-9]+(?:[-_./+][A-Za-z0-9]+)*\b", stripped)
+
+    stop_words = {
+        "page", "the", "and", "or", "for", "with", "this", "that", "you", "your",
+        "silas", "blue", "replying", "response", "summary", "checklist", "step",
+        "recommended", "solution", "upgrade", "table", "need", "give", "can", "will",
+        "about", "from", "are", "not", "have", "been", "would", "like", "using",
+        "what", "when", "where", "which", "there", "here", "also", "just", "more"
+    }
+
+    seen = set()
+    subject_tokens = []
+    for tok in tokens:
+        low = tok.lower()
+        if low not in stop_words and len(tok) > 1 and not tok.isdigit():
+            if any(c.isdigit() for c in tok) or "-" in tok or "+" in tok or tok.isupper() or (tok[0].isupper() and len(tok) > 3):
+                if low not in seen:
+                    seen.add(low)
+                    subject_tokens.append(tok)
+                    if len(subject_tokens) >= 8:
+                        break
+
+    return " ".join(subject_tokens)
+
+def build_search_query(
+    raw_prompt: str,
+    replied_context: str = "",
+    history: Optional[List[Dict[str, str]]] = None
+) -> str:
+    """
+    Constructs an optimized, grounded search query from a user prompt,
+    enriching vague follow-up prompts with contextual subjects when available.
+    """
+    cleaned = clean_query_text(raw_prompt)
+    words = set(re.findall(r"\b\w+\b", cleaned.lower()))
+    is_vague = (len(words) <= 3 or words.issubset(GENERIC_LOOKUP_WORDS))
+
+    if not is_vague:
+        return cleaned
+
+    context_subject = ""
+    if replied_context:
+        context_subject = extract_context_keywords(replied_context)
+
+    if not context_subject and history:
+        for item in reversed(history):
+            if item.get("role") == "user":
+                prev_text = item.get("content", "")
+                context_subject = extract_context_keywords(prev_text)
+                if context_subject:
+                    break
+        if not context_subject:
+            for item in reversed(history):
+                if item.get("role") == "assistant":
+                    context_subject = extract_context_keywords(item.get("content", ""))
+                    if context_subject:
+                        break
+
+    if context_subject:
+        cleaned_suffix = re.sub(r'^(?:a|an|the)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+        return f"{context_subject} {cleaned_suffix}".strip()
+    return cleaned or raw_prompt
 
 def should_auto_search(prompt: str) -> bool:
     """
