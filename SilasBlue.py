@@ -13,6 +13,9 @@ import signal
 import logging
 import argparse
 
+# Remove conflicting PYTHONHOME in Windows multi-python environments
+os.environ.pop("PYTHONHOME", None)
+
 from bot_core import start_bot, stop_bot, restart_bot, get_provider
 from utils import load_app_config, save_app_config
 import config
@@ -41,53 +44,69 @@ def set_crash_counter(val: int):
 if get_crash_counter() >= 2:
     config.DEBUG = True
     logger.info("Debug mode auto-enabled due to previous crashes.")
+    # Check if an update caused a boot failure; if so, trigger rollback
+    try:
+        from updater import BotUpdater
+        rolled_back, msg = BotUpdater.rollback()
+        if rolled_back:
+            logger.warning(f"Repeated crash on boot detected! Automated update rollback executed: {msg}")
+    except Exception as e:
+        logger.debug(f"Rollback verification check: {e}")
     set_crash_counter(0)
 
-def start_gui_and_bot(enable_web: bool = True, web_host: str = "127.0.0.1", web_port: int = 8080):
-    """Starts the PySide6 GUI and triggers bot startup and optional web dashboard."""
-    from gui.main_window import MainWindow
-    from PySide6.QtWidgets import QApplication, QSplashScreen
-    from PySide6.QtCore import QTimer, Qt
-    from PySide6.QtGui import QPixmap, QGuiApplication
+def start_gui_and_bot(enable_web: bool = True, web_host: str = "127.0.0.1", web_port: int = 8080, legacy_qt: bool = False):
+    """Starts the desktop GUI (unified WebView by default, or legacy PySide6) and bot services."""
+    if legacy_qt:
+        logger.info("Starting Silas Blue with legacy PySide6 Qt GUI...")
+        from gui.main_window import MainWindow
+        from PySide6.QtWidgets import QApplication, QSplashScreen
+        from PySide6.QtCore import QTimer, Qt
+        from PySide6.QtGui import QPixmap, QGuiApplication
 
-    # Enable fractional High-DPI Pass-Through scaling to prevent layout clipping
-    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
+        # Enable fractional High-DPI Pass-Through scaling to prevent layout clipping
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
 
-    app = QApplication(sys.argv)
+        app = QApplication(sys.argv)
 
-    # Splash Screen
-    splash = None
-    splash_path = os.path.join("gui", "splash.png")
-    if os.path.exists(splash_path):
-        splash_pix = QPixmap(splash_path)
-        splash = QSplashScreen(splash_pix)
-        splash.show()
-        app.processEvents()
+        # Splash Screen
+        splash = None
+        splash_path = os.path.join("gui", "splash.png")
+        if os.path.exists(splash_path):
+            splash_pix = QPixmap(splash_path)
+            splash = QSplashScreen(splash_pix)
+            splash.show()
+            app.processEvents()
 
-    # Optional local web server
-    if enable_web:
-        try:
-            from web.server import start_web_server_in_thread
-            start_web_server_in_thread(host=web_host, port=web_port)
-        except Exception as e:
-            logger.warning(f"Failed to start embedded web server: {e}")
+        # Optional local web server
+        if enable_web:
+            try:
+                from web.server import start_web_server_in_thread
+                start_web_server_in_thread(host=web_host, port=web_port)
+            except Exception as e:
+                logger.warning(f"Failed to start embedded web server: {e}")
 
-    def show_main_window():
-        window = MainWindow(start_bot=start_bot, stop_bot=stop_bot, restart_bot=restart_bot)
-        window.show()
-        if splash:
-            splash.finish(window)
-        window.redirect_output_to_log()
-        # Start Discord bot in background
-        QTimer.singleShot(100, start_bot)
+        def show_main_window():
+            window = MainWindow(start_bot=start_bot, stop_bot=stop_bot, restart_bot=restart_bot)
+            window.show()
+            if splash:
+                splash.finish(window)
+            window.redirect_output_to_log()
+            # Start Discord bot in background
+            QTimer.singleShot(100, start_bot)
 
-    # Transition from splash to main window
-    QTimer.singleShot(1500, show_main_window)
-    exit_code = app.exec()
-    set_crash_counter(0)  # Clean exit
-    sys.exit(exit_code)
+        # Transition from splash to main window
+        QTimer.singleShot(1500, show_main_window)
+        exit_code = app.exec()
+        set_crash_counter(0)  # Clean exit
+        sys.exit(exit_code)
+
+    # Unified WebView Desktop App (Single UI codebase)
+    from gui.webview_app import start_desktop_app
+    start_desktop_app(web_host=web_host, web_port=web_port)
+    set_crash_counter(0)
+    sys.exit(0)
 
 def start_headless_and_bot(web_host: str = "127.0.0.1", web_port: int = 8080):
     """Starts bot core and web management server in headless mode (no GUI display needed)."""
@@ -201,6 +220,8 @@ if __name__ == "__main__":
     parser.add_argument("--web-host", default="127.0.0.1", help="Host interface for web dashboard (default: 127.0.0.1; use 0.0.0.0 for LAN/VPS)")
     parser.add_argument("--web-port", type=int, default=8080, help="Port for web dashboard (default: 8080)")
 
+    parser.add_argument("--legacy-gui", "--qt", action="store_true", help="Run with legacy PySide6 Qt GUI instead of unified WebView")
+
     args = parser.parse_args()
 
     enable_web = args.web and not args.no_web
@@ -212,10 +233,23 @@ if __name__ == "__main__":
         if is_headless:
             start_headless_and_bot(web_host=args.web_host, web_port=args.web_port)
         else:
-            start_gui_and_bot(enable_web=enable_web, web_host=args.web_host, web_port=args.web_port)
+            start_gui_and_bot(
+                enable_web=enable_web,
+                web_host=args.web_host,
+                web_port=args.web_port,
+                legacy_qt=args.legacy_gui
+            )
 
     except Exception as e:
         count = get_crash_counter() + 1
         set_crash_counter(count)
         logger.error(f"Silas Blue encountered an unhandled crash: {e}")
+        if count >= 2:
+            try:
+                from updater import BotUpdater
+                rolled_back, msg = BotUpdater.rollback()
+                if rolled_back:
+                    logger.warning(f"Repeated crash on boot detected! Automated update rollback executed: {msg}")
+            except Exception:
+                pass
         raise

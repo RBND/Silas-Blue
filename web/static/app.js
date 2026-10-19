@@ -5,6 +5,48 @@ let ws = null;
 let reconnectTimer = null;
 let currentGuilds = [];
 
+// --- Toast Notifications ---
+function showToast(message, type = 'success', duration = 3500) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+
+    let icon = '✓';
+    if (type === 'error') icon = '✕';
+    else if (type === 'warning') icon = '⚠';
+    else if (type === 'info') icon = 'ℹ';
+
+    toast.innerHTML = `
+        <span class="toast-icon">${icon}</span>
+        <span class="toast-message">${message}</span>
+    `;
+
+    toast.onclick = () => dismissToast(toast);
+
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+        toast.classList.add('show');
+    });
+
+    setTimeout(() => {
+        dismissToast(toast);
+    }, duration);
+}
+
+function dismissToast(toast) {
+    if (!toast || toast.classList.contains('hide')) return;
+    toast.classList.remove('show');
+    toast.classList.add('hide');
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 300);
+}
+
 // --- Navigation ---
 function switchPage(pageId) {
     activePage = pageId;
@@ -21,6 +63,7 @@ function switchPage(pageId) {
 
     if (pageId === 'ai') loadAiSettings();
     if (pageId === 'servers') loadGuildsList();
+    if (pageId === 'updates') loadUpdateStatus();
 }
 
 // --- WebSocket Real-Time Log Streaming ---
@@ -224,10 +267,10 @@ async function changeActiveModel() {
         const result = await res.json();
         if (result.success) {
             refreshStatus();
-            alert(`Active model switched to: ${model}`);
+            showToast(`Active model switched to: ${model}`, 'success');
         }
     } catch (e) {
-        alert('Failed to change model');
+        showToast('Failed to change model', 'error');
     }
 }
 
@@ -243,10 +286,10 @@ async function pullModel() {
             body: JSON.stringify({ model })
         });
         const result = await res.json();
-        alert(result.message || 'Pull initiated. Check live logs for progress.');
+        showToast(result.message || 'Pull initiated. Check live logs for progress.', 'info');
         input.value = '';
     } catch (e) {
-        alert('Failed to initiate pull');
+        showToast('Failed to initiate pull', 'error');
     }
 }
 
@@ -348,14 +391,26 @@ async function saveAiSettings() {
             body: JSON.stringify(payload)
         });
         const result = await res.json();
-        alert(result.message || 'Settings saved!');
+        showToast(result.message || 'Settings saved!', 'success');
         refreshStatus();
     } catch (e) {
-        alert('Failed to save AI settings');
+        showToast('Failed to save AI settings', 'error');
     }
 }
 
-// --- Server Configuration ---
+// --- Server Configuration & Permission Management ---
+const SNOWFLAKE_REGEX = /^[1-9]\d{16,19}$/;
+const USER_MENTION_REGEX = /^<@!?([1-9]\d{16,19})>$/;
+const ROLE_MENTION_REGEX = /^<@&([1-9]\d{16,19})>$/;
+
+let permData = {
+    reply: { roles: ['everyone'], users: [] },
+    model: { roles: [], users: [] },
+    perm: { roles: [], users: [] },
+    search: { roles: ['everyone'], users: [] }
+};
+let serverAvailableRoles = [];
+
 async function loadGuildsList() {
     const select = document.getElementById('guild-select');
     select.innerHTML = '';
@@ -378,11 +433,41 @@ async function loadSelectedGuildConfig() {
         const res = await fetch(`/api/guild/${guildId}`);
         const data = await res.json();
         const cfg = data.config || {};
-        const roles = data.available_roles || [];
+        serverAvailableRoles = data.available_roles || [];
 
-        renderRolesCheckboxes('roles-reply', roles, cfg.reply_roles || []);
-        renderRolesCheckboxes('roles-model', roles, cfg.change_model_roles || []);
-        renderRolesCheckboxes('roles-perm', roles, cfg.change_permission_roles || []);
+        // Update datalist for role autocompletion
+        const datalist = document.getElementById('available-roles-datalist');
+        if (datalist) {
+            datalist.innerHTML = '';
+            serverAvailableRoles.forEach(r => {
+                if (r.name && r.name !== '@everyone') {
+                    const opt = document.createElement('option');
+                    opt.value = r.name;
+                    datalist.appendChild(opt);
+                }
+            });
+        }
+
+        permData = {
+            reply: {
+                roles: Array.isArray(cfg.reply_roles) ? [...cfg.reply_roles] : ['everyone'],
+                users: Array.isArray(cfg.reply_users) ? [...cfg.reply_users] : []
+            },
+            model: {
+                roles: Array.isArray(cfg.change_model_roles) ? [...cfg.change_model_roles] : [],
+                users: Array.isArray(cfg.change_model_users) ? [...cfg.change_model_users] : []
+            },
+            perm: {
+                roles: Array.isArray(cfg.change_permission_roles) ? [...cfg.change_permission_roles] : [],
+                users: Array.isArray(cfg.change_permission_users) ? [...cfg.change_permission_users] : []
+            },
+            search: {
+                roles: Array.isArray(cfg.search_roles) ? [...cfg.search_roles] : ['everyone'],
+                users: Array.isArray(cfg.search_users) ? [...cfg.search_users] : []
+            }
+        };
+
+        ['reply', 'model', 'perm', 'search'].forEach(scope => renderPermScope(scope));
 
         document.getElementById('cfg-pagination').checked = cfg.pagination_enabled !== false;
         document.getElementById('cfg-max-chars').value = cfg.pagination_max_chars || 1000;
@@ -394,42 +479,200 @@ async function loadSelectedGuildConfig() {
     }
 }
 
-function renderRolesCheckboxes(containerId, roles, selectedRoles) {
-    const container = document.getElementById(containerId);
-    container.innerHTML = '';
-    const selectedLower = selectedRoles.map(r => r.toLowerCase());
+function renderPermScope(scope) {
+    const scopeData = permData[scope];
+    if (!scopeData) return;
 
-    roles.forEach(r => {
-        const div = document.createElement('div');
-        div.style.marginBottom = '4px';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.value = r.name;
-        cb.checked = selectedLower.includes(r.name.toLowerCase());
-        cb.style.width = 'auto';
-        cb.style.marginRight = '8px';
+    const isEveryone = scopeData.roles.some(r => typeof r === 'string' && ['everyone', '@everyone'].includes(r.toLowerCase()));
 
-        const lbl = document.createElement('label');
-        lbl.textContent = r.name;
-        lbl.prepend(cb);
-        div.appendChild(lbl);
-        container.appendChild(div);
-    });
+    // Set radio buttons
+    const rbEveryone = document.querySelector(`input[name="perm-mode-${scope}"][value="everyone"]`);
+    const rbRestricted = document.querySelector(`input[name="perm-mode-${scope}"][value="restricted"]`);
+    if (rbEveryone && rbRestricted) {
+        rbEveryone.checked = isEveryone;
+        rbRestricted.checked = !isEveryone;
+    }
+
+    const chipsContainer = document.getElementById(`chips-${scope}`);
+    const emptyState = document.getElementById(`empty-${scope}`);
+    const inputRow = document.getElementById(`input-row-${scope}`);
+
+    if (isEveryone) {
+        if (chipsContainer) chipsContainer.style.display = 'none';
+        if (emptyState) emptyState.style.display = 'none';
+        if (inputRow) inputRow.style.display = 'none';
+        return;
+    }
+
+    // Restricted mode: show chips and input
+    if (chipsContainer) chipsContainer.style.display = 'flex';
+    if (inputRow) inputRow.style.display = 'flex';
+
+    if (chipsContainer) {
+        chipsContainer.innerHTML = '';
+        const cleanRoles = scopeData.roles.filter(r => typeof r === 'string' && !['everyone', '@everyone'].includes(r.toLowerCase()));
+
+        cleanRoles.forEach(r => {
+            const chip = document.createElement('div');
+            chip.className = 'perm-chip role';
+            const span = document.createElement('span');
+            span.textContent = `🛡️ ${r}`;
+            const btn = document.createElement('button');
+            btn.className = 'del-btn';
+            btn.textContent = '✕';
+            btn.title = 'Remove role grant';
+            btn.onclick = () => removePermGrant(scope, 'role', r);
+            chip.appendChild(span);
+            chip.appendChild(btn);
+            chipsContainer.appendChild(chip);
+        });
+
+        scopeData.users.forEach(u => {
+            const chip = document.createElement('div');
+            chip.className = 'perm-chip user';
+            const span = document.createElement('span');
+            span.textContent = `👤 User (${String(u).slice(-4)})`;
+            span.title = `Discord User ID: ${u}`;
+            const btn = document.createElement('button');
+            btn.className = 'del-btn';
+            btn.textContent = '✕';
+            btn.title = 'Remove user grant';
+            btn.onclick = () => removePermGrant(scope, 'user', u);
+            chip.appendChild(span);
+            chip.appendChild(btn);
+            chipsContainer.appendChild(chip);
+        });
+
+        if (emptyState) {
+            emptyState.style.display = (cleanRoles.length === 0 && scopeData.users.length === 0) ? 'block' : 'none';
+        }
+    }
 }
 
-function getSelectedRoles(containerId) {
-    const checked = document.querySelectorAll(`#${containerId} input:checked`);
-    return Array.from(checked).map(cb => cb.value);
+function togglePermMode(scope, mode) {
+    if (!permData[scope]) return;
+    if (mode === 'everyone') {
+        permData[scope].roles = ['everyone'];
+        permData[scope].users = [];
+    } else {
+        permData[scope].roles = permData[scope].roles.filter(r => typeof r === 'string' && !['everyone', '@everyone'].includes(r.toLowerCase()));
+    }
+    renderPermScope(scope);
+}
+
+function addPermGrant(scope) {
+    const input = document.getElementById(`input-${scope}`);
+    const status = document.getElementById(`status-${scope}`);
+    if (!input || !permData[scope]) return;
+
+    const val = input.value.trim();
+    if (!val) return;
+
+    if (status) {
+        status.style.display = 'none';
+        status.textContent = '';
+    }
+
+    // 1. User Mention <@123456789...> or <@!123456789...>
+    const userMatch = val.match(USER_MENTION_REGEX);
+    if (userMatch) {
+        const uid = userMatch[1];
+        if (!permData[scope].users.includes(uid)) {
+            permData[scope].users.push(uid);
+        }
+        input.value = '';
+        renderPermScope(scope);
+        return;
+    }
+
+    // 2. Role Mention <@&123456789...>
+    const roleMatch = val.match(ROLE_MENTION_REGEX);
+    if (roleMatch) {
+        const rid = roleMatch[1];
+        const found = serverAvailableRoles.find(r => String(r.id) === rid);
+        const roleName = found ? found.name : rid;
+        if (!permData[scope].roles.some(r => r.toLowerCase() === roleName.toLowerCase())) {
+            permData[scope].roles.push(roleName);
+        }
+        input.value = '';
+        renderPermScope(scope);
+        return;
+    }
+
+    // 3. Raw Snowflake (17-20 digits)
+    if (SNOWFLAKE_REGEX.test(val)) {
+        // If matches available server role ID, add role name; otherwise add user snowflake
+        const found = serverAvailableRoles.find(r => String(r.id) === val);
+        if (found) {
+            if (!permData[scope].roles.some(r => r.toLowerCase() === found.name.toLowerCase())) {
+                permData[scope].roles.push(found.name);
+            }
+        } else {
+            if (!permData[scope].users.includes(val)) {
+                permData[scope].users.push(val);
+            }
+        }
+        input.value = '';
+        renderPermScope(scope);
+        return;
+    }
+
+    // 4. Role Name
+    const matchedRole = serverAvailableRoles.find(r => r.name.toLowerCase() === val.toLowerCase());
+    const roleToAdd = matchedRole ? matchedRole.name : val;
+    if (permData[scope].roles.some(r => r.toLowerCase() === roleToAdd.toLowerCase())) {
+        if (status) {
+            status.textContent = `Role '${roleToAdd}' already granted.`;
+            status.style.color = 'var(--accent-cyan)';
+            status.style.display = 'block';
+        }
+        return;
+    }
+
+    permData[scope].roles.push(roleToAdd);
+    input.value = '';
+    renderPermScope(scope);
+}
+
+function removePermGrant(scope, type, val) {
+    if (!permData[scope]) return;
+    if (type === 'user') {
+        permData[scope].users = permData[scope].users.filter(u => u !== val);
+    } else {
+        permData[scope].roles = permData[scope].roles.filter(r => r !== val);
+    }
+    renderPermScope(scope);
+}
+
+function getScopeDataForSave(scope) {
+    const isEveryone = permData[scope].roles.some(r => typeof r === 'string' && ['everyone', '@everyone'].includes(r.toLowerCase()));
+    if (isEveryone) {
+        return { roles: ['everyone'], users: [] };
+    }
+    return {
+        roles: permData[scope].roles.filter(r => typeof r === 'string' && !['everyone', '@everyone'].includes(r.toLowerCase())),
+        users: [...permData[scope].users]
+    };
 }
 
 async function saveServerConfig() {
     const guildId = document.getElementById('guild-select').value;
     if (!guildId) return;
 
+    const reply = getScopeDataForSave('reply');
+    const model = getScopeDataForSave('model');
+    const perm = getScopeDataForSave('perm');
+    const search = getScopeDataForSave('search');
+
     const payload = {
-        reply_roles: getSelectedRoles('roles-reply'),
-        change_model_roles: getSelectedRoles('roles-model'),
-        change_permission_roles: getSelectedRoles('roles-perm'),
+        reply_roles: reply.roles,
+        reply_users: reply.users,
+        change_model_roles: model.roles,
+        change_model_users: model.users,
+        change_permission_roles: perm.roles,
+        change_permission_users: perm.users,
+        search_roles: search.roles,
+        search_users: search.users,
         pagination_enabled: document.getElementById('cfg-pagination').checked,
         pagination_max_chars: parseInt(document.getElementById('cfg-max-chars').value) || 1000,
         system_prompt: document.getElementById('cfg-server-system-prompt').value.trim(),
@@ -444,9 +687,240 @@ async function saveServerConfig() {
             body: JSON.stringify(payload)
         });
         const result = await res.json();
-        alert(result.message || 'Server configuration saved!');
+        showToast(result.message || 'Server configuration saved!', 'success');
     } catch (e) {
-        alert('Failed to save server config');
+        showToast('Failed to save server config', 'error');
+    }
+}
+
+// --- Updater Management ---
+async function loadUpdateStatus() {
+    try {
+        const res = await fetch('/api/update/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Update Dashboard Summary
+        const dashSummary = document.getElementById('dash-update-summary');
+        const dashBtnApply = document.getElementById('btn-dash-update-apply');
+        const currVer = data.current_version || '3.3.4';
+        const currSha = (data.current_commit || '').substring(0, 7);
+
+        if (dashSummary) {
+            dashSummary.textContent = `Silas Blue v${currVer} (#${currSha}) • Channel: ${(data.config?.update_channel || 'stable').toUpperCase()}`;
+        }
+
+        // Update Updates Page Form & KPIs
+        const updateCurrVer = document.getElementById('update-curr-version');
+        const updateCurrCommit = document.getElementById('update-curr-commit');
+        const updateCurrChan = document.getElementById('update-curr-channel');
+        
+        if (updateCurrVer) updateCurrVer.textContent = currVer;
+        if (updateCurrCommit) updateCurrCommit.textContent = `#${currSha}`;
+        if (updateCurrChan) updateCurrChan.textContent = (data.config?.update_channel || 'stable').toUpperCase();
+
+        const cfg = data.config || {};
+        const selChan = document.getElementById('cfg-update-channel');
+        const chkAuto = document.getElementById('cfg-auto-update-enabled');
+        const selMode = document.getElementById('cfg-auto-update-mode');
+        const numInterval = document.getElementById('cfg-auto-update-interval');
+        const txtNotifyChan = document.getElementById('cfg-update-notify-channel');
+        const chkNotifyOwner = document.getElementById('cfg-update-notify-owner');
+
+        if (selChan) selChan.value = cfg.update_channel || 'stable';
+        if (chkAuto) chkAuto.checked = !!cfg.auto_update_enabled;
+        if (selMode) selMode.value = cfg.auto_update_mode || 'notify';
+        if (numInterval) numInterval.value = cfg.auto_update_interval_hours || 24;
+        if (txtNotifyChan) txtNotifyChan.value = cfg.update_notify_channel_id || '';
+        if (chkNotifyOwner) chkNotifyOwner.checked = cfg.update_notify_owner_dm !== false;
+
+        // Render cached status if available
+        if (data.cached_status) {
+            renderUpdateResult(data.cached_status);
+        }
+    } catch (e) {
+        console.error('Failed to load update status:', e);
+    }
+}
+
+function renderUpdateResult(res) {
+    const statusPill = document.getElementById('update-status-pill');
+    const statusSub = document.getElementById('update-status-sub');
+    const latestVer = document.getElementById('update-latest-version');
+    const latestCommit = document.getElementById('update-latest-commit');
+    const btnDashApply = document.getElementById('btn-dash-update-apply');
+    const btnFullApply = document.getElementById('btn-full-update-apply');
+    const changelogContainer = document.getElementById('update-changelog-container');
+    const changelogList = document.getElementById('update-changelog-list');
+    const actionPrompt = document.getElementById('update-action-prompt');
+
+    if (latestVer) latestVer.textContent = res.latest_version || res.current_version;
+    if (latestCommit) latestCommit.textContent = `#${(res.latest_commit || '').substring(0, 7)}`;
+
+    if (res.update_available) {
+        if (statusPill) {
+            statusPill.className = 'status-pill online';
+            statusPill.textContent = 'UPDATE READY';
+        }
+        if (statusSub) statusSub.textContent = `Newer version available`;
+        if (actionPrompt) actionPrompt.innerHTML = `<b style="color:var(--accent-cyan);">A newer version (${res.latest_version}) is ready to install!</b>`;
+        if (btnDashApply) btnDashApply.style.display = 'inline-block';
+        if (btnFullApply) btnFullApply.style.display = 'inline-block';
+
+        if (res.changelog && res.changelog.length > 0) {
+            if (changelogContainer) changelogContainer.style.display = 'block';
+            if (changelogList) {
+                changelogList.innerHTML = '';
+                res.changelog.forEach(item => {
+                    const li = document.createElement('li');
+                    li.textContent = item;
+                    changelogList.appendChild(li);
+                });
+            }
+        }
+    } else {
+        if (statusPill) {
+            statusPill.className = 'status-pill online';
+            statusPill.textContent = 'UP TO DATE';
+        }
+        if (statusSub) statusSub.textContent = 'No updates pending';
+        if (actionPrompt) actionPrompt.textContent = 'Silas Blue is running the latest version.';
+        if (btnDashApply) btnDashApply.style.display = 'none';
+        if (btnFullApply) btnFullApply.style.display = 'none';
+        if (changelogContainer) changelogContainer.style.display = 'none';
+    }
+}
+
+async function checkUpdates(userTriggered = false) {
+    const chan = document.getElementById('cfg-update-channel')?.value || 'stable';
+    const actionPrompt = document.getElementById('update-action-prompt');
+    if (actionPrompt) actionPrompt.textContent = 'Contacting GitHub and checking repository for updates...';
+
+    try {
+        const res = await fetch('/api/update/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: chan })
+        });
+        const result = await res.json();
+        renderUpdateResult(result);
+        if (userTriggered) {
+            if (result.update_available) {
+                showToast(`Update Available! Latest: ${result.latest_version || result.latest_commit}`, 'info');
+            } else {
+                showToast('Silas Blue is already up to date!', 'success');
+            }
+        }
+    } catch (e) {
+        console.error('Update check failed:', e);
+        if (actionPrompt) actionPrompt.textContent = 'Failed to check for updates. Check server logs.';
+        showToast('Failed to check for updates', 'error');
+    }
+}
+
+async function applyUpdate() {
+    const chan = document.getElementById('cfg-update-channel')?.value || 'stable';
+    if (!confirm(`Are you sure you want to install the update from channel '${chan}' and restart Silas Blue?`)) {
+        return;
+    }
+
+    const actionPrompt = document.getElementById('update-action-prompt');
+    if (actionPrompt) actionPrompt.textContent = 'Creating safety backup, pulling update, and preparing restart...';
+
+    const btnFullApply = document.getElementById('btn-full-update-apply');
+    const btnDashApply = document.getElementById('btn-dash-update-apply');
+    if (btnFullApply) btnFullApply.disabled = true;
+    if (btnDashApply) btnDashApply.disabled = true;
+
+    try {
+        const res = await fetch('/api/update/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channel: chan })
+        });
+        const result = await res.json();
+
+        if (result.success) {
+            showToast('Update staged! Silas Blue is now restarting. Dashboard will reconnect momentarily.', 'info', 6000);
+            setTimeout(() => {
+                window.location.reload();
+            }, 6000);
+        } else {
+            showToast(`Update failed: ${result.error || 'Unknown error'}`, 'error', 5000);
+            if (btnFullApply) btnFullApply.disabled = false;
+            if (btnDashApply) btnDashApply.disabled = false;
+        }
+    } catch (e) {
+        showToast('Server connection lost during update restart. Reloading page...', 'warning', 5000);
+        setTimeout(() => {
+            window.location.reload();
+        }, 5000);
+    }
+}
+
+async function saveUpdateSettings() {
+    const payload = {
+        update_channel: document.getElementById('cfg-update-channel').value,
+        auto_update_enabled: document.getElementById('cfg-auto-update-enabled').checked,
+        auto_update_mode: document.getElementById('cfg-auto-update-mode').value,
+        auto_update_interval_hours: parseInt(document.getElementById('cfg-auto-update-interval').value) || 24,
+        update_notify_channel_id: document.getElementById('cfg-update-notify-channel').value.trim() || null,
+        update_notify_owner_dm: document.getElementById('cfg-update-notify-owner').checked
+    };
+
+    try {
+        const res = await fetch('/api/update/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        showToast(result.message || 'Updater settings saved!', 'success');
+        loadUpdateStatus();
+    } catch (e) {
+        showToast('Failed to save updater configuration', 'error');
+    }
+}
+
+// --- Bot Invite Modal ---
+let activeInviteUrl = '';
+
+async function openInviteModal() {
+    const modal = document.getElementById('invite-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+
+    try {
+        const res = await fetch('/api/bot/invite');
+        if (res.ok) {
+            const data = await res.json();
+            activeInviteUrl = data.invite_url || '';
+            document.getElementById('invite-client-id').value = data.client_id || 'Not configured';
+            document.getElementById('invite-url-input').value = activeInviteUrl || 'Token not loaded';
+        }
+    } catch (e) {
+        console.error('Failed to fetch invite details:', e);
+    }
+}
+
+function closeInviteModal() {
+    const modal = document.getElementById('invite-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function copyInviteLink() {
+    const input = document.getElementById('invite-url-input');
+    if (input && input.value) {
+        navigator.clipboard.writeText(input.value);
+        showToast('Invite link copied to clipboard!', 'success');
+    }
+}
+
+function openInviteInBrowser() {
+    if (activeInviteUrl) {
+        window.open(activeInviteUrl, '_blank');
+    } else {
+        showToast('Invite link not available', 'error');
     }
 }
 
@@ -455,6 +929,7 @@ window.addEventListener('DOMContentLoaded', () => {
     refreshStatus();
     loadAvailableModels();
     connectWebSocket();
+    loadUpdateStatus();
 
     // Periodic status refresh
     setInterval(refreshStatus, 8000);

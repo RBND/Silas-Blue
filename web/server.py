@@ -177,6 +177,11 @@ def create_web_app(app_cfg: dict) -> web.Application:
     app.router.add_post("/api/guild/{guild_id}", api_handler.require_auth(api_handler.save_guild_config))
     app.router.add_get("/api/ai/config", api_handler.require_auth(api_handler.get_ai_config))
     app.router.add_post("/api/ai/config", api_handler.require_auth(api_handler.save_ai_config))
+    app.router.add_get("/api/update/status", api_handler.require_auth(api_handler.get_update_status))
+    app.router.add_get("/api/bot/invite", api_handler.require_auth(api_handler.get_bot_invite))
+    app.router.add_post("/api/update/check", api_handler.require_auth(api_handler.check_update))
+    app.router.add_post("/api/update/apply", api_handler.require_auth(api_handler.apply_update))
+    app.router.add_post("/api/update/config", api_handler.require_auth(api_handler.save_update_config))
 
     # WebSocket Log Stream
     app.router.add_get("/api/ws/logs", api_handler.websocket_handler)
@@ -191,11 +196,28 @@ def create_web_app(app_cfg: dict) -> web.Application:
     return app
 
 
+_server_state = {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "otp_link": None,
+    "ready": threading.Event()
+}
+
+def get_server_otp_link(timeout: float = 5.0) -> str:
+    """Waits for web server to start and returns the auto-login OTP link."""
+    _server_state["ready"].wait(timeout=timeout)
+    return _server_state.get("otp_link") or f"http://{_server_state['host']}:{_server_state['port']}"
+
+
 def start_web_server_in_thread(host: str = "127.0.0.1", port: int = 8080, app_cfg: dict = None) -> threading.Thread:
     """Launches the aiohttp web management server in a dedicated daemon thread."""
     if app_cfg is None:
         from utils import load_app_config
         app_cfg = load_app_config()
+
+    _server_state["host"] = host
+    _server_state["port"] = port
+    _server_state["ready"].clear()
 
     def run():
         loop = asyncio.new_event_loop()
@@ -210,6 +232,8 @@ def start_web_server_in_thread(host: str = "127.0.0.1", port: int = 8080, app_cf
         # Generate and print OTP Magic Link
         auth_mgr = app["auth_manager"]
         otp_link = auth_mgr.generate_otp_magic_link(host, port)
+        _server_state["otp_link"] = otp_link
+        _server_state["ready"].set()
 
         print("\n" + "=" * 65)
         print("          SILAS BLUE WEB DASHBOARD ACTIVE")

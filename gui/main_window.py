@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QLineEdit, QProgressBar, QCheckBox, QStackedWidget,
     QTextEdit, QSpinBox, QFileDialog, QGroupBox, QRadioButton, QButtonGroup,
-    QFrame, QScrollArea, QSizePolicy
+    QFrame, QScrollArea, QSizePolicy, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QObject, QUrl
 from PySide6.QtGui import QFont, QDesktopServices
@@ -21,6 +21,7 @@ from .server_config_page import ServerConfigPage
 from ai_providers import get_ai_provider, AIProvider, RemoteOpenAIProvider, REMOTE_PRESETS
 from bot_core import bot, reload_ai_provider, gui_event_queue
 from utils import load_app_config, save_app_config
+from updater import BotUpdater, get_current_version, get_current_commit
 import config
 
 logger = logging.getLogger("silasblue")
@@ -66,6 +67,8 @@ class WorkerSignals(QObject):
     remote_test_finished = Signal(bool, str)
     remote_models_fetched = Signal(list)
     web_search_tested = Signal(bool, str)
+    update_check_finished = Signal(dict)
+    update_apply_finished = Signal(bool, str)
 
 
 class MainWindow(QMainWindow):
@@ -105,6 +108,8 @@ class MainWindow(QMainWindow):
         self.signals.remote_test_finished.connect(self.on_remote_test_finished)
         self.signals.remote_models_fetched.connect(self.on_remote_models_fetched)
         self.signals.web_search_tested.connect(self.on_web_search_tested)
+        self.signals.update_check_finished.connect(self.on_gui_update_check_finished)
+        self.signals.update_apply_finished.connect(self.on_gui_update_apply_finished)
 
         # Compatibility widgets (in case external modules query them)
         self.bot_status_label = QLabel("Bot Status: Stopped")
@@ -1058,8 +1063,149 @@ class MainWindow(QMainWindow):
         diag_layout.addLayout(diag_btns_row)
         layout.addWidget(diag_card)
 
+        # --- System Updates & Release Channels Card ---
+        update_card = QFrame()
+        update_card.setObjectName("card")
+        u_layout = QVBoxLayout(update_card)
+        u_layout.setContentsMargins(14, 12, 14, 12)
+        u_layout.setSpacing(10)
+
+        u_title = QLabel("System Updates & Release Channels")
+        u_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        u_layout.addWidget(u_title)
+
+        u_info_row = QHBoxLayout()
+        self.gui_update_ver_label = QLabel(f"Current Version: <b>v{get_current_version()}</b> (#{get_current_commit()})")
+        u_info_row.addWidget(self.gui_update_ver_label)
+        u_info_row.addStretch(1)
+        u_layout.addLayout(u_info_row)
+
+        u_cfg_row = QHBoxLayout()
+        u_cfg_row.addWidget(QLabel("Release Channel:"))
+        self.gui_update_channel = QComboBox()
+        self.gui_update_channel.addItem("Stable (Releases & Tags)", userData="stable")
+        self.gui_update_channel.addItem("Latest (Main Branch)", userData="latest")
+        cur_chan = self.app_cfg.get("update_channel", "stable")
+        self.gui_update_channel.setCurrentIndex(1 if cur_chan == "latest" else 0)
+        u_cfg_row.addWidget(self.gui_update_channel)
+
+        self.gui_auto_update_chk = QCheckBox("Periodic Auto-Check")
+        self.gui_auto_update_chk.setChecked(bool(self.app_cfg.get("auto_update_enabled", False)))
+        u_cfg_row.addWidget(self.gui_auto_update_chk)
+
+        u_cfg_row.addWidget(QLabel("Mode:"))
+        self.gui_auto_update_mode = QComboBox()
+        self.gui_auto_update_mode.addItem("Notify Only", userData="notify")
+        self.gui_auto_update_mode.addItem("Auto-Apply & Restart", userData="apply")
+        cur_mode = self.app_cfg.get("auto_update_mode", "notify")
+        self.gui_auto_update_mode.setCurrentIndex(1 if cur_mode == "apply" else 0)
+        u_cfg_row.addWidget(self.gui_auto_update_mode)
+
+        u_cfg_row.addStretch(1)
+        u_layout.addLayout(u_cfg_row)
+
+        # Action Buttons & Status Row
+        u_btn_row = QHBoxLayout()
+        self.gui_check_update_btn = QPushButton("🔍 Check for Updates")
+        self.gui_check_update_btn.clicked.connect(self.gui_check_for_updates)
+        u_btn_row.addWidget(self.gui_check_update_btn)
+
+        self.gui_apply_update_btn = QPushButton("🚀 Install Update & Restart")
+        self.gui_apply_update_btn.setObjectName("primaryBtn")
+        self.gui_apply_update_btn.setVisible(False)
+        self.gui_apply_update_btn.clicked.connect(self.gui_apply_update)
+        u_btn_row.addWidget(self.gui_apply_update_btn)
+
+        self.gui_save_update_cfg_btn = QPushButton("💾 Save Update Settings")
+        self.gui_save_update_cfg_btn.clicked.connect(self.gui_save_updater_settings)
+        u_btn_row.addWidget(self.gui_save_update_cfg_btn)
+
+        u_btn_row.addStretch(1)
+        u_layout.addLayout(u_btn_row)
+
+        self.gui_update_status_label = QLabel("Click 'Check for Updates' to verify the latest release.")
+        self.gui_update_status_label.setStyleSheet("font-size: 11px; opacity: 0.85;")
+        u_layout.addWidget(self.gui_update_status_label)
+
+        layout.addWidget(update_card)
+
         layout.addStretch(1)
         self.content_stack.addWidget(page)  # Page 4
+
+    def gui_check_for_updates(self):
+        chan = self.gui_update_channel.currentData() or "stable"
+        self.gui_check_update_btn.setEnabled(False)
+        self.gui_check_update_btn.setText("Checking GitHub...")
+        self.gui_update_status_label.setText("Querying remote repository...")
+
+        def run_check():
+            res = BotUpdater.check_for_updates(chan)
+            self.signals.update_check_finished.emit(res)
+
+        self.executor.submit(run_check)
+
+    def on_gui_update_check_finished(self, res: dict):
+        self.gui_check_update_btn.setEnabled(True)
+        self.gui_check_update_btn.setText("🔍 Check for Updates")
+
+        if res.get("update_available"):
+            latest_v = res.get("latest_version") or res.get("latest_commit")
+            self.gui_update_status_label.setText(f"🎉 Update available: v{latest_v}! Click 'Install Update & Restart' to apply.")
+            self.gui_apply_update_btn.setVisible(True)
+            self.gui_apply_update_btn.setText(f"🚀 Install v{latest_v} & Restart")
+        else:
+            self.gui_update_status_label.setText(f"✅ Silas Blue is completely up to date on {res.get('channel', 'stable').title()} channel.")
+            self.gui_apply_update_btn.setVisible(False)
+
+    def gui_apply_update(self):
+        chan = self.gui_update_channel.currentData() or "stable"
+        reply = QMessageBox.question(
+            self,
+            "Install Silas Blue Update",
+            f"Are you sure you want to download and install the update from channel '{chan.title()}'?\n\n"
+            "Silas Blue will snapshot configuration and restart automatically.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        self.gui_apply_update_btn.setEnabled(False)
+        self.gui_apply_update_btn.setText("Updating...")
+        self.gui_update_status_label.setText("Backing up and applying updates from GitHub...")
+
+        def run_apply():
+            ok, msg = BotUpdater.apply_update(channel=chan, initiator="Desktop GUI")
+            self.signals.update_apply_finished.emit(ok, msg)
+
+        self.executor.submit(run_apply)
+
+    def on_gui_update_apply_finished(self, success: bool, message: str):
+        if success:
+            QMessageBox.information(
+                self,
+                "Update Applied",
+                "Silas Blue was updated successfully! Restarting application now..."
+            )
+            BotUpdater.trigger_restart()
+        else:
+            self.gui_apply_update_btn.setEnabled(True)
+            self.gui_apply_update_btn.setText("🚀 Install Update & Restart")
+            self.gui_update_status_label.setText(f"❌ Update failed: {message}")
+            QMessageBox.critical(self, "Update Failed", f"Failed to apply update:\n{message}")
+
+    def gui_save_updater_settings(self):
+        chan = self.gui_update_channel.currentData() or "stable"
+        enabled = self.gui_auto_update_chk.isChecked()
+        mode = self.gui_auto_update_mode.currentData() or "notify"
+
+        self.app_cfg["update_channel"] = chan
+        self.app_cfg["auto_update_enabled"] = enabled
+        self.app_cfg["auto_update_mode"] = mode
+        save_app_config(self.app_cfg)
+
+        self.gui_update_status_label.setText("✅ Updater settings saved successfully.")
+        QMessageBox.information(self, "Settings Saved", "Updater settings have been updated.")
 
     def open_folder(self, folder_name: str):
         path = os.path.abspath(folder_name)

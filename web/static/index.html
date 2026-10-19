@@ -20,6 +20,8 @@
             <button class="nav-item" onclick="switchPage('ai')">🧠 AI & Models</button>
             <button class="nav-item" onclick="switchPage('servers')">🛡️ Server Config</button>
             <button class="nav-item" onclick="switchPage('logs')">📜 Live Console</button>
+            <button class="nav-item" onclick="switchPage('updates')">🔄 Updates</button>
+            <button class="nav-item" onclick="openInviteModal()" style="margin-top: 10px; border: 1px dashed rgba(0, 240, 255, 0.4); color: var(--accent-cyan);">➕ Invite Bot</button>
         </div>
 
         <div class="sidebar-user">
@@ -86,6 +88,20 @@
                     <div class="form-row" style="margin-bottom: 0;">
                         <input type="text" id="quick-pull-input" placeholder="e.g. llama3:8b">
                         <button onclick="pullModel()">Pull Model</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Update Quick Status Card -->
+            <div class="card" id="dash-update-card" style="margin-bottom: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <div class="card-title" style="margin-bottom: 2px;">System Version & Updates</div>
+                        <div class="kpi-subtext" id="dash-update-summary">Loading version info...</div>
+                    </div>
+                    <div class="btn-group">
+                        <button onclick="checkUpdates(true)">🔍 Check for Updates</button>
+                        <button class="primary" id="btn-dash-update-apply" style="display:none;" onclick="applyUpdate()">🚀 Install Update</button>
                     </div>
                 </div>
             </div>
@@ -203,7 +219,10 @@
         <div id="page-servers" class="page">
             <div class="page-header">
                 <div class="page-title">Discord Server Configuration</div>
-                <button class="primary" onclick="saveServerConfig()">💾 Save Server Config</button>
+                <div class="btn-group">
+                    <button onclick="openInviteModal()">➕ Invite Bot</button>
+                    <button class="primary" onclick="saveServerConfig()">💾 Save Server Config</button>
+                </div>
             </div>
 
             <div class="card">
@@ -214,19 +233,76 @@
             </div>
 
             <div class="card" id="guild-config-card">
-                <div class="card-title">Role-Based Access Control</div>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px;">
-                    <div>
-                        <div style="font-weight: 600; margin-bottom: 6px;">Who can the bot reply to?</div>
-                        <div id="roles-reply" style="max-height: 180px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: 6px;"></div>
+                <div class="card-title">Role-Based & User Access Control</div>
+                <datalist id="available-roles-datalist"></datalist>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+                    <!-- 1. Bot Chat & Replies -->
+                    <div class="perm-card" id="card-perm-reply">
+                        <div class="perm-card-title">💬 Bot Chat & Replies</div>
+                        <div class="perm-card-desc">Who can prompt Silas Blue in server channels and threads to receive AI responses.</div>
+                        <div class="perm-mode-toggle">
+                            <label><input type="radio" name="perm-mode-reply" value="everyone" onchange="togglePermMode('reply', 'everyone')"> Everyone (@everyone)</label>
+                            <label><input type="radio" name="perm-mode-reply" value="restricted" onchange="togglePermMode('reply', 'restricted')"> Restricted</label>
+                        </div>
+                        <div id="chips-reply" class="chips-cloud"></div>
+                        <div id="empty-reply" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                        <div class="perm-input-row" id="input-row-reply">
+                            <input type="text" id="input-reply" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('reply')">
+                            <button onclick="addPermGrant('reply')">➕ Add</button>
+                        </div>
+                        <div id="status-reply" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
-                    <div>
-                        <div style="font-weight: 600; margin-bottom: 6px;">Who can switch models?</div>
-                        <div id="roles-model" style="max-height: 180px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: 6px;"></div>
+
+                    <!-- 2. AI Model Switching -->
+                    <div class="perm-card" id="card-perm-model">
+                        <div class="perm-card-title">⚡ AI Model Switching</div>
+                        <div class="perm-card-desc">Who can use the !model command to change the active LLM for this server.</div>
+                        <div class="perm-mode-toggle">
+                            <label><input type="radio" name="perm-mode-model" value="everyone" onchange="togglePermMode('model', 'everyone')"> Everyone (@everyone)</label>
+                            <label><input type="radio" name="perm-mode-model" value="restricted" onchange="togglePermMode('model', 'restricted')"> Restricted</label>
+                        </div>
+                        <div id="chips-model" class="chips-cloud"></div>
+                        <div id="empty-model" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                        <div class="perm-input-row" id="input-row-model">
+                            <input type="text" id="input-model" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('model')">
+                            <button onclick="addPermGrant('model')">➕ Add</button>
+                        </div>
+                        <div id="status-model" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
-                    <div>
-                        <div style="font-weight: 600; margin-bottom: 6px;">Who can change settings?</div>
-                        <div id="roles-perm" style="max-height: 180px; overflow-y: auto; background: var(--bg-input); padding: 8px; border-radius: 6px;"></div>
+
+                    <!-- 3. Server Bot Administration -->
+                    <div class="perm-card" id="card-perm-perm">
+                        <div class="perm-card-title">🛡️ Server Bot Administration</div>
+                        <div class="perm-card-desc">Who can configure prompts, memory, and permissions via bot commands (!setprompt, !setmemory, !setttl).</div>
+                        <div class="perm-mode-toggle">
+                            <label><input type="radio" name="perm-mode-perm" value="everyone" onchange="togglePermMode('perm', 'everyone')"> Everyone (@everyone)</label>
+                            <label><input type="radio" name="perm-mode-perm" value="restricted" onchange="togglePermMode('perm', 'restricted')"> Restricted</label>
+                        </div>
+                        <div id="chips-perm" class="chips-cloud"></div>
+                        <div id="empty-perm" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                        <div class="perm-input-row" id="input-row-perm">
+                            <input type="text" id="input-perm" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('perm')">
+                            <button onclick="addPermGrant('perm')">➕ Add</button>
+                        </div>
+                        <div id="status-perm" style="font-size: 11px; margin-top: 4px; display: none;"></div>
+                    </div>
+
+                    <!-- 4. Web Search & Grounding -->
+                    <div class="perm-card" id="card-perm-search">
+                        <div class="perm-card-title">🌐 Web Search & Grounding</div>
+                        <div class="perm-card-desc">Who can use !search or trigger real-time AI web search grounding in this server.</div>
+                        <div class="perm-mode-toggle">
+                            <label><input type="radio" name="perm-mode-search" value="everyone" onchange="togglePermMode('search', 'everyone')"> Everyone (@everyone)</label>
+                            <label><input type="radio" name="perm-mode-search" value="restricted" onchange="togglePermMode('search', 'restricted')"> Restricted</label>
+                        </div>
+                        <div id="chips-search" class="chips-cloud"></div>
+                        <div id="empty-search" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                        <div class="perm-input-row" id="input-row-search">
+                            <input type="text" id="input-search" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('search')">
+                            <button onclick="addPermGrant('search')">➕ Add</button>
+                        </div>
+                        <div id="status-search" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
                 </div>
 
@@ -275,8 +351,127 @@
                 <div class="terminal-logs" id="full-terminal-logs"></div>
             </div>
         </div>
+
+        <!-- 5. UPDATES & MAINTENANCE PAGE -->
+        <div id="page-updates" class="page">
+            <div class="page-header">
+                <div class="page-title">System Updates & Channels</div>
+                <div class="btn-group">
+                    <button onclick="checkUpdates(true)">🔍 Check for Updates</button>
+                    <button class="primary" onclick="saveUpdateSettings()">💾 Save Updater Settings</button>
+                </div>
+            </div>
+
+            <!-- Version Overview Cards -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-title">Current Version</div>
+                    <div class="kpi-value" id="update-curr-version">3.3.4</div>
+                    <div class="kpi-subtext" id="update-curr-commit">#-------</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-title">Target Channel</div>
+                    <div class="kpi-value" id="update-curr-channel">Stable</div>
+                    <div class="kpi-subtext">Release Track</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-title">Latest Available</div>
+                    <div class="kpi-value" id="update-latest-version">Checking...</div>
+                    <div class="kpi-subtext" id="update-latest-commit">Remote SHA</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-title">Update Status</div>
+                    <div id="update-status-pill" class="status-pill warning">UNKNOWN</div>
+                    <div class="kpi-subtext" id="update-status-sub">Check pending</div>
+                </div>
+            </div>
+
+            <!-- Manual Action & Changelog Card -->
+            <div class="card" id="update-action-card">
+                <div class="card-title">Update Action & Release Notes</div>
+                <div id="update-action-prompt" style="margin-bottom: 12px; font-size: 13px;">Click "Check for Updates" to query GitHub for latest releases.</div>
+                
+                <div class="btn-group" style="margin-bottom: 14px;">
+                    <button class="success" id="btn-full-update-apply" style="display:none;" onclick="applyUpdate()">🚀 Install Update & Restart</button>
+                </div>
+
+                <div id="update-changelog-container" style="display:none;">
+                    <div style="font-weight: 600; margin-bottom: 6px; color: var(--accent-cyan);">What's New:</div>
+                    <ul id="update-changelog-list" style="padding-left: 20px; font-size: 13px; line-height: 1.6; color: var(--text-dim);"></ul>
+                </div>
+            </div>
+
+            <!-- Auto-Update Configuration Card -->
+            <div class="card">
+                <div class="card-title">Automated Update Settings</div>
+                
+                <div class="form-row">
+                    <label>Release Track:</label>
+                    <select id="cfg-update-channel">
+                        <option value="stable">Stable (GitHub Releases & Tags)</option>
+                        <option value="latest">Latest (Main Branch Commits)</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <label>Periodic Auto-Checking:</label>
+                    <input type="checkbox" id="cfg-auto-update-enabled" style="width: auto;">
+                </div>
+
+                <div class="form-row">
+                    <label>Action on New Version:</label>
+                    <select id="cfg-auto-update-mode">
+                        <option value="notify">Notify Only (Send alert to Discord / Web)</option>
+                        <option value="apply">Auto-Apply & Restart (Autonomous)</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <label>Check Interval (Hours):</label>
+                    <input type="number" id="cfg-auto-update-interval" min="1" max="168" value="24">
+                </div>
+
+                <div class="form-row">
+                    <label>Discord Alert Channel ID:</label>
+                    <input type="text" id="cfg-update-notify-channel" placeholder="Optional Discord channel ID for update notices">
+                </div>
+
+                <div class="form-row">
+                    <label>Notify Bot Owner in DM:</label>
+                    <input type="checkbox" id="cfg-update-notify-owner" checked style="width: auto;">
+                </div>
+            </div>
+        </div>
     </main>
 
+    <!-- Invite Bot Modal -->
+    <div id="invite-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">➕ Invite Silas Blue to Discord</div>
+                <button class="modal-close" onclick="closeInviteModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 13px; color: var(--text-dim); margin-bottom: 14px; line-height: 1.5;">
+                    Add Silas Blue to any server where you have <strong>Manage Server</strong> or <strong>Administrator</strong> permissions.
+                </p>
+                <div class="form-row">
+                    <label>Client ID:</label>
+                    <input type="text" id="invite-client-id" readonly>
+                </div>
+                <div class="form-row">
+                    <label>Invite Link:</label>
+                    <input type="text" id="invite-url-input" readonly>
+                </div>
+                <div class="btn-group" style="margin-top: 16px; justify-content: flex-end;">
+                    <button onclick="copyInviteLink()">📋 Copy Link</button>
+                    <button class="primary" onclick="openInviteInBrowser()">🌐 Open in Browser</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
     <script src="/static/app.js"></script>
 </body>
 </html>

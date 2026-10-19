@@ -13,6 +13,7 @@ from bot_core import (
 )
 from utils import load_app_config, save_app_config, load_config, save_config
 from ai_providers import REMOTE_PRESETS, get_ai_provider
+from updater import BotUpdater, get_current_version, get_current_commit
 import config
 
 logger = logging.getLogger("silasblue.web.api")
@@ -308,3 +309,102 @@ class ApiHandler:
             self.active_ws_clients.discard(ws)
 
         return ws
+
+    # -------------------------------------------------------------------------
+    # UPDATER MANAGEMENT
+    # -------------------------------------------------------------------------
+    async def get_update_status(self, request):
+        """Returns current version, commit, update configuration, and cached status."""
+        cfg = load_app_config()
+        channel = cfg.get("update_channel", "stable")
+        
+        status_file = os.path.join("state", "update_status.json")
+        cached = {}
+        if os.path.exists(status_file):
+            try:
+                with open(status_file, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+            except Exception:
+                pass
+
+        return web.json_response({
+            "current_version": get_current_version(),
+            "current_commit": get_current_commit(),
+            "config": {
+                "update_channel": cfg.get("update_channel", "stable"),
+                "auto_update_enabled": cfg.get("auto_update_enabled", False),
+                "auto_update_mode": cfg.get("auto_update_mode", "notify"),
+                "auto_update_interval_hours": cfg.get("auto_update_interval_hours", 24),
+                "update_notify_channel_id": cfg.get("update_notify_channel_id"),
+                "update_notify_owner_dm": cfg.get("update_notify_owner_dm", True)
+            },
+            "cached_status": cached
+        })
+
+    async def check_update(self, request):
+        """Executes a fresh update check on demand."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        channel = body.get("channel")
+        res = await asyncio.to_thread(BotUpdater.check_for_updates, channel)
+        return web.json_response(res)
+
+    async def apply_update(self, request):
+        """Applies update and schedules restart."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        channel = body.get("channel")
+        user = request.get("user", {})
+        initiator = user.get("username", "WebAdmin")
+
+        success, message = await asyncio.to_thread(
+            BotUpdater.apply_update,
+            channel=channel,
+            initiator=f"Web: {initiator}"
+        )
+
+        if success:
+            async def delayed_restart():
+                await asyncio.sleep(2)
+                BotUpdater.trigger_restart()
+
+            asyncio.create_task(delayed_restart())
+            return web.json_response({"success": True, "message": message})
+        else:
+            return web.json_response({"success": False, "error": message}, status=500)
+
+    async def save_update_config(self, request):
+        """Saves updater configuration."""
+        data = await request.json()
+        cfg = load_app_config()
+
+        for key in [
+            "update_channel",
+            "auto_update_enabled",
+            "auto_update_mode",
+            "auto_update_interval_hours",
+            "update_notify_channel_id",
+            "update_notify_owner_dm"
+        ]:
+            if key in data:
+                cfg[key] = data[key]
+
+        save_app_config(cfg)
+        self.app_cfg = cfg
+        return web.json_response({"success": True, "message": "Updater settings saved."})
+
+    async def get_bot_invite(self, request):
+        """Returns Discord OAuth2 Bot invitation URL and Client ID."""
+        from bot_core import get_bot_invite_url, get_bot_client_id
+        client_id = get_bot_client_id()
+        invite_url = get_bot_invite_url()
+        return web.json_response({
+            "client_id": str(client_id) if client_id else None,
+            "invite_url": invite_url
+        })
+
+

@@ -127,5 +127,18 @@ class TestWebApiEndpoints(AioHTTPTestCase):
         cookies = self.client.session.cookie_jar.filter_cookies(resp.url)
         self.assertIn(SESSION_COOKIE_NAME, cookies)
 
+    @unittest_run_loop
+    async def test_authenticated_get_bot_invite(self):
+        auth_mgr = self.app["auth_manager"]
+        session_token = auth_mgr.sign_session_data({"id": "admin", "username": "Admin", "exp": 9999999999})
+        self.client.session.cookie_jar.update_cookies({SESSION_COOKIE_NAME: session_token})
+
+        resp = await self.client.get("/api/bot/invite")
+        self.assertEqual(resp.status, 200)
+        data = await resp.json()
+        self.assertIn("invite_url", data)
+        self.assertIn("client_id", data)
+
 if __name__ == "__main__":
     unittest.main()
+

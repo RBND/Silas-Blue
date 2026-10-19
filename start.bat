@@ -1,5 +1,6 @@
 @echo off
 setlocal
+set "PYTHONHOME="
 title Silas Blue v3.3.4
 
 :: Change directory to the folder containing this batch script

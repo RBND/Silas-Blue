@@ -325,6 +325,13 @@ Silas Blue responds to mentions or standard prefix commands:
   !autosearch [on|off]       - Toggle auto-search for questions requiring live/temporal info (Admin only)
   !setwebsearch [on|off]     - Enable or disable web search features for this server (Admin only)
   ```
+* **System Updates**:
+  ```text
+  /update check [channel]    - Check GitHub for latest updates (Stable or Latest)
+  /update apply [channel]    - Snapshot config, pull update, and restart (Owner/Admin)
+  /update channel <stable|latest> - Set active release tracking channel
+  !update [check|apply|channel]   - Prefix command equivalent
+  ```
 * **Help & Server Info**:
   ```text
   !help                      - View available commands and usage
@@ -332,6 +339,24 @@ Silas Blue responds to mentions or standard prefix commands:
   !ping                      - Check bot gateway latency
   !config                    - View active server configuration (Admin only)
   ```
+
+---
+
+## 🔄 Automated & Manual Updates
+
+Silas Blue features a full-featured update management system supporting both native virtual environments and Docker Compose:
+
+* **Discord Commands**: Check and apply updates directly in Discord using `/update` (slash) or `!update`.
+* **Web Management Dashboard**: Dedicated **Updates** page with version diffs, changelogs, channel switcher, and 1-click updates.
+* **Desktop GUI**: Located in **Settings & Diagnostics** -> **System Updates & Release Channels**.
+* **Terminal Scripts**: Standalone cross-platform scripts:
+  * Linux / macOS: `./update.sh` (supports `--channel stable|latest` and `--docker`)
+  * Windows: `update.bat`
+* **Automated Background Updates**: Configure periodic checks (e.g. every 24 hours) with choice of **Notify-only** or **Auto-Apply & Restart**.
+* **Enterprise-Grade Safety**:
+  * Automatic snapshots of `config/` and `state/` saved to `backups/` before any update.
+  * Strict clean Git pull (`git fetch` + `reset --hard`) to prevent merge conflicts while leaving user configs untouched.
+  * Boot health verification: Silas Blue verifies stability on startup. If a fatal crash occurs on boot, it automatically rolls back to the previous stable release and restores configuration backups!
 
 ---
 

@@ -20,8 +20,9 @@ from typing import Optional, Dict, Any, List
 
 from ai_providers import get_ai_provider, AIProvider
 from permissions import PermissionManager
-from utils import load_config, save_config, get_config_path, load_app_config
+from utils import load_config, save_config, get_config_path, load_app_config, save_app_config
 from memory import conversation_memory
+from updater import BotUpdater, auto_update_background_loop
 from web_search import (
     SearchService,
     WebSearchResult,
@@ -468,6 +469,103 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents, help_command=None)
 
+async def dispatch_post_update_announcement(bot_client: commands.Bot, update_data: dict):
+    """Sends confirmation embed to Discord after a successful update restart."""
+    app_cfg = load_app_config()
+    notify_ctx = update_data.get("notify_context", {})
+    prev_ver = update_data.get("previous_version", "unknown")
+    new_ver = update_data.get("new_version", "unknown")
+    prev_commit = update_data.get("previous_commit", "")[:7]
+    new_commit = update_data.get("new_commit", "")[:7]
+    channel_name = update_data.get("channel", "stable").title()
+    changelog = update_data.get("changelog", [])
+
+    embed = discord.Embed(
+        title="✨ Silas Blue Updated Successfully!",
+        description=(
+            f"Silas Blue has been updated and restarted cleanly.\n\n"
+            f"• **Version:** `{prev_ver}` → `{new_ver}`\n"
+            f"• **Commit:** `{prev_commit}` → `{new_commit}`\n"
+            f"• **Channel:** `{channel_name}`\n"
+        ),
+        color=get_discord_theme_color()
+    )
+    if changelog:
+        cl_text = "\n".join(f"• {c}" for c in changelog[:6])
+        embed.add_field(name="Recent Changes", value=cl_text, inline=False)
+
+    sent = False
+
+    # 1. Send to the channel where /update was run
+    invoked_channel_id = notify_ctx.get("channel_id")
+    if invoked_channel_id:
+        try:
+            target_chan = bot_client.get_channel(int(invoked_channel_id))
+            if target_chan:
+                await target_chan.send(embed=embed)
+                sent = True
+        except Exception as e:
+            logger.debug(f"Could not send to invoked channel: {e}")
+
+    # 2. Send to configured notify channel if different
+    cfg_channel_id = app_cfg.get("update_notify_channel_id")
+    if cfg_channel_id and str(cfg_channel_id) != str(invoked_channel_id):
+        try:
+            target_chan = bot_client.get_channel(int(cfg_channel_id))
+            if target_chan:
+                await target_chan.send(embed=embed)
+                sent = True
+        except Exception as e:
+            logger.debug(f"Could not send to notify channel: {e}")
+
+    # 3. Send to bot owner DM if configured or if no channel was notified
+    if app_cfg.get("update_notify_owner_dm", True) and not sent:
+        try:
+            app_info = await bot_client.application_info()
+            if app_info.owner:
+                await app_info.owner.send(embed=embed)
+        except Exception as e:
+            logger.debug(f"Could not send update DM to bot owner: {e}")
+
+async def dispatch_update_alert(bot_client: commands.Bot, update_info: dict):
+    """Sends notification when a new update is detected by the background scheduler."""
+    app_cfg = load_app_config()
+    embed = discord.Embed(
+        title="🔔 Silas Blue Update Available",
+        description=(
+            f"A new update was detected on the **{update_info.get('channel', 'stable').title()}** channel!\n\n"
+            f"• **Current:** `{update_info.get('current_version')}` (`{update_info.get('current_commit')}`)\n"
+            f"• **Available:** `{update_info.get('latest_version')}` (`{update_info.get('latest_commit')}`)\n"
+        ),
+        color=get_discord_theme_color()
+    )
+    if update_info.get("changelog"):
+        cl = "\n".join(f"• {c}" for c in update_info["changelog"][:5])
+        embed.add_field(name="Highlights", value=cl, inline=False)
+
+    embed.set_footer(text="Run /update apply or !update apply to update now.")
+
+    cfg_channel_id = app_cfg.get("update_notify_channel_id")
+    if cfg_channel_id:
+        try:
+            target_chan = bot_client.get_channel(int(cfg_channel_id))
+            if target_chan:
+                await target_chan.send(embed=embed)
+                return
+        except Exception:
+            pass
+
+    if app_cfg.get("update_notify_owner_dm", True):
+        try:
+            app_info = await bot_client.application_info()
+            if app_info.owner:
+                await app_info.owner.send(embed=embed)
+        except Exception:
+            pass
+
+# Bind alert callback to bot instance
+bot.dispatch_update_alert = lambda info: dispatch_update_alert(bot, info)
+
 @bot.event
 async def on_ready():
     logger.info(f"Silas Blue is online as {bot.user} (ID: {bot.user.id})")
@@ -476,6 +574,25 @@ async def on_ready():
         config = load_config(guild.id)
         server_configs[guild.id] = config
     logger.info(f"Loaded configurations for {len(bot.guilds)} server(s).")
+
+    # Verify post-update health check and dispatch notification
+    try:
+        post_update_info = BotUpdater.verify_boot_health()
+        if post_update_info:
+            logger.info("Bot boot verified following update. Dispatching update announcement...")
+            await dispatch_post_update_announcement(bot, post_update_info)
+    except Exception as e:
+        logger.error(f"Error handling post-update verification: {e}")
+
+    # Synchronize Discord Slash Commands
+    try:
+        await bot.tree.sync()
+        logger.info("Synchronized Discord slash commands.")
+    except Exception as e:
+        logger.warning(f"Failed to sync slash commands: {e}")
+
+    # Launch background auto-update loop
+    bot.loop.create_task(auto_update_background_loop(bot))
 
 @bot.event
 async def on_guild_join(guild):
@@ -930,6 +1047,126 @@ async def set_web_search_command(ctx, state: Optional[str] = None):
     status_str = "ENABLED" if new_state else "DISABLED"
     await ctx.send(f"🌐 Web search is now **{status_str}** for this server.")
 
+@bot.hybrid_command(name="update", description="Check, configure, or apply updates to Silas Blue.")
+@discord.app_commands.describe(
+    action="Action: 'check' (default), 'apply', 'channel', or 'status'",
+    channel="Release channel: 'stable' or 'latest'"
+)
+async def update_command(ctx: commands.Context, action: str = "check", channel: Optional[str] = None):
+    """
+    Manages Silas Blue updates.
+    Usage:
+      !update / /update - Check for updates
+      !update check [channel] - Check specific channel
+      !update apply [channel] - Pull update, backup, and restart (Owner/Admin)
+      !update channel <stable|latest> - Set active release channel
+      !update status - Show current version and update configuration
+    """
+    action = action.lower().strip()
+    app_cfg = load_app_config()
+    current_chan = (channel or app_cfg.get("update_channel", "stable")).lower().strip()
+
+    # Permission check for mutating actions
+    is_owner = await bot.is_owner(ctx.author)
+    is_admin = bool(ctx.guild and (ctx.author == ctx.guild.owner or getattr(ctx.author.guild_permissions, "administrator", False)))
+
+    if action in ("apply", "channel") and not (is_owner or is_admin):
+        await ctx.send("❌ You must be the Bot Owner or a Server Administrator to perform this action.")
+        return
+
+    # Defer interaction if slash command to avoid Discord 3-second timeout
+    if ctx.interaction:
+        await ctx.defer()
+
+    if action in ("check", "status"):
+        msg = await ctx.send("🔍 Checking for updates...")
+        res = await asyncio.to_thread(BotUpdater.check_for_updates, current_chan)
+        
+        has_update = res.get("update_available", False)
+        embed = discord.Embed(
+            title="🔄 Silas Blue Update Status",
+            color=get_discord_theme_color()
+        )
+        embed.add_field(name="Current Version", value=f"`{res.get('current_version')}` (`{res.get('current_commit')}`)", inline=True)
+        embed.add_field(name="Latest Available", value=f"`{res.get('latest_version')}` (`{res.get('latest_commit')}`)", inline=True)
+        embed.add_field(name="Release Channel", value=f"`{res.get('channel', 'stable').title()}`", inline=True)
+
+        if has_update:
+            embed.description = "🎉 **A newer version of Silas Blue is available!**\nUse `/update apply` or `!update apply` to install and restart."
+            if res.get("commits_behind", 0) > 0:
+                embed.add_field(name="Commits Behind", value=str(res["commits_behind"]), inline=True)
+            if res.get("changelog"):
+                cl = "\n".join(f"• {c}" for c in res["changelog"][:6])
+                embed.add_field(name="Changelog", value=cl, inline=False)
+        else:
+            embed.description = "✅ **Silas Blue is completely up to date!**"
+
+        if res.get("error"):
+            embed.add_field(name="Notice", value=f"⚠️ {res['error']}", inline=False)
+
+        await msg.edit(content=None, embed=embed)
+
+    elif action == "channel":
+        if channel not in ("stable", "latest"):
+            await ctx.send("⚠️ Please specify a valid channel: `stable` (GitHub releases) or `latest` (main branch).")
+            return
+        app_cfg["update_channel"] = channel
+        save_app_config(app_cfg)
+        await ctx.send(f"✅ Active update channel switched to **{channel.title()}**.")
+
+    elif action == "apply":
+        init_embed = discord.Embed(
+            title="⏳ Updating Silas Blue...",
+            description=(
+                f"1. Creating safety snapshot of `config/` and `state/`\n"
+                f"2. Pulling updates from channel: **{current_chan.title()}**\n"
+                f"3. Installing updated dependencies if needed\n"
+                f"4. Restarting process..."
+            ),
+            color=get_discord_theme_color()
+        )
+        status_msg = await ctx.send(embed=init_embed)
+
+        notify_ctx = {
+            "channel_id": ctx.channel.id,
+            "user_id": ctx.author.id,
+            "guild_id": ctx.guild.id if ctx.guild else None
+        }
+
+        success, message = await asyncio.to_thread(
+            BotUpdater.apply_update,
+            channel=current_chan,
+            initiator=str(ctx.author),
+            notify_context=notify_ctx
+        )
+
+        if not success:
+            err_embed = discord.Embed(
+                title="❌ Update Failed",
+                description=f"An error occurred while applying the update:\n```{message}```",
+                color=0xFF0000
+            )
+            await status_msg.edit(embed=err_embed)
+            return
+
+        done_embed = discord.Embed(
+            title="🚀 Update Applied!",
+            description=(
+                f"Update successfully staged.\n"
+                f"**Restarting Silas Blue now...**\n"
+                f"You will be notified once the bot is back online."
+            ),
+            color=0x00FF88
+        )
+        await status_msg.edit(embed=done_embed)
+        await asyncio.sleep(1.5)
+
+        # Trigger process/container restart
+        BotUpdater.trigger_restart()
+
+    else:
+        await ctx.send("❓ Unknown update action. Available actions: `check`, `apply`, `channel`, `status`.")
+
 @bot.command(name="help")
 async def help_command(ctx):
     guild_id = ctx.guild.id if ctx.guild else None
@@ -945,6 +1182,7 @@ async def help_command(ctx):
         f"Commands:\n"
         f"{prefix}ping - Check bot response\n"
         f"{prefix}invite - Get invite link to add Silas Blue to a server\n"
+        f"{prefix}update [check|apply|channel] - Check for or apply updates\n"
         f"{prefix}setmodel <name> - Set default model for this server\n"
         f"{prefix}models - List available models on AI backend\n"
         f"{prefix}search <query> - Search web and answer with live AI citations\n"

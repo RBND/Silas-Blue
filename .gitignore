@@ -46,6 +46,9 @@ gui/silasblue.png
 *.zip
 *.7z
 *.tar
-*.gz
-*.bz2
+# Runtime state & Backups
+state/
+state/*
+backups/
+backups/*
 

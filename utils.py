@@ -67,7 +67,14 @@ DEFAULT_APP_CONFIG = {
     "tavily_api_key": "",
     "brave_api_key": "",
     "debug": False,
-    "theme": "retrowave"
+    "theme": "retrowave",
+    "update_channel": "stable",
+    "auto_update_enabled": False,
+    "auto_update_mode": "notify",
+    "auto_update_interval_hours": 24,
+    "auto_update_check_on_startup": True,
+    "update_notify_owner_dm": True,
+    "update_notify_channel_id": None
 }
 
 DEFAULT_GUILD_CONFIG = {
