@@ -1,6 +1,6 @@
-# Silas Blue v3.3.4
+# Silas Blue v3.3.5
 
-[![Version](https://img.shields.io/badge/version-3.3.4-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.3.5-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,25 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.3.4 enhances configuration persistence and guards user-selected Remote Cloud APIs against inadvertent auto-detection overrides.
+Silas Blue v3.3.5 introduces an automated update management system, multi-channel release tracks, multi-step live update feedback, unified desktop webview mode, and high-contrast toast notifications.
 
 ---
 
-## 🚀 What's New in Version 3.3.4
+## 🚀 What's New in Version 3.3.5
+
+* **Automated & Manual In-App/Web Updater**:
+  * Dual-track update channels: **Stable** (tracked via GitHub releases) and **Latest** (tracking HEAD commits on git branch).
+  * Background update scheduler with configurable check intervals and automated Discord notifications for server administrators.
+  * Live multi-step update modal displaying download progress, git pull status, backup creation, and service restart.
+  * Resilient Docker container restart handling (`SIGTERM` signaling) with client-side polling until the service returns online.
+* **Modern Web & Console Improvements**:
+  * Non-blocking, high-contrast toast notifications replacing browser `alert()` popups on configuration saves.
+  * Real-time version synchronization across the web management console sidebar, KPIs, and login portal.
+  * Desktop Webview mode integration for running the lightweight web interface inside native desktop frames.
+
+---
+
+## 🚀 Prior Features (v3.3.4)
 
 * **AI Configuration Persistence & Auto-Detection Guard**:
   * Fixed an issue where startup background service checking would detect a running local Llama.cpp instance and overwrite user-configured Remote APIs (Xiaomi MiMo, OpenAI, Groq, etc.) with Llama.cpp.

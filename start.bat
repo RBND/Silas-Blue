@@ -1,13 +1,13 @@
 @echo off
 setlocal
 set "PYTHONHOME="
-title Silas Blue v3.3.4
+title Silas Blue v3.3.5
 
 :: Change directory to the folder containing this batch script
 cd /d "%~dp0"
 
 echo ========================================
-echo        Starting Silas Blue v3.3.4
+echo        Starting Silas Blue v3.3.5
 echo ========================================
 echo.
 
