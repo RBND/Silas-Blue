@@ -13,7 +13,7 @@ from bot_core import (
 )
 from utils import load_app_config, save_app_config, load_config, save_config
 from ai_providers import REMOTE_PRESETS, get_ai_provider
-from updater import BotUpdater, get_current_version, get_current_commit
+from updater import BotUpdater, get_current_version, get_current_commit, parse_semver
 import config
 
 logger = logging.getLogger("silasblue.web.api")
@@ -329,9 +329,25 @@ class ApiHandler:
             except Exception:
                 pass
 
+        curr_ver = get_current_version()
+        curr_commit = get_current_commit()
+
+        # If cached status indicates an update, but we are already on that version/commit, clear update_available
+        if cached and cached.get("update_available"):
+            cached_ver = cached.get("latest_version", "")
+            cached_commit = (cached.get("latest_commit", "") or "")[:7]
+            curr_c = (curr_commit or "")[:7]
+
+            if curr_c and cached_commit and curr_c == cached_commit:
+                cached["update_available"] = False
+                cached["commits_behind"] = 0
+            elif cached_ver and parse_semver(curr_ver) >= parse_semver(cached_ver) and channel == "stable":
+                cached["update_available"] = False
+                cached["commits_behind"] = 0
+
         return web.json_response({
-            "current_version": get_current_version(),
-            "current_commit": get_current_commit(),
+            "current_version": curr_ver,
+            "current_commit": curr_commit,
             "config": {
                 "update_channel": cfg.get("update_channel", "stable"),
                 "auto_update_enabled": cfg.get("auto_update_enabled", False),

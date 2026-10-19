@@ -746,8 +746,26 @@ async function loadUpdateStatus() {
         if (chkNotifyOwner) chkNotifyOwner.checked = cfg.update_notify_owner_dm !== false;
 
         // Render cached status if available
-        if (data.cached_status) {
+        if (data.cached_status && Object.keys(data.cached_status).length > 0) {
+            const cachedLatestCommit = (data.cached_status.latest_commit || '').substring(0, 7);
+            const cachedLatestVer = data.cached_status.latest_version || '';
+            if (currSha && cachedLatestCommit && currSha === cachedLatestCommit) {
+                data.cached_status.update_available = false;
+                data.cached_status.commits_behind = 0;
+            }
+            if (cachedLatestVer && currVer === cachedLatestVer && (data.config?.update_channel || 'stable') === 'stable') {
+                data.cached_status.update_available = false;
+                data.cached_status.commits_behind = 0;
+            }
             renderUpdateResult(data.cached_status);
+        } else {
+            renderUpdateResult({
+                current_version: currVer,
+                latest_version: currVer,
+                current_commit: currSha,
+                latest_commit: currSha,
+                update_available: false
+            });
         }
     } catch (e) {
         console.error('Failed to load update status:', e);

@@ -393,6 +393,26 @@ class BotUpdater:
         with open(PENDING_UPDATE_FILE, "w", encoding="utf-8") as f:
             json.dump(pending_data, f, indent=2)
 
+        # Mark update as applied / up-to-date in update_status.json
+        try:
+            status_data = {
+                "channel": channel,
+                "current_version": target_version,
+                "current_commit": new_commit,
+                "latest_version": target_version,
+                "latest_commit": new_commit,
+                "update_available": False,
+                "commits_behind": 0,
+                "changelog": [],
+                "release_url": f"https://github.com/{GITHUB_REPO}",
+                "last_check": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "error": None
+            }
+            with open(UPDATE_STATUS_FILE, "w", encoding="utf-8") as f:
+                json.dump(status_data, f, indent=2)
+        except Exception as e:
+            logger.debug(f"Failed to reset update_status.json in apply_update: {e}")
+
         logger.info(f"Update successfully applied: {prev_version} ({prev_commit}) -> {target_version} ({new_commit})")
         return True, f"Successfully updated from {prev_version} ({prev_commit}) to {target_version} ({new_commit}). Restart required."
 
@@ -460,6 +480,28 @@ class BotUpdater:
             # Successfully reached on_ready()! Remove pending update marker
             os.remove(PENDING_UPDATE_FILE)
             logger.info(f"Post-update health check passed! Upgraded to {get_current_version()} ({get_current_commit()})")
+
+            # Update update_status.json so cached status reports UP TO DATE
+            try:
+                curr_v = get_current_version()
+                curr_c = get_current_commit()
+                status_data = {
+                    "channel": data.get("channel", "stable"),
+                    "current_version": curr_v,
+                    "current_commit": curr_c,
+                    "latest_version": curr_v,
+                    "latest_commit": curr_c,
+                    "update_available": False,
+                    "commits_behind": 0,
+                    "changelog": [],
+                    "release_url": f"https://github.com/{GITHUB_REPO}",
+                    "last_check": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "error": None
+                }
+                with open(UPDATE_STATUS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(status_data, f, indent=2)
+            except Exception as e:
+                logger.debug(f"Failed to reset update_status.json in verify_boot_health: {e}")
 
             # Collect commit log changelog
             prev = data.get("previous_commit")
