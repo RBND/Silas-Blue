@@ -408,6 +408,11 @@ class BotUpdater:
                 logger.info(f"Docker signal written to {DOCKER_SIGNAL_FILE}. Terminating container for restart...")
             except Exception as e:
                 logger.warning(f"Failed to write Docker signal file: {e}")
+            try:
+                import signal
+                os.kill(1, signal.SIGTERM)
+            except Exception:
+                pass
             # Exit process cleanly at OS level so Docker restart policy restarts the container
             os._exit(0)
 
