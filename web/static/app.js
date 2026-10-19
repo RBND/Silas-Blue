@@ -818,19 +818,59 @@ async function checkUpdates(userTriggered = false) {
     }
 }
 
+function setUpdateStep(stepId, state, labelText) {
+    const el = document.getElementById(stepId);
+    if (!el) return;
+
+    el.classList.remove('pending', 'active', 'done', 'error');
+    el.classList.add(state);
+
+    const iconEl = el.querySelector('.step-icon');
+    const labelEl = el.querySelector('.step-label');
+
+    if (iconEl) {
+        if (state === 'active') iconEl.textContent = '⏳';
+        else if (state === 'done') iconEl.textContent = '✓';
+        else if (state === 'error') iconEl.textContent = '✕';
+        else iconEl.textContent = '○';
+    }
+
+    if (labelText && labelEl) {
+        labelEl.textContent = labelText;
+    }
+}
+
 async function applyUpdate() {
     const chan = document.getElementById('cfg-update-channel')?.value || 'stable';
     if (!confirm(`Are you sure you want to install the update from channel '${chan}' and restart Silas Blue?`)) {
         return;
     }
 
-    const actionPrompt = document.getElementById('update-action-prompt');
-    if (actionPrompt) actionPrompt.textContent = 'Creating safety backup, pulling update, and preparing restart...';
+    const modal = document.getElementById('update-progress-modal');
+    const progressFill = document.getElementById('update-progress-fill');
+    const statusSub = document.getElementById('update-modal-status-sub');
+    const modalTitle = document.getElementById('update-modal-title');
+    const modalSpinner = document.getElementById('update-modal-spinner');
 
-    const btnFullApply = document.getElementById('btn-full-update-apply');
-    const btnDashApply = document.getElementById('btn-dash-update-apply');
-    if (btnFullApply) btnFullApply.disabled = true;
-    if (btnDashApply) btnDashApply.disabled = true;
+    if (modal) modal.style.display = 'flex';
+    if (modalTitle) modalTitle.textContent = 'Installing Update';
+    if (modalSpinner) modalSpinner.textContent = '🚀';
+
+    // Step 1: Backup
+    setUpdateStep('step-backup', 'active', 'Creating configuration & state backup snapshot...');
+    setUpdateStep('step-pull', 'pending', 'Pulling repository changes & dependencies');
+    setUpdateStep('step-restart', 'pending', 'Restarting Silas Blue service');
+    setUpdateStep('step-reconnect', 'pending', 'Verifying boot health & reconnecting');
+    if (progressFill) progressFill.style.width = '25%';
+    if (statusSub) statusSub.textContent = 'Snapshotting local state to backups/...';
+
+    // Transition visually to pull step after 1s
+    const stepTimer = setTimeout(() => {
+        setUpdateStep('step-backup', 'done', 'Configuration & state safely backed up');
+        setUpdateStep('step-pull', 'active', 'Pulling Git updates & verifying dependencies...');
+        if (progressFill) progressFill.style.width = '50%';
+        if (statusSub) statusSub.textContent = 'Downloading latest repository commits...';
+    }, 1200);
 
     try {
         const res = await fetch('/api/update/apply', {
@@ -838,57 +878,95 @@ async function applyUpdate() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channel: chan })
         });
+        clearTimeout(stepTimer);
         const result = await res.json();
 
         if (result.success) {
-            showToast('Update staged! Silas Blue is restarting. Reconnecting automatically...', 'info', 10000);
-            if (actionPrompt) actionPrompt.textContent = 'Silas Blue is restarting with the new update. Reconnecting automatically...';
+            setUpdateStep('step-backup', 'done', 'Configuration & state safely backed up');
+            setUpdateStep('step-pull', 'done', 'Updates and packages installed successfully');
+            setUpdateStep('step-restart', 'active', 'Restarting Silas Blue service & container...');
+            if (progressFill) progressFill.style.width = '75%';
+            if (statusSub) statusSub.textContent = 'Initiating service reboot...';
 
-            let attempts = 0;
-            const maxAttempts = 30;
-            const pollForOnline = async () => {
-                attempts++;
-                try {
-                    const check = await fetch('/api/status', { cache: 'no-store' });
-                    if (check.ok) {
-                        showToast('Reconnected! Silas Blue is online.', 'success');
-                        setTimeout(() => window.location.reload(), 800);
-                        return;
+            setTimeout(() => {
+                setUpdateStep('step-restart', 'done', 'Silas Blue service restarted');
+                setUpdateStep('step-reconnect', 'active', 'Verifying gateway and waiting for backend...');
+                if (progressFill) progressFill.style.width = '88%';
+
+                let attempts = 0;
+                const maxAttempts = 35;
+                const pollForOnline = async () => {
+                    attempts++;
+                    if (statusSub) {
+                        statusSub.textContent = `Connecting to gateway (attempt ${attempts}/${maxAttempts})...`;
                     }
-                } catch (e) {}
+                    try {
+                        const check = await fetch('/api/status', { cache: 'no-store' });
+                        if (check.ok) {
+                            setUpdateStep('step-reconnect', 'done', 'Silas Blue is online and healthy!');
+                            if (progressFill) progressFill.style.width = '100%';
+                            if (modalTitle) modalTitle.textContent = '🎉 Update Complete!';
+                            if (modalSpinner) modalSpinner.textContent = '✅';
+                            if (statusSub) statusSub.textContent = 'Reloading dashboard...';
+                            showToast('Update complete! Silas Blue is back online.', 'success');
+                            setTimeout(() => window.location.reload(), 1200);
+                            return;
+                        }
+                    } catch (e) {}
 
-                if (attempts < maxAttempts) {
-                    setTimeout(pollForOnline, 2000);
-                } else {
-                    window.location.reload();
-                }
-            };
-            setTimeout(pollForOnline, 3500);
+                    if (attempts < maxAttempts) {
+                        setTimeout(pollForOnline, 1800);
+                    } else {
+                        if (statusSub) statusSub.textContent = 'Reloading page...';
+                        window.location.reload();
+                    }
+                };
+                setTimeout(pollForOnline, 2500);
+            }, 2000);
+
         } else {
-            showToast(`Update failed: ${result.error || 'Unknown error'}`, 'error', 5000);
-            if (btnFullApply) btnFullApply.disabled = false;
-            if (btnDashApply) btnDashApply.disabled = false;
+            clearTimeout(stepTimer);
+            setUpdateStep('step-pull', 'error', `Update failed: ${result.error || 'Unknown error'}`);
+            if (modalTitle) modalTitle.textContent = '❌ Update Failed';
+            if (modalSpinner) modalSpinner.textContent = '⚠️';
+            if (statusSub) statusSub.innerHTML = `<span style="color:#ff5555">${result.error || 'Unknown error'}</span><br><button onclick="document.getElementById('update-progress-modal').style.display='none'" style="margin-top:10px;">Close</button>`;
+            showToast(`Update failed: ${result.error || 'Unknown error'}`, 'error', 6000);
         }
     } catch (e) {
-        showToast('Connection interrupted during restart. Reconnecting...', 'warning', 8000);
+        clearTimeout(stepTimer);
+        // If fetch aborted/failed because server rebooted immediately
+        setUpdateStep('step-backup', 'done', 'Configuration & state backed up');
+        setUpdateStep('step-pull', 'done', 'Updates applied');
+        setUpdateStep('step-restart', 'done', 'Service reboot triggered');
+        setUpdateStep('step-reconnect', 'active', 'Reconnecting to Silas Blue gateway...');
+        if (progressFill) progressFill.style.width = '88%';
+
         let attempts = 0;
-        const maxAttempts = 25;
+        const maxAttempts = 35;
         const pollForOnline = async () => {
             attempts++;
+            if (statusSub) {
+                statusSub.textContent = `Connecting to gateway (attempt ${attempts}/${maxAttempts})...`;
+            }
             try {
                 const check = await fetch('/api/status', { cache: 'no-store' });
                 if (check.ok) {
-                    window.location.reload();
+                    setUpdateStep('step-reconnect', 'done', 'Silas Blue is back online!');
+                    if (progressFill) progressFill.style.width = '100%';
+                    if (modalTitle) modalTitle.textContent = '🎉 Update Complete!';
+                    if (modalSpinner) modalSpinner.textContent = '✅';
+                    setTimeout(() => window.location.reload(), 1200);
                     return;
                 }
             } catch (err) {}
+
             if (attempts < maxAttempts) {
-                setTimeout(pollForOnline, 2000);
+                setTimeout(pollForOnline, 1800);
             } else {
                 window.location.reload();
             }
         };
-        setTimeout(pollForOnline, 3500);
+        setTimeout(pollForOnline, 2500);
     }
 }
 

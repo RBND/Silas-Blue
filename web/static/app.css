@@ -493,28 +493,29 @@ input:focus, select:focus, textarea:focus {
     z-index: 9999;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     pointer-events: none;
-    max-width: 420px;
+    max-width: 440px;
 }
 
 .toast {
     pointer-events: auto;
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
+    gap: 14px;
+    padding: 14px 20px;
     border-radius: 8px;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     line-height: 1.4;
-    color: #f8f8f2;
-    background: #1e1f29;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+    color: #ffffff;
+    background: #181922 !important; /* 100% solid, fully opaque */
+    border: 1px solid #282a36;
+    border-left: 5px solid var(--accent-cyan);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.9), 0 4px 12px rgba(0, 0, 0, 0.7);
     opacity: 0;
     transform: translateY(-12px) scale(0.96);
-    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     cursor: pointer;
     user-select: none;
 }
@@ -530,8 +531,8 @@ input:focus, select:focus, textarea:focus {
 }
 
 .toast-icon {
-    font-size: 16px;
-    font-weight: bold;
+    font-size: 18px;
+    font-weight: 800;
     flex-shrink: 0;
 }
 
@@ -540,36 +541,101 @@ input:focus, select:focus, textarea:focus {
 }
 
 .toast.success {
-    border-color: rgba(80, 250, 123, 0.5);
-    background: linear-gradient(135deg, rgba(80, 250, 123, 0.18), #1e1f29 75%);
+    background: #122117 !important; /* Solid dark green */
+    border-color: rgba(80, 250, 123, 0.6);
+    border-left: 5px solid #50fa7b;
 }
 .toast.success .toast-icon {
     color: #50fa7b;
 }
 
 .toast.error {
-    border-color: rgba(255, 85, 85, 0.5);
-    background: linear-gradient(135deg, rgba(255, 85, 85, 0.18), #1e1f29 75%);
+    background: #261316 !important; /* Solid dark red */
+    border-color: rgba(255, 85, 85, 0.6);
+    border-left: 5px solid #ff5555;
 }
 .toast.error .toast-icon {
     color: #ff5555;
 }
 
 .toast.warning {
-    border-color: rgba(255, 184, 108, 0.5);
-    background: linear-gradient(135deg, rgba(255, 184, 108, 0.18), #1e1f29 75%);
+    background: #261f13 !important; /* Solid dark amber */
+    border-color: rgba(255, 184, 108, 0.6);
+    border-left: 5px solid #ffb86c;
 }
 .toast.warning .toast-icon {
     color: #ffb86c;
 }
 
 .toast.info {
-    border-color: rgba(0, 240, 255, 0.5);
-    background: linear-gradient(135deg, rgba(0, 240, 255, 0.18), #1e1f29 75%);
+    background: #121e28 !important; /* Solid dark cyan */
+    border-color: rgba(0, 240, 255, 0.6);
+    border-left: 5px solid var(--accent-cyan);
 }
 .toast.info .toast-icon {
     color: var(--accent-cyan);
 }
+
+/* Update Progress Modal & Steps */
+.update-steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #12131b;
+    border-radius: 8px;
+    padding: 16px 18px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.update-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #f8f8f2;
+    transition: all 0.25s ease;
+}
+
+.update-step .step-icon {
+    width: 20px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 15px;
+    flex-shrink: 0;
+}
+
+.update-step.pending {
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+.update-step.active {
+    color: var(--accent-cyan);
+    font-weight: 700;
+}
+
+.update-step.done {
+    color: #50fa7b;
+    font-weight: 600;
+}
+
+.update-progress-track {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 14px;
+}
+
+.update-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-cyan), #50fa7b);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+
 
 /* Modal Dialog */
 .modal-overlay {

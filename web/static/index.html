@@ -471,6 +471,45 @@
         </div>
     </div>
 
+    <!-- Update Progress Modal -->
+    <div id="update-progress-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-card" style="max-width: 480px; text-align: center;">
+            <div style="font-size: 36px; margin-bottom: 8px;" id="update-modal-spinner">🚀</div>
+            <div class="modal-title" style="font-size: 18px; margin-bottom: 6px; text-align: center;" id="update-modal-title">Installing Update</div>
+            <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 18px;" id="update-modal-desc">
+                Please wait while Silas Blue updates and restarts. Do not close this page.
+            </div>
+
+            <!-- Step List -->
+            <div class="update-steps-list">
+                <div class="update-step" id="step-backup">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-label">Creating safety backup snapshot...</span>
+                </div>
+                <div class="update-step pending" id="step-pull">
+                    <span class="step-icon">○</span>
+                    <span class="step-label">Pulling repository changes & dependencies</span>
+                </div>
+                <div class="update-step pending" id="step-restart">
+                    <span class="step-icon">○</span>
+                    <span class="step-label">Restarting Silas Blue service</span>
+                </div>
+                <div class="update-step pending" id="step-reconnect">
+                    <span class="step-icon">○</span>
+                    <span class="step-label">Verifying boot health & reconnecting</span>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="update-progress-track">
+                <div class="update-progress-bar" id="update-progress-fill" style="width: 25%;"></div>
+            </div>
+            <div id="update-modal-status-sub" style="font-size: 11px; color: var(--text-muted); margin-top: 10px;">
+                Starting update sequence...
+            </div>
+        </div>
+    </div>
+
     <div id="toast-container"></div>
     <script src="/static/app.js"></script>
 </body>
