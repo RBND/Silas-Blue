@@ -841,20 +841,54 @@ async function applyUpdate() {
         const result = await res.json();
 
         if (result.success) {
-            showToast('Update staged! Silas Blue is now restarting. Dashboard will reconnect momentarily.', 'info', 6000);
-            setTimeout(() => {
-                window.location.reload();
-            }, 6000);
+            showToast('Update staged! Silas Blue is restarting. Reconnecting automatically...', 'info', 10000);
+            if (actionPrompt) actionPrompt.textContent = 'Silas Blue is restarting with the new update. Reconnecting automatically...';
+
+            let attempts = 0;
+            const maxAttempts = 30;
+            const pollForOnline = async () => {
+                attempts++;
+                try {
+                    const check = await fetch('/api/status', { cache: 'no-store' });
+                    if (check.ok) {
+                        showToast('Reconnected! Silas Blue is online.', 'success');
+                        setTimeout(() => window.location.reload(), 800);
+                        return;
+                    }
+                } catch (e) {}
+
+                if (attempts < maxAttempts) {
+                    setTimeout(pollForOnline, 2000);
+                } else {
+                    window.location.reload();
+                }
+            };
+            setTimeout(pollForOnline, 3500);
         } else {
             showToast(`Update failed: ${result.error || 'Unknown error'}`, 'error', 5000);
             if (btnFullApply) btnFullApply.disabled = false;
             if (btnDashApply) btnDashApply.disabled = false;
         }
     } catch (e) {
-        showToast('Server connection lost during update restart. Reloading page...', 'warning', 5000);
-        setTimeout(() => {
-            window.location.reload();
-        }, 5000);
+        showToast('Connection interrupted during restart. Reconnecting...', 'warning', 8000);
+        let attempts = 0;
+        const maxAttempts = 25;
+        const pollForOnline = async () => {
+            attempts++;
+            try {
+                const check = await fetch('/api/status', { cache: 'no-store' });
+                if (check.ok) {
+                    window.location.reload();
+                    return;
+                }
+            } catch (err) {}
+            if (attempts < maxAttempts) {
+                setTimeout(pollForOnline, 2000);
+            } else {
+                window.location.reload();
+            }
+        };
+        setTimeout(pollForOnline, 3500);
     }
 }
 

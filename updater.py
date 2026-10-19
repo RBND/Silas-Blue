@@ -408,8 +408,8 @@ class BotUpdater:
                 logger.info(f"Docker signal written to {DOCKER_SIGNAL_FILE}. Terminating container for restart...")
             except Exception as e:
                 logger.warning(f"Failed to write Docker signal file: {e}")
-            # Exit process cleanly so Docker container restart policy (unless-stopped) restarts it
-            sys.exit(0)
+            # Exit process cleanly at OS level so Docker restart policy restarts the container
+            os._exit(0)
 
         # For Native installations (Windows / Linux / macOS)
         try:
@@ -430,8 +430,8 @@ class BotUpdater:
                     preexec_fn=os.setpgrp,
                     close_fds=True
                 )
-            # Exit current process
-            sys.exit(0)
+            # Exit current process at OS level
+            os._exit(0)
         except Exception as e:
             logger.error(f"Failed to spawn restart process: {e}")
             # Fallback to direct execv
