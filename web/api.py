@@ -141,6 +141,8 @@ class ApiHandler:
         uptime_secs = int(time.time() - start_time)
 
         return web.json_response({
+            "version": get_current_version(),
+            "commit": get_current_commit(),
             "bot": {
                 "running": bot_running,
                 "status": "Running" if bot_running else "Stopped",

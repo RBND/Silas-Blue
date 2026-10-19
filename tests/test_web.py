@@ -110,6 +110,8 @@ class TestWebApiEndpoints(AioHTTPTestCase):
         self.assertIn("bot", data)
         self.assertIn("ai", data)
         self.assertIn("system", data)
+        self.assertIn("version", data)
+        self.assertIn("commit", data)
         self.assertEqual(data["ai"]["active_model"], "test-model:latest")
 
     @unittest_run_loop

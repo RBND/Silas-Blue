@@ -160,6 +160,12 @@ async function refreshStatus() {
 }
 
 function updateDashboardUI(data) {
+    // Remote Management Version
+    const sidebarVer = document.getElementById('sidebar-version-text');
+    if (sidebarVer && data.version) {
+        sidebarVer.textContent = `Remote Management v${data.version}`;
+    }
+
     // User header
     const userDisplay = document.getElementById('user-display');
     if (userDisplay && data.user) {
@@ -708,6 +714,11 @@ async function loadUpdateStatus() {
 
         if (dashSummary) {
             dashSummary.textContent = `Silas Blue v${currVer} (#${currSha}) • Channel: ${(data.config?.update_channel || 'stable').toUpperCase()}`;
+        }
+
+        const sidebarVer = document.getElementById('sidebar-version-text');
+        if (sidebarVer && currVer) {
+            sidebarVer.textContent = `Remote Management v${currVer}`;
         }
 
         // Update Updates Page Form & KPIs
