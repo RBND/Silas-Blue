@@ -196,7 +196,7 @@ class BotUpdater:
             else:
                 # Latest channel: checks git origin/main
                 if is_git_repo():
-                    rc, _, _ = run_git(["fetch", "origin", "main"])
+                    rc, _, _ = run_git(["fetch", "origin", "main", "--force"])
                     if rc == 0:
                         # Get remote commit hash
                         rc_rev, remote_sha, _ = run_git(["rev-parse", "--short", "origin/main"])
@@ -315,10 +315,12 @@ class BotUpdater:
         prev_commit = get_current_commit()
         prev_version = get_current_version()
 
-        # 2. Fetch updates from remote
-        rc, _, err = run_git(["fetch", "origin", "--tags"])
+        # 2. Fetch updates from remote (use --force so updating tags like 'Latest' do not fail)
+        rc, _, err = run_git(["fetch", "origin", "main", "--tags", "--force"])
         if rc != 0:
-            return False, f"Git fetch failed: {err}"
+            rc, _, err = run_git(["fetch", "--tags", "--force", "origin"])
+            if rc != 0:
+                return False, f"Git fetch failed: {err}"
 
         # 3. Pull / Checkout target
         target_ref = "origin/main"

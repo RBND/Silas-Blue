@@ -56,7 +56,7 @@ echo "[OK] Backup saved to $BACKUP_PATH"
 # 2. Fetch updates from Git remote
 echo ""
 echo "[2/4] Fetching latest updates from GitHub..."
-git fetch origin --tags
+git fetch origin main --tags --force
 
 PREV_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 

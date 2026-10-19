@@ -50,7 +50,7 @@ echo.
 
 :: 2. Fetch updates from Git remote
 echo [2/4] Fetching latest updates from GitHub...
-git fetch origin --tags
+git fetch origin main --tags --force
 
 for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set "PREV_COMMIT=%%i"
 
