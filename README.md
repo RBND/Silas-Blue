@@ -1,6 +1,6 @@
-# Silas Blue v3.3.5
+# Silas Blue v3.4.0
 
-[![Version](https://img.shields.io/badge/version-3.3.5-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.4.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,24 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.3.5 introduces an automated update management system, multi-channel release tracks, multi-step live update feedback, unified desktop webview mode, and high-contrast toast notifications.
+Silas Blue v3.4.0 introduces role-based token quotas, customizable reset schedules, partial overage policies, in-Discord quota inspection commands, and web dashboard configuration controls.
 
 ---
 
-## 🚀 What's New in Version 3.3.5
+## 🚀 What's New in Version 3.4.0
+
+* **Role-Based Token Limits & Quotas**:
+  * Set token quotas per Discord role with automatic Administrator/Server Owner bypass.
+  * Hierarchical resolution: Members with multiple roles receive the highest configured allowance.
+  * Configurable automated reset schedules: **Daily**, **Weekly** (day of week), **Monthly** (day of month), or **Rolling 24 Hours**.
+  * Flexible reset time anchoring (`HH:MM`) with timezone offset selection (`UTC-12` to `UTC+14`).
+  * Granular partial overage controls: Enable or disable overage on a user's final turn, with configurable token buffer caps (`max_overage_tokens`) and generation clamping.
+  * In-Discord `!quota` (aliases: `!tokens`, `!myquota`) embed command displaying current role tier, cycle, tokens used, remaining allowance, and a dynamic relative reset countdown (`<t:{epoch}:R>`).
+  * Web management dashboard integration for managing quotas per server.
+
+---
+
+## 🚀 Prior Features (v3.3.5)
 
 * **Automated & Manual In-App/Web Updater**:
   * Dual-track update channels: **Stable** (tracked via GitHub releases) and **Latest** (tracking HEAD commits on git branch).

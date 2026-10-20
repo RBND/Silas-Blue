@@ -848,7 +848,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.3.5';
+        const currVer = data.current_version || '3.4.0';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {
