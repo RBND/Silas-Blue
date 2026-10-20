@@ -141,6 +141,28 @@ class TestWebApiEndpoints(AioHTTPTestCase):
         self.assertIn("invite_url", data)
         self.assertIn("client_id", data)
 
+    @unittest_run_loop
+    async def test_favicon_endpoints_accessible_without_auth(self):
+        # 1. Root /favicon.ico route
+        ico_resp = await self.client.get("/favicon.ico")
+        self.assertEqual(ico_resp.status, 200)
+        self.assertIn("image", ico_resp.headers.get("Content-Type", ""))
+        ico_bytes = await ico_resp.read()
+        self.assertGreater(len(ico_bytes), 0)
+
+        # 2. Static SVG favicon
+        svg_resp = await self.client.get("/static/favicon.svg")
+        self.assertEqual(svg_resp.status, 200)
+        svg_text = await svg_resp.text()
+        self.assertIn("<svg", svg_text)
+        self.assertIn("</svg>", svg_text)
+
+        # 3. Static Web App Manifest
+        manifest_resp = await self.client.get("/static/site.webmanifest")
+        self.assertEqual(manifest_resp.status, 200)
+        manifest_data = await manifest_resp.json()
+        self.assertEqual(manifest_data.get("name"), "Silas Blue Web Management")
+
 if __name__ == "__main__":
     unittest.main()
 

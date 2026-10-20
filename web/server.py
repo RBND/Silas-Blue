@@ -167,6 +167,16 @@ def create_web_app(app_cfg: dict) -> web.Application:
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
         )
 
+    async def handle_favicon(request):
+        """Serves favicon.ico at domain root."""
+        fav_path = os.path.join(static_dir, "favicon.ico")
+        if os.path.exists(fav_path):
+            return web.FileResponse(
+                fav_path,
+                headers={"Cache-Control": "public, max-age=86400"}
+            )
+        return web.Response(status=404)
+
     # Register Auth Routes
     app.router.add_get("/auth/otp", handle_otp_login)
     app.router.add_get("/auth/discord/login", handle_discord_login)
@@ -195,6 +205,7 @@ def create_web_app(app_cfg: dict) -> web.Application:
     # Web Pages
     app.router.add_get("/", handle_index)
     app.router.add_get("/login", handle_login_page)
+    app.router.add_get("/favicon.ico", handle_favicon)
 
     # Static Assets (CSS, JS, Images)
     app.router.add_static("/static/", path=static_dir, name="static")

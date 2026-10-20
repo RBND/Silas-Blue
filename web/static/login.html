@@ -4,7 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - Silas Blue Web Manager</title>
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="manifest" href="/static/site.webmanifest">
+    <link rel="stylesheet" href="/static/app.css?v=3.5.8">
     <style>
         body {
             display: flex;
@@ -109,8 +115,9 @@
 </head>
 <body>
     <div class="login-card">
+        <img src="/static/favicon.svg" alt="Silas Blue" style="width: 58px; height: 58px; border-radius: 14px; margin-bottom: 12px; box-shadow: 0 0 24px rgba(0, 240, 255, 0.35);">
         <div class="login-brand">SILAS BLUE</div>
-        <div class="login-subtitle">Remote Management v3.5.7</div>
+        <div class="login-subtitle">Remote Management v3.5.8</div>
 
         <!-- Discord OAuth2 Login -->
         <a href="/auth/discord/login" class="discord-btn">

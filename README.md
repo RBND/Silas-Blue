@@ -1,6 +1,6 @@
-# Silas Blue v3.5.7
+# Silas Blue v3.5.8
 
-[![Version](https://img.shields.io/badge/version-3.5.7-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.8-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -11,7 +11,17 @@
 
 ---
 
-## 🚀 What's New in Version 3.5.7
+## 🚀 What's New in Version 3.5.8
+
+* **Brand Favicon & Web Management Assets**:
+  * **Cyberpunk Mascot Vector Favicon**: Introduced scalable vector SVG (`favicon.svg`) modeled after the Silas Blue neon robot mascot with dual magenta antenna orbs, cyan visor, glowing eyes, and dark high-contrast squircle plate.
+  * **Cross-Platform Multi-Resolution Formats**: Packaged multi-resolution `favicon.ico` (16x16, 32x32, 48x48, 64x64, 128x128, 256x256), high-DPI PNGs (`16x16`, `32x32`, `48x48`), Apple touch icon (`180x180`), and Android/Chrome icons (`192x192`, `512x512`).
+  * **PWA Web Manifest & Dedicated Route**: Added `/favicon.ico` root server route and standard `site.webmanifest` for mobile and desktop browser homescreens.
+  * **Branded Web Interface**: Integrated mascot iconography across both the login portal and main sidebar navigation header.
+
+---
+
+## 🚀 Prior Features (v3.5.7)
 
 * **Automated Dependency Monitoring with GitHub Dependabot**:
   * **Dependabot Version Updates**: Added `.github/dependabot.yml` configured to monitor Python dependencies (`requirements.txt`) and Docker base images (`Dockerfile`) weekly.
