@@ -175,8 +175,12 @@ def reload_ai_provider():
     logger.info(f"AI Provider reloaded: {current_ai_provider.name} ({current_ai_provider.base_url})")
 
 def update_server_config(guild_id, config: dict):
-    """Updates in-memory server config immediately from GUI saves."""
-    server_configs[guild_id] = config
+    """Updates in-memory server config immediately from GUI / Web saves."""
+    try:
+        server_configs[int(guild_id)] = config
+    except (ValueError, TypeError):
+        pass
+    server_configs[str(guild_id)] = config
     logger.debug(f"In-memory config updated for guild {guild_id}")
 
 def log_to_gui(event_type: str, data: dict):
@@ -661,11 +665,10 @@ async def on_guild_remove(guild):
 # Thread IDs processed by forum auto-reply or on_message to prevent duplicate answers
 _handled_forum_thread_ids: set = set()
 
-@bot.event
-async def on_thread_create(thread: discord.Thread):
+async def process_forum_auto_reply(thread: discord.Thread, starter_msg: Optional[discord.Message] = None):
     """
-    Event listener triggered when a new thread is created in Discord.
-    Monitors for new posts created in Forum channels and auto-replies if enabled.
+    Core handler for auto-replying to newly created posts in Discord Forum channels.
+    Can be invoked from either on_thread_create or on_message (for starter posts).
     """
     if not thread.guild:
         return
@@ -675,7 +678,7 @@ async def on_thread_create(thread: discord.Thread):
         return
 
     guild_id = thread.guild.id
-    config = server_configs.get(guild_id)
+    config = server_configs.get(guild_id) or server_configs.get(str(guild_id))
     if not config:
         config = load_config(guild_id)
         server_configs[guild_id] = config
@@ -695,14 +698,14 @@ async def on_thread_create(thread: discord.Thread):
                 return
 
     # Verify parent is a ForumChannel
-    is_forum = isinstance(parent, discord.ForumChannel) or getattr(parent, "type", None) == discord.ChannelType.forum
+    is_forum = isinstance(parent, getattr(discord, "ForumChannel", ())) or getattr(parent, "type", None) == getattr(discord.ChannelType, "forum", None)
     if not is_forum:
         return
 
     # Channel whitelist check
     monitored_channels = [str(c).strip() for c in config.get("forum_monitored_channels", []) if str(c).strip()]
     if monitored_channels and str(parent.id) not in monitored_channels:
-        logger.debug(f"Forum thread {thread.id} in channel {parent.id} skipped (not in monitored channel whitelist)")
+        logger.info(f"Forum thread '{thread.name}' ({thread.id}) in channel {parent.id} skipped (not in monitored channel whitelist: {monitored_channels})")
         return
 
     # Tag filter check
@@ -729,7 +732,8 @@ async def on_thread_create(thread: discord.Thread):
         _handled_forum_thread_ids.add(thread.id)
 
     # Fetch starter message
-    starter_msg = getattr(thread, "starter_message", None)
+    if starter_msg is None:
+        starter_msg = getattr(thread, "starter_message", None)
     if starter_msg is None:
         await asyncio.sleep(0.5)
         try:
@@ -745,7 +749,7 @@ async def on_thread_create(thread: discord.Thread):
             logger.debug(f"Could not retrieve starter message for thread {thread.id}: {e}")
 
     if not starter_msg:
-        logger.warning(f"Could not retrieve starter message for forum thread {thread.id}")
+        logger.warning(f"Could not retrieve starter message for forum thread '{thread.name}' ({thread.id})")
         return
 
     # Do not reply to bots or self
@@ -768,7 +772,7 @@ async def on_thread_create(thread: discord.Thread):
 
     forum_sys_prompt = (config.get("forum_system_prompt") or "").strip()
 
-    logger.info(f"Auto-replying to forum post '{title}' ({thread.id}) in guild '{thread.guild.name}'")
+    logger.info(f"Auto-replying to forum post '{title}' ({thread.id}) in guild '{thread.guild.name}' (#{getattr(parent, 'name', parent.id)})")
     log_to_gui("forum_post_replied", {
         "guild_id": guild_id,
         "guild_name": thread.guild.name,
@@ -783,6 +787,14 @@ async def on_thread_create(thread: discord.Thread):
         prompt_override=prompt_override,
         system_prompt_override=forum_sys_prompt if forum_sys_prompt else None
     )
+
+@bot.event
+async def on_thread_create(thread: discord.Thread):
+    """
+    Event listener triggered when a new thread is created in Discord.
+    Monitors for new posts created in Forum channels and auto-replies if enabled.
+    """
+    await process_forum_auto_reply(thread)
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -822,11 +834,16 @@ async def on_message(message: discord.Message):
         config = load_config(guild_id)
         server_configs[guild_id] = config
 
-    # Prevent duplicate reply if already handled by forum auto-reply
+    # Check if message is a new forum post starter message
     if isinstance(message.channel, discord.Thread) and message.id == message.channel.id:
-        if message.channel.id in _handled_forum_thread_ids:
+        parent = message.channel.parent
+        if parent is None and getattr(message.channel, "parent_id", None) and message.guild:
+            parent = message.guild.get_channel(message.channel.parent_id)
+        is_forum = isinstance(parent, getattr(discord, "ForumChannel", ())) or getattr(parent, "type", None) == getattr(discord.ChannelType, "forum", None)
+        if is_forum:
+            if message.channel.id not in _handled_forum_thread_ids:
+                await process_forum_auto_reply(message.channel, starter_msg=message)
             return
-        _handled_forum_thread_ids.add(message.channel.id)
 
     # Permission check for reply
     if not permissions.can_reply(message, config):

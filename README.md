@@ -1,6 +1,6 @@
-# Silas Blue v3.5.3
+# Silas Blue v3.5.4
 
-[![Version](https://img.shields.io/badge/version-3.5.3-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.4-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,20 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.5.3 upgrades the Forum Auto-Reply channel selector into a search-and-chip badge interface identical to the permissions control system across both the Web Management Console and Desktop PySide6 GUI.
+Silas Blue v3.5.4 resolves a critical event race condition in Discord Forum post auto-replies, ensuring new forum posts trigger immediate proactive answers without requiring user @mentions.
 
 ---
 
-## 🚀 What's New in Version 3.5.3
+## 🚀 What's New in Version 3.5.4
+
+* **Fixed Forum Post Auto-Reply Event Race Condition**:
+  * Fixed an issue where the Discord `MESSAGE_CREATE` event for a new forum post's starter message was prematurely registering the thread ID as handled, preventing `on_thread_create` from executing and suppressing automated answers.
+  * Unified forum post processing across both `on_thread_create` and starter `on_message` listeners, guaranteeing robust and instant replies regardless of Discord event delivery order.
+  * Synchronized string and integer server configuration lookup keys across in-memory runtime caches.
+
+---
+
+## 🚀 Prior Features (v3.5.3)
 
 * **Searchable Forum Channel Selector (Permissions UX)**:
   * Upgraded Forum Channel whitelist selection from a comma-separated ID text field to a Discord-grade chip and search interface matching the permissions manager:

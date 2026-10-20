@@ -3,7 +3,7 @@ Silas Blue - Discord Bot powered by local AI models via Ollama or Llama.cpp
 Main entry point: launches Discord bot with either desktop GUI or headless web management.
 """
 
-__version__ = "3.5.3"
+__version__ = "3.5.4"
 
 import sys
 import threading

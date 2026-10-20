@@ -218,5 +218,24 @@ class TestForumAutoReply(unittest.IsolatedAsyncioTestCase):
                     await bot_core.set_forum(ctx, action="off")
                     self.assertFalse(config["forum_auto_reply_enabled"])
 
+    @patch("bot_core.handle_ai_prompt", new_callable=AsyncMock)
+    async def test_forum_auto_reply_via_starter_message_event(self, mock_handle_ai):
+        thread, starter_msg = self._create_mock_thread(parent_is_forum=True)
+        config = {
+            "forum_auto_reply_enabled": True,
+            "forum_include_post_title": True,
+            "forum_system_prompt": "Diagnostic bot persona"
+        }
+        with patch.dict(bot_core.server_configs, {self.guild_id: config}):
+            with patch("bot_core.permissions.can_reply", return_value=True):
+                # When on_message receives the starter message first
+                await bot_core.on_message(starter_msg)
+                mock_handle_ai.assert_called_once()
+
+                # And when on_thread_create fires subsequently, it avoids double-reply
+                mock_handle_ai.reset_mock()
+                await bot_core.on_thread_create(thread)
+                mock_handle_ai.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
