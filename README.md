@@ -1,6 +1,6 @@
-# Silas Blue v3.5.5
+# Silas Blue v3.5.7
 
-[![Version](https://img.shields.io/badge/version-3.5.5-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.7-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,17 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.5.5 introduces configurable multi-page delivery modes for Forum Auto-Replies, allowing long diagnostic answers to be delivered sequentially as permanent messages with `[Part X/Y]` headers or as persistent interactive pagination buttons open to all thread participants.
+---
+
+## 🚀 What's New in Version 3.5.7
+
+* **Automated Dependency Monitoring with GitHub Dependabot**:
+  * **Dependabot Version Updates**: Added `.github/dependabot.yml` configured to monitor Python dependencies (`requirements.txt`) and Docker base images (`Dockerfile`) weekly.
+  * **Automated Pull Requests & Notifications**: GitHub will automatically open PRs and trigger notifications whenever updates or security advisories become available for project dependencies.
 
 ---
 
-## 🚀 What's New in Version 3.5.6
+## 🚀 Prior Features (v3.5.6)
 
 * **Prominent Forum Reply Pagination Configuration**:
   * **Explicit Pagination Naming**: Labeled and styled clearly as **Forum Reply Pagination Mode** across all settings interfaces so technicians and server owners can easily find and configure pagination for forum replies.
