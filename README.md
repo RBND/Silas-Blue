@@ -1,6 +1,6 @@
-# Silas Blue v3.4.0
+# Silas Blue v3.5.0
 
-[![Version](https://img.shields.io/badge/version-3.4.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,24 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.4.0 introduces role-based token quotas, customizable reset schedules, partial overage policies, in-Discord quota inspection commands, and web dashboard configuration controls.
+Silas Blue v3.5.0 introduces automated Discord forum monitoring and replies, tag whitelist/blacklist filtering, forum-specific system persona overrides, and Discord/GUI/Web configuration controls.
 
 ---
 
-## 🚀 What's New in Version 3.4.0
+## 🚀 What's New in Version 3.5.0
+
+* **Discord Forum Post Monitoring & Auto-Replies**:
+  * Proactively monitors newly created forum threads in Discord `ForumChannel`s and generates AI responses without requiring user @mentions.
+  * Context-aware prompt injection combining the thread title (`[Forum Post Title: ...]`) with the starter post body.
+  * Channel whitelist filtering: Restrict forum auto-replies to specific forum channels (e.g. `#support`, `#questions`), or allow all forums in the server.
+  * Tag whitelist & blacklist filtering: Trigger replies only on posts matching designated tags (e.g. `help`, `unsolved`) and automatically skip posts carrying ignored tags (e.g. `closed`, `resolved`, `announcement`).
+  * Specialized forum system prompts: Configure dedicated AI personas/instructions specifically for forum post answers.
+  * In-Discord admin commands: `!setforum on/off`, `!setforum status`, `!setforum prompt <text>`, `!setforum title on/off`.
+  * Dedicated forum auto-reply configuration card in Desktop GUI and Web Management Dashboard.
+
+---
+
+## 🚀 Prior Features (v3.4.0)
 
 * **Role-Based Token Limits & Quotas**:
   * Set token quotas per Discord role with automatic Administrator/Server Owner bypass.
@@ -337,6 +350,14 @@ Silas Blue responds to mentions or standard prefix commands:
   ```text
   !setprompt You are a helpful assistant for the Coding Club. Keep answers concise.
   !setprompt reset   (resets back to the global default persona)
+  ```
+* **Discord Forum Auto-Reply**:
+  ```text
+  !setforum status           - View current forum monitoring settings (Admin only)
+  !setforum on / off         - Enable or disable proactive replies in forum channels
+  !setforum prompt <text>    - Set specialized AI persona/instructions for forum replies
+  !setforum resetprompt      - Reset forum persona to server default
+  !setforum title on / off   - Toggle including the forum post title in prompt context
   ```
 * **Conversation Memory & Message Recall**:
   ```text

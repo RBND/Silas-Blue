@@ -272,7 +272,8 @@ async def handle_ai_prompt(
     message: discord.Message,
     config: dict,
     prompt_override: Optional[str] = None,
-    force_web_search: bool = False
+    force_web_search: bool = False,
+    system_prompt_override: Optional[str] = None
 ):
     """
     Sends message to active AI provider asynchronously without blocking event loop.
@@ -368,7 +369,10 @@ async def handle_ai_prompt(
     citations_footer = ""
 
     # Base system prompt
-    server_prompt = (config.get("system_prompt") or "").strip() if config else ""
+    if system_prompt_override is not None:
+        server_prompt = system_prompt_override.strip()
+    else:
+        server_prompt = (config.get("system_prompt") or "").strip() if config else ""
     global_prompt = (app_cfg.get("system_prompt") or "").strip()
     if server_prompt and global_prompt:
         base_sys_prompt = f"{global_prompt}\n\n### SERVER-SPECIFIC PERSONA & INSTRUCTIONS\n{server_prompt}"
@@ -654,6 +658,132 @@ async def on_guild_remove(guild):
     logger.info(f"Left server: {guild.name} ({guild.id})")
     log_to_gui("server_left", {"guild_id": guild.id, "guild_name": guild.name})
 
+# Thread IDs processed by forum auto-reply or on_message to prevent duplicate answers
+_handled_forum_thread_ids: set = set()
+
+@bot.event
+async def on_thread_create(thread: discord.Thread):
+    """
+    Event listener triggered when a new thread is created in Discord.
+    Monitors for new posts created in Forum channels and auto-replies if enabled.
+    """
+    if not thread.guild:
+        return
+
+    # Check if thread was already handled
+    if thread.id in _handled_forum_thread_ids:
+        return
+
+    guild_id = thread.guild.id
+    config = server_configs.get(guild_id)
+    if not config:
+        config = load_config(guild_id)
+        server_configs[guild_id] = config
+
+    if not config.get("forum_auto_reply_enabled", False):
+        return
+
+    # Resolve parent channel
+    parent = thread.parent
+    if parent is None and getattr(thread, "parent_id", None):
+        parent = thread.guild.get_channel(thread.parent_id)
+        if parent is None:
+            try:
+                parent = await thread.guild.fetch_channel(thread.parent_id)
+            except Exception as e:
+                logger.debug(f"Could not fetch parent channel for thread {thread.id}: {e}")
+                return
+
+    # Verify parent is a ForumChannel
+    is_forum = isinstance(parent, discord.ForumChannel) or getattr(parent, "type", None) == discord.ChannelType.forum
+    if not is_forum:
+        return
+
+    # Channel whitelist check
+    monitored_channels = [str(c).strip() for c in config.get("forum_monitored_channels", []) if str(c).strip()]
+    if monitored_channels and str(parent.id) not in monitored_channels:
+        logger.debug(f"Forum thread {thread.id} in channel {parent.id} skipped (not in monitored channel whitelist)")
+        return
+
+    # Tag filter check
+    applied_tags = getattr(thread, "applied_tags", []) or []
+    applied_names = {t.name.casefold().strip() for t in applied_tags if hasattr(t, "name")}
+    applied_ids = {str(t.id).strip() for t in applied_tags if hasattr(t, "id")}
+
+    # 1. Ignored tags check (blacklist)
+    ignore_tags = {str(t).casefold().strip() for t in config.get("forum_ignore_tags", []) if str(t).strip()}
+    if ignore_tags and ((applied_names & ignore_tags) or (applied_ids & ignore_tags)):
+        logger.info(f"Forum post '{thread.name}' skipped due to ignored tag filter.")
+        return
+
+    # 2. Required tags check (whitelist)
+    req_tags = {str(t).casefold().strip() for t in config.get("forum_auto_reply_tags", []) if str(t).strip()}
+    if req_tags and not ((applied_names & req_tags) or (applied_ids & req_tags)):
+        logger.info(f"Forum post '{thread.name}' skipped: does not match required tag filter.")
+        return
+
+    # Mark as handled to prevent duplicate reply
+    _handled_forum_thread_ids.add(thread.id)
+    if len(_handled_forum_thread_ids) > 10000:
+        _handled_forum_thread_ids.clear()
+        _handled_forum_thread_ids.add(thread.id)
+
+    # Fetch starter message
+    starter_msg = getattr(thread, "starter_message", None)
+    if starter_msg is None:
+        await asyncio.sleep(0.5)
+        try:
+            starter_msg = await thread.fetch_message(thread.id)
+        except Exception:
+            pass
+    if starter_msg is None:
+        try:
+            async for msg in thread.history(limit=1, oldest_first=True):
+                starter_msg = msg
+                break
+        except Exception as e:
+            logger.debug(f"Could not retrieve starter message for thread {thread.id}: {e}")
+
+    if not starter_msg:
+        logger.warning(f"Could not retrieve starter message for forum thread {thread.id}")
+        return
+
+    # Do not reply to bots or self
+    if starter_msg.author == bot.user or getattr(starter_msg.author, "bot", False):
+        return
+
+    # Permission check
+    if not permissions.can_reply(starter_msg, config):
+        logger.info(f"User {starter_msg.author} lacks permission for forum auto-reply in {thread.guild.name}")
+        return
+
+    # Build prompt
+    title = (thread.name or "").strip()
+    body = (starter_msg.content or "").strip()
+    include_title = config.get("forum_include_post_title", True)
+    if include_title and title:
+        prompt_override = f"[Forum Post Title: {title}]\n{body}" if body else f"[Forum Post Title: {title}]"
+    else:
+        prompt_override = body if body else title
+
+    forum_sys_prompt = (config.get("forum_system_prompt") or "").strip()
+
+    logger.info(f"Auto-replying to forum post '{title}' ({thread.id}) in guild '{thread.guild.name}'")
+    log_to_gui("forum_post_replied", {
+        "guild_id": guild_id,
+        "guild_name": thread.guild.name,
+        "thread_id": thread.id,
+        "post_title": title,
+        "author": str(starter_msg.author)
+    })
+
+    await handle_ai_prompt(
+        starter_msg,
+        config,
+        prompt_override=prompt_override,
+        system_prompt_override=forum_sys_prompt if forum_sys_prompt else None
+    )
+
 @bot.event
 async def on_message(message: discord.Message):
     if message.author == bot.user:
@@ -691,6 +821,12 @@ async def on_message(message: discord.Message):
     if not config:
         config = load_config(guild_id)
         server_configs[guild_id] = config
+
+    # Prevent duplicate reply if already handled by forum auto-reply
+    if isinstance(message.channel, discord.Thread) and message.id == message.channel.id:
+        if message.channel.id in _handled_forum_thread_ids:
+            return
+        _handled_forum_thread_ids.add(message.channel.id)
 
     # Permission check for reply
     if not permissions.can_reply(message, config):
@@ -903,6 +1039,84 @@ async def set_prompt(ctx, *, prompt: str = ""):
         server_configs[guild_id] = config
         snippet = prompt[:80] + "..." if len(prompt) > 80 else prompt
         await ctx.send(f"✓ Server system prompt updated:\n> *{snippet}*")
+
+@bot.command(name="setforum", aliases=["forumreply", "forum"])
+async def set_forum(ctx, action: Optional[str] = None, *, arg: Optional[str] = None):
+    """
+    Configures Discord Forum Auto-Reply settings for this server (Admin only).
+    Usage:
+      !setforum on / off             - Enable or disable automatic replies in forums
+      !setforum status               - View current forum auto-reply configuration
+      !setforum prompt <text>        - Set custom persona/instructions for forum post replies
+      !setforum resetprompt          - Clear custom forum system prompt
+      !setforum title on / off       - Toggle including post title in the prompt
+    """
+    if not ctx.guild:
+        await ctx.send("Forum settings can only be configured within a server.")
+        return
+
+    guild_id = ctx.guild.id
+    config = server_configs.get(guild_id, {})
+    if not permissions.can_change_permissions(ctx.author, ctx.guild, config):
+        await ctx.send("You do not have permission to modify server forum settings.")
+        return
+
+    act = (action or "").lower().strip()
+
+    if act in ("on", "enable", "true", "1"):
+        config["forum_auto_reply_enabled"] = True
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        await ctx.send("✅ **Forum Auto-Reply Enabled**: Silas Blue will now monitor new forum posts and reply.")
+    elif act in ("off", "disable", "false", "0"):
+        config["forum_auto_reply_enabled"] = False
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        await ctx.send("⏸️ **Forum Auto-Reply Disabled**.")
+    elif act in ("title", "posttitle"):
+        val = (arg or "").lower().strip()
+        enable_title = val in ("on", "true", "1", "yes")
+        config["forum_include_post_title"] = enable_title
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        await ctx.send(f"✅ Forum post title inclusion set to: **{enable_title}**.")
+    elif act in ("prompt", "systemprompt", "setprompt"):
+        if not arg or not arg.strip():
+            await ctx.send("Please provide the custom system prompt text, e.g. `!setforum prompt You are a helpful forum assistant.`")
+            return
+        config["forum_system_prompt"] = arg.strip()[:4000]
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        await ctx.send(f"✅ **Forum System Prompt updated**:\n```{config['forum_system_prompt']}```")
+    elif act in ("resetprompt", "clearprompt"):
+        config["forum_system_prompt"] = ""
+        save_config(guild_id, config)
+        server_configs[guild_id] = config
+        await ctx.send("✅ **Forum System Prompt cleared** (will use server default system prompt).")
+    elif act == "status" or not act:
+        enabled = config.get("forum_auto_reply_enabled", False)
+        chans = config.get("forum_monitored_channels", [])
+        chans_display = ", ".join(f"<#{c}>" for c in chans) if chans else "All Forum Channels"
+        tags = config.get("forum_auto_reply_tags", [])
+        tags_display = ", ".join(f"`{t}`" for t in tags) if tags else "All Tags (No whitelist filter)"
+        ignore_tags = config.get("forum_ignore_tags", [])
+        ignore_display = ", ".join(f"`{t}`" for t in ignore_tags) if ignore_tags else "None"
+        include_title = config.get("forum_include_post_title", True)
+        f_prompt = config.get("forum_system_prompt") or "(Uses standard server system prompt)"
+
+        status_msg = (
+            f"📋 **Discord Forum Auto-Reply Settings**\n"
+            f"• **Status**: {'🟢 **Enabled**' if enabled else '🔴 **Disabled**'}\n"
+            f"• **Monitored Forums**: {chans_display}\n"
+            f"• **Required Tags**: {tags_display}\n"
+            f"• **Ignored Tags**: {ignore_display}\n"
+            f"• **Include Post Title**: {'Yes' if include_title else 'No'}\n"
+            f"• **Custom Forum Prompt**: {f_prompt[:300] + ('...' if len(f_prompt) > 300 else '')}\n\n"
+            f"*Use `!setforum on/off`, `!setforum prompt <text>`, or the Desktop/Web GUI to configure.*"
+        )
+        await ctx.send(status_msg)
+    else:
+        await ctx.send("Unknown action. Available: `!setforum [on|off|status|prompt <text>|resetprompt|title on/off]`")
 
 @bot.command(name="setnick", aliases=["setname"])
 async def set_nick(ctx, *, new_name: str):
@@ -1277,6 +1491,7 @@ async def help_command(ctx):
         f"{prefix}autosearch [on|off] - Toggle auto-search for questions needing live info\n"
         f"{prefix}setwebsearch [on|off] - Enable/disable web search for this server\n"
         f"{prefix}setprompt <text> - Set custom AI persona for this server (use 'reset' for default)\n"
+        f"{prefix}setforum [on|off|status|prompt] - Manage forum auto-reply monitoring (Admin only)\n"
         f"{prefix}clear / {prefix}reset - Clear channel or DM conversation memory\n"
         f"{prefix}recall <msg_id_or_link> [notes] - Recall a previous message and analyze/respond\n"
         f"{prefix}setmemory <0-50> - Set conversation memory turns for this server (0 = off)\n"

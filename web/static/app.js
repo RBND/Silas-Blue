@@ -481,6 +481,19 @@ async function loadSelectedGuildConfig() {
         document.getElementById('cfg-guild-memory-turns').value = cfg.memory_turns !== undefined ? cfg.memory_turns : 6;
         document.getElementById('cfg-guild-memory-ttl').value = cfg.memory_ttl_minutes !== undefined ? cfg.memory_ttl_minutes : 30;
 
+        const fAutoReply = document.getElementById('cfg-forum-auto-reply');
+        if (fAutoReply) fAutoReply.checked = Boolean(cfg.forum_auto_reply_enabled);
+        const fIncTitle = document.getElementById('cfg-forum-include-title');
+        if (fIncTitle) fIncTitle.checked = cfg.forum_include_post_title !== false;
+        const fChans = document.getElementById('cfg-forum-channels');
+        if (fChans) fChans.value = (cfg.forum_monitored_channels || []).join(', ');
+        const fTags = document.getElementById('cfg-forum-tags');
+        if (fTags) fTags.value = (cfg.forum_auto_reply_tags || []).join(', ');
+        const fIgnoreTags = document.getElementById('cfg-forum-ignore-tags');
+        if (fIgnoreTags) fIgnoreTags.value = (cfg.forum_ignore_tags || []).join(', ');
+        const fPrompt = document.getElementById('cfg-forum-system-prompt');
+        if (fPrompt) fPrompt.value = cfg.forum_system_prompt || '';
+
         // Load Token Quotas Configuration
         const tq = cfg.token_quotas || {};
         const isEnabled = !!tq.enabled;
@@ -727,6 +740,12 @@ async function saveServerConfig() {
         system_prompt: document.getElementById('cfg-server-system-prompt').value.trim(),
         memory_turns: parseInt(document.getElementById('cfg-guild-memory-turns').value) || 0,
         memory_ttl_minutes: parseInt(document.getElementById('cfg-guild-memory-ttl').value) || 30,
+        forum_auto_reply_enabled: document.getElementById('cfg-forum-auto-reply') ? document.getElementById('cfg-forum-auto-reply').checked : false,
+        forum_include_post_title: document.getElementById('cfg-forum-include-title') ? document.getElementById('cfg-forum-include-title').checked : true,
+        forum_monitored_channels: document.getElementById('cfg-forum-channels') ? document.getElementById('cfg-forum-channels').value.split(',').map(s => s.trim()).filter(Boolean) : [],
+        forum_auto_reply_tags: document.getElementById('cfg-forum-tags') ? document.getElementById('cfg-forum-tags').value.split(',').map(s => s.trim()).filter(Boolean) : [],
+        forum_ignore_tags: document.getElementById('cfg-forum-ignore-tags') ? document.getElementById('cfg-forum-ignore-tags').value.split(',').map(s => s.trim()).filter(Boolean) : [],
+        forum_system_prompt: document.getElementById('cfg-forum-system-prompt') ? document.getElementById('cfg-forum-system-prompt').value.trim() : '',
         token_quotas: {
             enabled: document.getElementById('cfg-quotas-enabled').checked,
             reset_frequency: document.getElementById('cfg-quotas-freq').value,
@@ -902,7 +921,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.4.0';
+        const currVer = data.current_version || '3.5.0';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {

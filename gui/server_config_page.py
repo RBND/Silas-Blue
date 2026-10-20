@@ -11,7 +11,7 @@ Features:
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
-    QSpinBox, QTextEdit, QPushButton, QTabWidget, QCheckBox, QFrame,
+    QSpinBox, QTextEdit, QLineEdit, QPushButton, QTabWidget, QCheckBox, QFrame,
     QScrollArea, QMessageBox, QSizePolicy
 )
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -337,6 +337,71 @@ class ServerConfigPage(QWidget):
 
         container_layout.addWidget(options_card)
 
+        # ---------------------------------------------------------------------
+        # SECTION 4: DISCORD FORUM AUTO-REPLY
+        # ---------------------------------------------------------------------
+        forum_card = QFrame()
+        forum_card.setObjectName("card")
+        forum_card_layout = QVBoxLayout(forum_card)
+        forum_card_layout.setContentsMargins(14, 12, 14, 12)
+        forum_card_layout.setSpacing(10)
+
+        forum_header = QLabel("💬 Discord Forum Auto-Reply")
+        forum_header.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        forum_card_layout.addWidget(forum_header)
+
+        forum_sub = QLabel("Silas Blue can automatically monitor new forum posts and generate proactive answers.")
+        forum_sub.setStyleSheet("font-size: 11px; color: #888;")
+        forum_card_layout.addWidget(forum_sub)
+
+        f_toggles_row = QHBoxLayout()
+        self.forum_auto_reply_enabled = QCheckBox("Enable Forum Post Auto-Reply")
+        self.forum_auto_reply_enabled.toggled.connect(self._on_field_edited)
+        f_toggles_row.addWidget(self.forum_auto_reply_enabled)
+
+        self.forum_include_post_title = QCheckBox("Include Post Title in Prompt")
+        self.forum_include_post_title.setChecked(True)
+        self.forum_include_post_title.toggled.connect(self._on_field_edited)
+        f_toggles_row.addWidget(self.forum_include_post_title)
+        f_toggles_row.addStretch(1)
+        forum_card_layout.addLayout(f_toggles_row)
+
+        f_fields_grid = QGridLayout()
+        f_fields_grid.setHorizontalSpacing(15)
+        f_fields_grid.setVerticalSpacing(8)
+
+        f_fields_grid.addWidget(QLabel("Monitored Forum Channel IDs:"), 0, 0)
+        self.forum_monitored_channels = QLineEdit()
+        self.forum_monitored_channels.setPlaceholderText("e.g. 123456789, 987654321 (leave empty for all forum channels)")
+        self.forum_monitored_channels.textChanged.connect(self._on_field_edited)
+        f_fields_grid.addWidget(self.forum_monitored_channels, 0, 1)
+
+        f_fields_grid.addWidget(QLabel("Required Tags (Whitelist):"), 1, 0)
+        self.forum_auto_reply_tags = QLineEdit()
+        self.forum_auto_reply_tags.setPlaceholderText("e.g. help, question (leave empty to reply to all tags)")
+        self.forum_auto_reply_tags.textChanged.connect(self._on_field_edited)
+        f_fields_grid.addWidget(self.forum_auto_reply_tags, 1, 1)
+
+        f_fields_grid.addWidget(QLabel("Ignored Tags (Blacklist):"), 2, 0)
+        self.forum_ignore_tags = QLineEdit()
+        self.forum_ignore_tags.setPlaceholderText("e.g. resolved, closed, announcement")
+        self.forum_ignore_tags.textChanged.connect(self._on_field_edited)
+        f_fields_grid.addWidget(self.forum_ignore_tags, 2, 1)
+
+        forum_card_layout.addLayout(f_fields_grid)
+
+        f_prompt_lbl = QLabel("Forum-Specific System Prompt (Optional):")
+        f_prompt_lbl.setStyleSheet("font-size: 11px; font-weight: 600;")
+        forum_card_layout.addWidget(f_prompt_lbl)
+
+        self.forum_system_prompt = QTextEdit()
+        self.forum_system_prompt.setPlaceholderText("Leave empty to use server default system prompt, or define specialized persona/instructions for forum answers...")
+        self.forum_system_prompt.setMaximumHeight(85)
+        self.forum_system_prompt.textChanged.connect(self._on_field_edited)
+        forum_card_layout.addWidget(self.forum_system_prompt)
+
+        container_layout.addWidget(forum_card)
+
         self.scroll_area.setWidget(container)
         wrapper_layout.addWidget(self.scroll_area)
         self.tabs.addTab(self.gui_tab_wrapper, "GUI Editor")
@@ -485,6 +550,12 @@ class ServerConfigPage(QWidget):
             "web_search_auto": self.server_web_search_auto.isChecked(),
             "memory_turns": self.memory_turns.value(),
             "memory_ttl_minutes": self.memory_ttl_minutes.value(),
+            "forum_auto_reply_enabled": self.forum_auto_reply_enabled.isChecked(),
+            "forum_include_post_title": self.forum_include_post_title.isChecked(),
+            "forum_monitored_channels": [x.strip() for x in self.forum_monitored_channels.text().split(",") if x.strip()],
+            "forum_auto_reply_tags": [x.strip() for x in self.forum_auto_reply_tags.text().split(",") if x.strip()],
+            "forum_ignore_tags": [x.strip() for x in self.forum_ignore_tags.text().split(",") if x.strip()],
+            "forum_system_prompt": self.forum_system_prompt.toPlainText().strip(),
             "token_quotas": getattr(self, "_current_token_quotas", {})
         }
         return validate_and_sanitize_guild_config(cfg)
@@ -507,6 +578,12 @@ class ServerConfigPage(QWidget):
             self.server_web_search_auto.setChecked(config.get("web_search_auto", True))
             self.memory_turns.setValue(int(config.get("memory_turns", 6)))
             self.memory_ttl_minutes.setValue(int(config.get("memory_ttl_minutes", 30)))
+            self.forum_auto_reply_enabled.setChecked(config.get("forum_auto_reply_enabled", False))
+            self.forum_include_post_title.setChecked(config.get("forum_include_post_title", True))
+            self.forum_monitored_channels.setText(", ".join(config.get("forum_monitored_channels", [])))
+            self.forum_auto_reply_tags.setText(", ".join(config.get("forum_auto_reply_tags", [])))
+            self.forum_ignore_tags.setText(", ".join(config.get("forum_ignore_tags", [])))
+            self.forum_system_prompt.setPlainText(config.get("forum_system_prompt", ""))
 
             self.raw_config.setPlainText(json.dumps(config, indent=2))
         finally:

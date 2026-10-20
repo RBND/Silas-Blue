@@ -94,6 +94,12 @@ DEFAULT_GUILD_CONFIG = {
     "random_prompt_enabled": False,
     "random_prompt_probability": 0,
     "system_prompt": "",
+    "forum_auto_reply_enabled": False,
+    "forum_monitored_channels": [],
+    "forum_auto_reply_tags": [],
+    "forum_ignore_tags": [],
+    "forum_system_prompt": "",
+    "forum_include_post_title": True,
     "memory_turns": 6,
     "memory_ttl_minutes": 30,
     "token_quotas": {
@@ -165,12 +171,29 @@ def validate_and_sanitize_guild_config(data: dict) -> dict:
         except (ValueError, TypeError):
             pass
 
-    for bool_field in ["pagination_enabled", "random_prompt_enabled", "web_search_enabled", "web_search_auto"]:
+    for bool_field in ["pagination_enabled", "random_prompt_enabled", "web_search_enabled", "web_search_auto", "forum_auto_reply_enabled", "forum_include_post_title"]:
         if bool_field in data:
             sanitized[bool_field] = bool(data[bool_field])
 
     if "system_prompt" in data and isinstance(data["system_prompt"], str):
         sanitized["system_prompt"] = data["system_prompt"][:4000]
+
+    if "forum_system_prompt" in data and isinstance(data["forum_system_prompt"], str):
+        sanitized["forum_system_prompt"] = data["forum_system_prompt"][:4000]
+
+    # Monitored forum channels (snowflakes)
+    if "forum_monitored_channels" in data and isinstance(data["forum_monitored_channels"], list):
+        valid_chans = []
+        for ch in data["forum_monitored_channels"]:
+            sch = str(ch).strip()
+            if SNOWFLAKE_REGEX.match(sch) and sch not in valid_chans:
+                valid_chans.append(sch)
+        sanitized["forum_monitored_channels"] = valid_chans
+
+    # Forum tags (whitelisted and ignored tag names or IDs)
+    for tag_field in ["forum_auto_reply_tags", "forum_ignore_tags"]:
+        if tag_field in data and isinstance(data[tag_field], list):
+            sanitized[tag_field] = [str(x).strip() for x in data[tag_field] if str(x).strip()]
 
     if "default_model" in data and isinstance(data["default_model"], str):
         sanitized["default_model"] = data["default_model"].strip()

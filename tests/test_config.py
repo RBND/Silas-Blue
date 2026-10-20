@@ -91,5 +91,27 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(sanitized["memory_turns"], 0)
         self.assertEqual(sanitized["memory_ttl_minutes"], 1440)
 
+    def test_forum_auto_reply_config_sanitization(self):
+        from utils import validate_and_sanitize_guild_config
+
+        raw = {
+            "forum_auto_reply_enabled": True,
+            "forum_include_post_title": False,
+            "forum_system_prompt": "You are a specialized support helper for forum posts.",
+            "forum_monitored_channels": ["123456789012345678", "bad_id", " 123456789012345678 "],
+            "forum_auto_reply_tags": ["help", "question", "  urgent  "],
+            "forum_ignore_tags": ["resolved", "closed", ""]
+        }
+        sanitized = validate_and_sanitize_guild_config(raw)
+
+        self.assertTrue(sanitized["forum_auto_reply_enabled"])
+        self.assertFalse(sanitized["forum_include_post_title"])
+        self.assertEqual(sanitized["forum_system_prompt"], "You are a specialized support helper for forum posts.")
+        # Monitored channels: valid snowflake deduplicated
+        self.assertEqual(sanitized["forum_monitored_channels"], ["123456789012345678"])
+        # Tags trimmed and empty strings dropped
+        self.assertEqual(sanitized["forum_auto_reply_tags"], ["help", "question", "urgent"])
+        self.assertEqual(sanitized["forum_ignore_tags"], ["resolved", "closed"])
+
 if __name__ == "__main__":
     unittest.main()
