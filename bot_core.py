@@ -507,7 +507,7 @@ async def handle_ai_prompt(
     max_chars = min(config.get("pagination_max_chars", 1900), 1900)
     pages = paginate_text(response, max_chars)
 
-    if len(pages) == 1:
+    if len(pages) == 1 or (is_forum_auto_reply and config.get("forum_delivery_mode", "all_chunks") == "disabled"):
         text = pages[0]
         if len(text) > 2000:
             text = text[:1997] + "..."

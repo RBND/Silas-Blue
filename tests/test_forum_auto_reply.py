@@ -309,5 +309,25 @@ class TestForumAutoReply(unittest.IsolatedAsyncioTestCase):
                                 allow_any_user=True
                             )
 
+        # 4. Test handle_ai_prompt with is_forum_auto_reply and disabled (single message truncate)
+        mock_msg.channel.send.reset_mock()
+        cfg_disabled = {
+            "forum_delivery_mode": "disabled",
+            "pagination_max_chars": 1200,
+            "web_search_enabled": False,
+        }
+
+        with patch("bot_core.get_provider", return_value=mock_provider):
+            with patch("bot_core.conversation_memory.add_turn"):
+                with patch("bot_core.log_to_gui"):
+                    with patch("bot_core.paginate_text", return_value=["Single truncated part", "Second part ignored"]):
+                        await bot_core.handle_ai_prompt(
+                            mock_msg,
+                            config=cfg_disabled,
+                            is_forum_auto_reply=True
+                        )
+                        self.assertEqual(mock_msg.channel.send.await_count, 1)
+                        self.assertEqual(mock_msg.channel.send.await_args_list[0].args[0], "Single truncated part")
+
 if __name__ == "__main__":
     unittest.main()

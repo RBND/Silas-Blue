@@ -526,6 +526,16 @@ class ServerConfigPage(QWidget):
         pag_row.addWidget(self.pagination_max_chars)
         col_left.addLayout(pag_row)
 
+        forum_pag_row = QHBoxLayout()
+        forum_pag_row.addWidget(QLabel("Forum Reply Pagination:"))
+        self.forum_delivery_mode_prompt = QComboBox()
+        self.forum_delivery_mode_prompt.addItem("Send All Chunks Sequentially ([Part 1/N])", "all_chunks")
+        self.forum_delivery_mode_prompt.addItem("Interactive Pagination Buttons (Persistent)", "interactive")
+        self.forum_delivery_mode_prompt.addItem("Single Message Only (No Pagination)", "disabled")
+        self.forum_delivery_mode_prompt.currentIndexChanged.connect(self._sync_forum_delivery_mode_from_prompt)
+        forum_pag_row.addWidget(self.forum_delivery_mode_prompt)
+        col_left.addLayout(forum_pag_row)
+
         search_row = QHBoxLayout()
         self.server_web_search_enabled = QCheckBox("Enable Web Search")
         self.server_web_search_enabled.toggled.connect(self._on_field_edited)
@@ -636,11 +646,12 @@ class ServerConfigPage(QWidget):
         f_fields_grid.setHorizontalSpacing(15)
         f_fields_grid.setVerticalSpacing(8)
 
-        f_fields_grid.addWidget(QLabel("Multi-Page Delivery Mode:"), 0, 0)
+        f_fields_grid.addWidget(QLabel("Forum Reply Pagination:"), 0, 0)
         self.forum_delivery_mode = QComboBox()
         self.forum_delivery_mode.addItem("Send All Chunks Sequentially ([Part 1/N])", "all_chunks")
         self.forum_delivery_mode.addItem("Interactive Pagination Buttons (Persistent)", "interactive")
-        self.forum_delivery_mode.currentIndexChanged.connect(self._on_field_edited)
+        self.forum_delivery_mode.addItem("Single Message Only (No Pagination)", "disabled")
+        self.forum_delivery_mode.currentIndexChanged.connect(self._sync_forum_delivery_mode_from_forum)
         f_fields_grid.addWidget(self.forum_delivery_mode, 0, 1)
 
         f_fields_grid.addWidget(QLabel("Required Tags (Whitelist):"), 1, 0)
@@ -877,6 +888,10 @@ class ServerConfigPage(QWidget):
             idx_mode = self.forum_delivery_mode.findData(mode)
             if idx_mode >= 0:
                 self.forum_delivery_mode.setCurrentIndex(idx_mode)
+            if hasattr(self, "forum_delivery_mode_prompt"):
+                idx_prompt = self.forum_delivery_mode_prompt.findData(mode)
+                if idx_prompt >= 0:
+                    self.forum_delivery_mode_prompt.setCurrentIndex(idx_prompt)
 
             # Token Quotas
             tq = config.get("token_quotas", {})
@@ -939,6 +954,20 @@ class ServerConfigPage(QWidget):
         QTimer.singleShot(1400, lambda: [button.setText(orig_text), button.setStyleSheet("")])
         if hasattr(self.main_window, "append_system_log"):
             self.main_window.append_system_log("[Server Config] Settings saved and applied to active server.")
+
+    def _sync_forum_delivery_mode_from_prompt(self, idx: int):
+        if hasattr(self, "forum_delivery_mode") and self.forum_delivery_mode.currentIndex() != idx:
+            self.forum_delivery_mode.blockSignals(True)
+            self.forum_delivery_mode.setCurrentIndex(idx)
+            self.forum_delivery_mode.blockSignals(False)
+        self._on_field_edited()
+
+    def _sync_forum_delivery_mode_from_forum(self, idx: int):
+        if hasattr(self, "forum_delivery_mode_prompt") and self.forum_delivery_mode_prompt.currentIndex() != idx:
+            self.forum_delivery_mode_prompt.blockSignals(True)
+            self.forum_delivery_mode_prompt.setCurrentIndex(idx)
+            self.forum_delivery_mode_prompt.blockSignals(False)
+        self._on_field_edited()
 
     def open_invite_dialog(self):
         """Opens the Invite Bot dialog."""

@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silas Blue - Web Management Console</title>
-    <link rel="stylesheet" href="/static/app.css?v=3.5.5">
+    <link rel="stylesheet" href="/static/app.css?v=3.5.6">
 </head>
 <body>
     <!-- Sidebar Navigation Rail -->
     <nav id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-title">SILAS BLUE</div>
-            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.5</div>
+            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.6</div>
             <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
         </div>
 
@@ -465,6 +465,14 @@
                             <input type="number" id="cfg-max-chars" min="500" max="1900" value="1000">
                         </div>
                         <div class="form-row" style="margin-bottom: 0;">
+                            <label>Forum Reply Pagination:</label>
+                            <select id="cfg-forum-delivery-mode-prompt" style="width: 100%;">
+                                <option value="all_chunks">Send All Chunks Sequentially ([Part 1/N])</option>
+                                <option value="interactive">Interactive Pagination Buttons (Persistent)</option>
+                                <option value="disabled">Single Message Only (No Pagination / Truncate)</option>
+                            </select>
+                        </div>
+                        <div class="form-row" style="margin-bottom: 0;">
                             <label>Memory Turns (0=off):</label>
                             <input type="number" id="cfg-guild-memory-turns" min="0" max="50" value="6">
                         </div>
@@ -501,11 +509,15 @@
                         <div id="status-forum-channels" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
                     <div class="form-row">
-                        <label>Multi-Page Delivery Mode:</label>
+                        <label>Forum Reply Pagination Mode:</label>
                         <select id="cfg-forum-delivery-mode" style="width: 100%;">
-                            <option value="all_chunks" selected>Send All Chunks Sequentially ([Part 1/N])</option>
-                            <option value="interactive">Interactive Pagination Buttons (Persistent)</option>
+                            <option value="all_chunks" selected>Send All Chunks Sequentially ([Part 1/N]) - Permanent History</option>
+                            <option value="interactive">Interactive Pagination Buttons (Persistent Buttons)</option>
+                            <option value="disabled">Single Message Only (Truncate at 2,000 chars, no pagination)</option>
                         </select>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.75; margin-top: -6px; margin-bottom: 10px;">
+                        Controls how auto-replies exceeding 2,000 characters are delivered in forum threads.
                     </div>
                     <div class="form-row">
                         <label>Required Tags (Whitelist):</label>
@@ -558,7 +570,7 @@
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-title">Current Version</div>
-                    <div class="kpi-value" id="update-curr-version">3.5.5</div>
+                    <div class="kpi-value" id="update-curr-version">3.5.6</div>
                     <div class="kpi-subtext" id="update-curr-commit">#-------</div>
                 </div>
                 <div class="kpi-card">
@@ -703,6 +715,6 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=3.5.5"></script>
+    <script src="/static/app.js?v=3.5.6"></script>
 </body>
 </html>

@@ -13,7 +13,19 @@ Silas Blue v3.5.5 introduces configurable multi-page delivery modes for Forum Au
 
 ---
 
-## 🚀 What's New in Version 3.5.5
+## 🚀 What's New in Version 3.5.6
+
+* **Prominent Forum Reply Pagination Configuration**:
+  * **Explicit Pagination Naming**: Labeled and styled clearly as **Forum Reply Pagination Mode** across all settings interfaces so technicians and server owners can easily find and configure pagination for forum replies.
+  * **Dual-Tab Accessibility**: The setting is now directly accessible and synchronized across both **Prompt & Pagination** and **Forum Auto Reply** sub-pages.
+  * **Supported Delivery Modes**:
+    * `all_chunks`: **Send All Chunks Sequentially ([Part 1/N])** - Permanent thread history without expiring buttons (Default & Recommended).
+    * `interactive`: **Interactive Pagination Buttons (Persistent)** - Persistent `[Previous]` / `[Next]` buttons without timeout, open to any thread participant.
+    * `disabled`: **Single Message Only (Truncate at 2,000 chars)** - Disables multi-page pagination in forum posts.
+
+---
+
+## 🚀 Prior Features (v3.5.5)
 
 * **Configurable Forum Multi-Page Delivery**:
   * **Sequential Multi-Message Mode (Default)**: Long responses exceeding the character limit are sent sequentially as separate messages with `**[Part X/Y]**` headers, ensuring the full diagnostic solution remains permanently readable in the forum thread without button expiration.

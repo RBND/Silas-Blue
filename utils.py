@@ -184,7 +184,7 @@ def validate_and_sanitize_guild_config(data: dict) -> dict:
 
     if "forum_delivery_mode" in data and isinstance(data["forum_delivery_mode"], str):
         mode = data["forum_delivery_mode"].strip().lower()
-        sanitized["forum_delivery_mode"] = mode if mode in ("all_chunks", "interactive") else "all_chunks"
+        sanitized["forum_delivery_mode"] = mode if mode in ("all_chunks", "interactive", "disabled") else "all_chunks"
 
     # Monitored forum channels (snowflakes)
     if "forum_monitored_channels" in data and isinstance(data["forum_monitored_channels"], list):
