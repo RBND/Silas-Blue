@@ -307,23 +307,68 @@
                 </div>
 
                 <!-- 5. Role-Based Token Quotas & Reset Schedule -->
-                <div class="card" id="card-token-quotas" style="margin-top: 14px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 14px;">
+                <div class="card" id="card-token-quotas" style="margin-top: 14px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                         <div>
                             <div class="card-title" style="margin-bottom: 2px;">📊 Role-Based Token Limits & Reset Schedule</div>
                             <div class="perm-card-desc">Limit AI token consumption per Discord role, schedule automatic quota resets, and configure partial overage policies.</div>
                         </div>
-                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 13px;">
-                            <input type="checkbox" id="cfg-quotas-enabled" onchange="toggleQuotaSection()" style="width: auto;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 700; font-size: 13px; background: rgba(0, 240, 255, 0.1); padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(0, 240, 255, 0.3);">
+                            <input type="checkbox" id="cfg-quotas-enabled" onchange="toggleQuotaSection(this.checked)" style="width: auto;">
                             Enable Quotas
                         </label>
                     </div>
 
                     <div id="quota-settings-body" style="display: none;">
+                        <!-- Primary Default Role Limit: @everyone -->
+                        <div style="background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                                <div>
+                                    <div style="font-weight: 700; font-size: 13px; color: var(--accent-cyan); display: flex; align-items: center; gap: 6px;">
+                                        🌐 Default Member Limit (@everyone)
+                                    </div>
+                                    <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">
+                                        Applies to all server members unless a higher allowance is granted in the Role Overrides below.
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <input type="number" id="cfg-quota-everyone" min="-1" value="10000" style="width: 140px; font-weight: 600; text-align: right;" oninput="updateEveryoneQuota(this.value)">
+                                    <span style="font-size: 12px; color: var(--text-dim);">tokens</span>
+                                    <button type="button" onclick="setEveryoneUnlimited()" style="padding: 4px 10px; font-size: 12px;">♾️ Unlimited</button>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 6px; margin-top: 10px; align-items: center; flex-wrap: wrap;">
+                                <span style="font-size: 11px; color: var(--text-dim); margin-right: 4px;">Quick Presets:</span>
+                                <button type="button" style="padding: 2px 8px; font-size: 11px;" onclick="setEveryonePreset(5000)">5,000</button>
+                                <button type="button" style="padding: 2px 8px; font-size: 11px;" onclick="setEveryonePreset(10000)">10,000</button>
+                                <button type="button" style="padding: 2px 8px; font-size: 11px;" onclick="setEveryonePreset(25000)">25,000</button>
+                                <button type="button" style="padding: 2px 8px; font-size: 11px;" onclick="setEveryonePreset(50000)">50,000</button>
+                                <button type="button" style="padding: 2px 8px; font-size: 11px;" onclick="setEveryonePreset(100000)">100,000</button>
+                                <button type="button" style="padding: 2px 8px; font-size: 11px;" onclick="setEveryonePreset(-1)">Unlimited</button>
+                            </div>
+                        </div>
+
+                        <!-- Role-Specific Overrides -->
+                        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
+                            <div style="font-weight: 700; font-size: 13px; margin-bottom: 2px;">🛡️ Role-Specific Overrides</div>
+                            <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 10px;">
+                                Grant higher or custom allowances to specific roles (e.g. @VIP, @Supporter, @Admin). Members with multiple roles receive the highest limit.
+                            </div>
+                            <div id="role-quotas-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;"></div>
+
+                            <!-- Add Role Limit Row -->
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: rgba(0, 0, 0, 0.2); padding: 8px; border-radius: 4px;">
+                                <input type="text" id="input-quota-role" list="available-roles-datalist" placeholder="Select or type role..." style="flex: 2; min-width: 150px;">
+                                <input type="number" id="input-quota-tokens" min="-1" placeholder="Token limit (e.g. 50000)" style="flex: 2; min-width: 150px;">
+                                <button type="button" onclick="setRoleUnlimitedQuota()" style="padding: 6px 10px;">♾️ Unlimited</button>
+                                <button type="button" class="primary" onclick="addRoleQuotaEntry()" style="padding: 6px 14px;">➕ Add Role Override</button>
+                            </div>
+                        </div>
+
                         <!-- Reset Schedule Row -->
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 6px; margin-bottom: 14px;">
                             <div class="form-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
-                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Frequency:</label>
+                                <label style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">Reset Frequency:</label>
                                 <select id="cfg-quotas-freq" onchange="onQuotaFreqChange()" style="width: 100%;">
                                     <option value="daily">Daily</option>
                                     <option value="weekly">Weekly</option>
@@ -332,11 +377,11 @@
                                 </select>
                             </div>
                             <div class="form-row" id="quota-reset-time-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
-                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Time (HH:MM):</label>
+                                <label style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">Reset Time (HH:MM):</label>
                                 <input type="text" id="cfg-quotas-time" placeholder="00:00" style="width: 100%;">
                             </div>
                             <div class="form-row" id="quota-tz-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
-                                <label style="font-size: 12px; margin-bottom: 4px;">Timezone Offset (UTC):</label>
+                                <label style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">Timezone Offset (UTC):</label>
                                 <select id="cfg-quotas-tz" style="width: 100%;">
                                     <option value="-8">UTC-8 (PST)</option>
                                     <option value="-7">UTC-7 (MST)</option>
@@ -351,7 +396,7 @@
                                 </select>
                             </div>
                             <div class="form-row" id="quota-day-week-row" style="display: none; flex-direction: column; align-items: flex-start; margin-bottom: 0;">
-                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Day of Week:</label>
+                                <label style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">Reset Day of Week:</label>
                                 <select id="cfg-quotas-day-of-week" style="width: 100%;">
                                     <option value="0">Monday</option>
                                     <option value="1">Tuesday</option>
@@ -363,7 +408,7 @@
                                 </select>
                             </div>
                             <div class="form-row" id="quota-day-month-row" style="display: none; flex-direction: column; align-items: flex-start; margin-bottom: 0;">
-                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Day of Month:</label>
+                                <label style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">Reset Day of Month:</label>
                                 <input type="number" id="cfg-quotas-day-of-month" min="1" max="28" value="1" style="width: 100%;">
                             </div>
                         </div>
@@ -371,30 +416,15 @@
                         <!-- Partial Overage Policy Row -->
                         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 6px; margin-bottom: 14px;">
                             <div class="form-row" style="margin-bottom: 0; align-items: center;">
-                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 600;">
                                     <input type="checkbox" id="cfg-quotas-allow-overage" style="width: auto;" checked>
                                     Allow Partial Overage on Final Turn
                                 </label>
                             </div>
                             <div class="form-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
-                                <label style="font-size: 12px; margin-bottom: 4px;">Max Overage Buffer (Tokens, -1 for unlimited):</label>
+                                <label style="font-size: 12px; margin-bottom: 4px; font-weight: 600;">Max Overage Buffer (Tokens, -1 for unlimited):</label>
                                 <input type="number" id="cfg-quotas-max-overage" min="-1" value="1000" style="width: 100%;">
                             </div>
-                        </div>
-
-                        <!-- Role Limits Configuration -->
-                        <div style="margin-bottom: 10px;">
-                            <label style="font-weight: 600; font-size: 13px;">Assigned Role Quotas:</label>
-                            <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">Members with multiple roles will receive the highest configured limit. Server Administrators and Owners are always unlimited.</div>
-                            <div id="role-quotas-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;"></div>
-                        </div>
-
-                        <!-- Add Role Limit Row -->
-                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                            <input type="text" id="input-quota-role" list="available-roles-datalist" placeholder="Role name or @role..." style="flex: 2; min-width: 160px;">
-                            <input type="number" id="input-quota-tokens" min="-1" placeholder="Tokens (e.g. 25000, -1=Unlimited)" style="flex: 2; min-width: 160px;">
-                            <button type="button" onclick="setRoleUnlimitedQuota()" style="flex: 1; min-width: 110px;">♾️ Unlimited</button>
-                            <button type="button" class="primary" onclick="addRoleQuotaEntry()" style="flex: 1; min-width: 100px;">➕ Set Quota</button>
                         </div>
                     </div>
                 </div>
@@ -604,6 +634,6 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=3.4.0.1"></script>
 </body>
 </html>

@@ -155,11 +155,17 @@ def create_web_app(app_cfg: dict) -> web.Application:
         session_cookie = request.cookies.get("sb_session")
         if not auth_manager.verify_session_token(session_cookie):
             raise web.HTTPFound(location="/login")
-        return web.FileResponse(os.path.join(static_dir, "index.html"))
+        return web.FileResponse(
+            os.path.join(static_dir, "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 
     async def handle_login_page(request):
         """Serves login portal page."""
-        return web.FileResponse(os.path.join(static_dir, "login.html"))
+        return web.FileResponse(
+            os.path.join(static_dir, "login.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
 
     # Register Auth Routes
     app.router.add_get("/auth/otp", handle_otp_login)

@@ -483,19 +483,44 @@ async function loadSelectedGuildConfig() {
 
         // Load Token Quotas Configuration
         const tq = cfg.token_quotas || {};
-        document.getElementById('cfg-quotas-enabled').checked = !!tq.enabled;
-        document.getElementById('cfg-quotas-freq').value = tq.reset_frequency || 'daily';
-        document.getElementById('cfg-quotas-time').value = tq.reset_time || '00:00';
-        document.getElementById('cfg-quotas-tz').value = tq.reset_timezone_offset !== undefined ? String(tq.reset_timezone_offset) : '0';
-        document.getElementById('cfg-quotas-day-of-week').value = tq.reset_day_of_week !== undefined ? String(tq.reset_day_of_week) : '0';
-        document.getElementById('cfg-quotas-day-of-month').value = tq.reset_day_of_month !== undefined ? tq.reset_day_of_month : 1;
-
-        const ovPolicy = tq.overage_policy || {};
-        document.getElementById('cfg-quotas-allow-overage').checked = ovPolicy.allow_partial_overage !== false;
-        document.getElementById('cfg-quotas-max-overage').value = ovPolicy.max_overage_tokens !== undefined ? ovPolicy.max_overage_tokens : 1000;
+        const isEnabled = !!tq.enabled;
+        const cbEnabled = document.getElementById('cfg-quotas-enabled');
+        if (cbEnabled) cbEnabled.checked = isEnabled;
 
         activeRoleQuotas = tq.role_limits ? { ...tq.role_limits } : { 'everyone': 10000 };
-        toggleQuotaSection();
+        if (activeRoleQuotas['everyone'] === undefined && activeRoleQuotas['@everyone'] !== undefined) {
+            activeRoleQuotas['everyone'] = activeRoleQuotas['@everyone'];
+        }
+        if (activeRoleQuotas['everyone'] === undefined) {
+            activeRoleQuotas['everyone'] = 10000;
+        }
+
+        const evInput = document.getElementById('cfg-quota-everyone');
+        if (evInput) evInput.value = activeRoleQuotas['everyone'];
+
+        const elFreq = document.getElementById('cfg-quotas-freq');
+        if (elFreq) elFreq.value = tq.reset_frequency || 'daily';
+
+        const elTime = document.getElementById('cfg-quotas-time');
+        if (elTime) elTime.value = tq.reset_time || '00:00';
+
+        const elTz = document.getElementById('cfg-quotas-tz');
+        if (elTz) elTz.value = tq.reset_timezone_offset !== undefined ? String(tq.reset_timezone_offset) : '0';
+
+        const elDow = document.getElementById('cfg-quotas-day-of-week');
+        if (elDow) elDow.value = tq.reset_day_of_week !== undefined ? String(tq.reset_day_of_week) : '0';
+
+        const elDom = document.getElementById('cfg-quotas-day-of-month');
+        if (elDom) elDom.value = tq.reset_day_of_month !== undefined ? tq.reset_day_of_month : 1;
+
+        const ovPolicy = tq.overage_policy || {};
+        const elAllowOv = document.getElementById('cfg-quotas-allow-overage');
+        if (elAllowOv) elAllowOv.checked = ovPolicy.allow_partial_overage !== false;
+
+        const elMaxOv = document.getElementById('cfg-quotas-max-overage');
+        if (elMaxOv) elMaxOv.value = ovPolicy.max_overage_tokens !== undefined ? ovPolicy.max_overage_tokens : 1000;
+
+        toggleQuotaSection(isEnabled);
         onQuotaFreqChange();
         renderRoleQuotasTable();
     } catch (e) {
@@ -733,12 +758,30 @@ async function saveServerConfig() {
 // --- Role Token Quotas Helpers ---
 let activeRoleQuotas = {};
 
-function toggleQuotaSection() {
-    const enabled = document.getElementById('cfg-quotas-enabled').checked;
+function toggleQuotaSection(forcedState) {
+    const cb = document.getElementById('cfg-quotas-enabled');
+    const enabled = forcedState !== undefined ? forcedState : (cb ? cb.checked : false);
     const body = document.getElementById('quota-settings-body');
     if (body) {
         body.style.display = enabled ? 'block' : 'none';
     }
+}
+
+function updateEveryoneQuota(val) {
+    const num = parseInt(val);
+    if (!isNaN(num)) {
+        activeRoleQuotas['everyone'] = num;
+    }
+}
+
+function setEveryonePreset(tokens) {
+    const input = document.getElementById('cfg-quota-everyone');
+    if (input) input.value = tokens;
+    activeRoleQuotas['everyone'] = tokens;
+}
+
+function setEveryoneUnlimited() {
+    setEveryonePreset(-1);
 }
 
 function onQuotaFreqChange() {
@@ -766,13 +809,17 @@ function renderRoleQuotasTable() {
     if (!container) return;
     container.innerHTML = '';
 
-    const roles = Object.keys(activeRoleQuotas);
-    if (roles.length === 0) {
-        container.innerHTML = '<div style="font-size:12px; color:var(--text-dim); padding:6px 0;">No role limits configured.</div>';
+    // Filter out 'everyone' and '@everyone' from the overrides list (managed in primary box)
+    const overrideRoles = Object.keys(activeRoleQuotas).filter(
+        r => !['everyone', '@everyone'].includes(r.toLowerCase())
+    );
+
+    if (overrideRoles.length === 0) {
+        container.innerHTML = '<div style="font-size:11px; color:var(--text-dim); padding:8px 10px; background:rgba(255,255,255,0.02); border-radius:4px;">No role overrides added yet. All members use the Default Member Limit (@everyone) above.</div>';
         return;
     }
 
-    roles.forEach(roleKey => {
+    overrideRoles.forEach(roleKey => {
         const limitVal = activeRoleQuotas[roleKey];
         const row = document.createElement('div');
         row.style = 'display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); padding:6px 10px; border-radius:4px; font-size:12px;';
@@ -826,6 +873,14 @@ function addRoleQuotaEntry() {
         return;
     }
 
+    if (['everyone', '@everyone'].includes(role.toLowerCase())) {
+        setEveryonePreset(tokensVal);
+        roleInput.value = '';
+        tokensInput.value = '';
+        showToast(`Default member limit (@everyone) updated to ${tokensVal === -1 ? 'Unlimited' : tokensVal.toLocaleString() + ' tokens'}.`, 'success');
+        return;
+    }
+
     activeRoleQuotas[role] = tokensVal;
     roleInput.value = '';
     tokensInput.value = '';
@@ -835,7 +890,6 @@ function addRoleQuotaEntry() {
 function removeRoleQuota(roleKey) {
     delete activeRoleQuotas[roleKey];
     renderRoleQuotasTable();
-}
 }
 
 // --- Updater Management ---
