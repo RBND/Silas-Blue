@@ -1,6 +1,6 @@
-# Silas Blue v3.5.4
+# Silas Blue v3.5.5
 
-[![Version](https://img.shields.io/badge/version-3.5.4-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.5-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,20 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.5.4 resolves a critical event race condition in Discord Forum post auto-replies, ensuring new forum posts trigger immediate proactive answers without requiring user @mentions.
+Silas Blue v3.5.5 introduces configurable multi-page delivery modes for Forum Auto-Replies, allowing long diagnostic answers to be delivered sequentially as permanent messages with `[Part X/Y]` headers or as persistent interactive pagination buttons open to all thread participants.
 
 ---
 
-## 🚀 What's New in Version 3.5.4
+## 🚀 What's New in Version 3.5.5
+
+* **Configurable Forum Multi-Page Delivery**:
+  * **Sequential Multi-Message Mode (Default)**: Long responses exceeding the character limit are sent sequentially as separate messages with `**[Part X/Y]**` headers, ensuring the full diagnostic solution remains permanently readable in the forum thread without button expiration.
+  * **Persistent Interactive Buttons Mode**: Alternative mode where pagination buttons do not time out and can be clicked by any technician or thread participant, rather than being restricted to the thread creator.
+  * **Configurable in Web & Desktop**: Toggle between delivery modes directly within the **Forum Auto-Reply** settings tab in the Web Management Console and PySide6 Desktop GUI.
+
+---
+
+## 🚀 Prior Features (v3.5.4)
 
 * **Fixed Forum Post Auto-Reply Event Race Condition**:
   * Fixed an issue where the Discord `MESSAGE_CREATE` event for a new forum post's starter message was prematurely registering the thread ID as handled, preventing `on_thread_create` from executing and suppressing automated answers.

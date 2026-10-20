@@ -96,6 +96,7 @@ class TestForumAutoReply(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[Forum Post Title: How do I fix Docker containers?]", kwargs["prompt_override"])
         self.assertIn("My container exits immediately after running.", kwargs["prompt_override"])
         self.assertEqual(kwargs["system_prompt_override"], "You are a tech support AI assistant.")
+        self.assertTrue(kwargs.get("is_forum_auto_reply", False))
 
     @patch("bot_core.handle_ai_prompt", new_callable=AsyncMock)
     async def test_channel_whitelist_filtering(self, mock_handle_ai):
@@ -236,6 +237,77 @@ class TestForumAutoReply(unittest.IsolatedAsyncioTestCase):
                 mock_handle_ai.reset_mock()
                 await bot_core.on_thread_create(thread)
                 mock_handle_ai.assert_not_called()
+
+    async def test_forum_auto_reply_pagination_delivery_modes(self):
+        # 1. Verify PaginatedView allow_any_user & timeout parameters
+        view = bot_core.PaginatedView(["Page 1", "Page 2"], author_id=123, timeout=None, allow_any_user=True)
+        self.assertIsNone(view.timeout)
+        self.assertTrue(view.allow_any_user)
+
+        # Another user can interact when allow_any_user is True
+        interaction = MagicMock()
+        interaction.user.id = 999  # Different user
+        interaction.response.edit_message = AsyncMock()
+        await view.next_button.callback(interaction)
+        interaction.response.edit_message.assert_awaited()
+
+        # 2. Test handle_ai_prompt with is_forum_auto_reply and all_chunks
+        mock_msg = MagicMock()
+        mock_msg.channel.send = AsyncMock()
+        mock_msg.author.id = 123456
+        mock_msg.guild.id = 5555
+        mock_msg.guild.name = "Test Guild"
+        mock_msg.content = "How to fix iPhone charging port?"
+
+        mock_provider = MagicMock()
+        mock_provider.list_models = AsyncMock(return_value=["test-model"])
+        mock_provider.generate_response = AsyncMock(return_value="Part 1 content and Part 2 content")
+
+        cfg_all_chunks = {
+            "forum_delivery_mode": "all_chunks",
+            "pagination_max_chars": 1200,
+            "web_search_enabled": False,
+        }
+
+        with patch("bot_core.get_provider", return_value=mock_provider):
+            with patch("bot_core.conversation_memory.add_turn"):
+                with patch("bot_core.log_to_gui"):
+                    with patch("bot_core.paginate_text", return_value=["Part 1 content", "Part 2 content"]):
+                        await bot_core.handle_ai_prompt(
+                            mock_msg,
+                            config=cfg_all_chunks,
+                            is_forum_auto_reply=True
+                        )
+                        
+                        self.assertEqual(mock_msg.channel.send.await_count, 2)
+                        calls = mock_msg.channel.send.await_args_list
+                        self.assertIn("**[Part 1/2]**", calls[0].args[0])
+                        self.assertIn("**[Part 2/2]**", calls[1].args[0])
+
+        # 3. Test handle_ai_prompt with is_forum_auto_reply and interactive
+        mock_msg.channel.send.reset_mock()
+        cfg_interactive = {
+            "forum_delivery_mode": "interactive",
+            "pagination_max_chars": 1200,
+            "web_search_enabled": False,
+        }
+
+        with patch("bot_core.get_provider", return_value=mock_provider):
+            with patch("bot_core.conversation_memory.add_turn"):
+                with patch("bot_core.log_to_gui"):
+                    with patch("bot_core.paginate_text", return_value=["Part 1 content", "Part 2 content"]):
+                        with patch("bot_core.PaginatedView") as mock_view_cls:
+                            await bot_core.handle_ai_prompt(
+                                mock_msg,
+                                config=cfg_interactive,
+                                is_forum_auto_reply=True
+                            )
+                            mock_view_cls.assert_called_once_with(
+                                ["Part 1 content", "Part 2 content"],
+                                mock_msg.author.id,
+                                timeout=None,
+                                allow_any_user=True
+                            )
 
 if __name__ == "__main__":
     unittest.main()

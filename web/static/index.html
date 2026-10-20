@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silas Blue - Web Management Console</title>
-    <link rel="stylesheet" href="/static/app.css?v=3.5.4">
+    <link rel="stylesheet" href="/static/app.css?v=3.5.5">
 </head>
 <body>
     <!-- Sidebar Navigation Rail -->
     <nav id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-title">SILAS BLUE</div>
-            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.4</div>
+            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.5</div>
             <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
         </div>
 
@@ -501,6 +501,13 @@
                         <div id="status-forum-channels" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
                     <div class="form-row">
+                        <label>Multi-Page Delivery Mode:</label>
+                        <select id="cfg-forum-delivery-mode" style="width: 100%;">
+                            <option value="all_chunks" selected>Send All Chunks Sequentially ([Part 1/N])</option>
+                            <option value="interactive">Interactive Pagination Buttons (Persistent)</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
                         <label>Required Tags (Whitelist):</label>
                         <input type="text" id="cfg-forum-tags" placeholder="e.g. help, question (leave empty to allow all tags)" style="width: 100%;">
                     </div>
@@ -551,7 +558,7 @@
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-title">Current Version</div>
-                    <div class="kpi-value" id="update-curr-version">3.5.4</div>
+                    <div class="kpi-value" id="update-curr-version">3.5.5</div>
                     <div class="kpi-subtext" id="update-curr-commit">#-------</div>
                 </div>
                 <div class="kpi-card">
@@ -696,6 +703,6 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=3.5.4"></script>
+    <script src="/static/app.js?v=3.5.5"></script>
 </body>
 </html>

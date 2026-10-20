@@ -636,17 +636,24 @@ class ServerConfigPage(QWidget):
         f_fields_grid.setHorizontalSpacing(15)
         f_fields_grid.setVerticalSpacing(8)
 
-        f_fields_grid.addWidget(QLabel("Required Tags (Whitelist):"), 0, 0)
+        f_fields_grid.addWidget(QLabel("Multi-Page Delivery Mode:"), 0, 0)
+        self.forum_delivery_mode = QComboBox()
+        self.forum_delivery_mode.addItem("Send All Chunks Sequentially ([Part 1/N])", "all_chunks")
+        self.forum_delivery_mode.addItem("Interactive Pagination Buttons (Persistent)", "interactive")
+        self.forum_delivery_mode.currentIndexChanged.connect(self._on_field_edited)
+        f_fields_grid.addWidget(self.forum_delivery_mode, 0, 1)
+
+        f_fields_grid.addWidget(QLabel("Required Tags (Whitelist):"), 1, 0)
         self.forum_auto_reply_tags = QLineEdit()
         self.forum_auto_reply_tags.setPlaceholderText("e.g. help, question (leave empty to reply to all tags)")
         self.forum_auto_reply_tags.textChanged.connect(self._on_field_edited)
-        f_fields_grid.addWidget(self.forum_auto_reply_tags, 0, 1)
+        f_fields_grid.addWidget(self.forum_auto_reply_tags, 1, 1)
 
-        f_fields_grid.addWidget(QLabel("Ignored Tags (Blacklist):"), 1, 0)
+        f_fields_grid.addWidget(QLabel("Ignored Tags (Blacklist):"), 2, 0)
         self.forum_ignore_tags = QLineEdit()
         self.forum_ignore_tags.setPlaceholderText("e.g. resolved, closed, announcement")
         self.forum_ignore_tags.textChanged.connect(self._on_field_edited)
-        f_fields_grid.addWidget(self.forum_ignore_tags, 1, 1)
+        f_fields_grid.addWidget(self.forum_ignore_tags, 2, 1)
 
         f_card_layout.addLayout(f_fields_grid)
 
@@ -837,6 +844,7 @@ class ServerConfigPage(QWidget):
             "forum_auto_reply_tags": [x.strip() for x in self.forum_auto_reply_tags.text().split(",") if x.strip()],
             "forum_ignore_tags": [x.strip() for x in self.forum_ignore_tags.text().split(",") if x.strip()],
             "forum_system_prompt": self.forum_system_prompt.toPlainText().strip(),
+            "forum_delivery_mode": self.forum_delivery_mode.currentData() or "all_chunks",
             "token_quotas": token_quotas
         }
         return validate_and_sanitize_guild_config(cfg)
@@ -865,6 +873,10 @@ class ServerConfigPage(QWidget):
             self.forum_auto_reply_tags.setText(", ".join(config.get("forum_auto_reply_tags", [])))
             self.forum_ignore_tags.setText(", ".join(config.get("forum_ignore_tags", [])))
             self.forum_system_prompt.setPlainText(config.get("forum_system_prompt", ""))
+            mode = config.get("forum_delivery_mode", "all_chunks")
+            idx_mode = self.forum_delivery_mode.findData(mode)
+            if idx_mode >= 0:
+                self.forum_delivery_mode.setCurrentIndex(idx_mode)
 
             # Token Quotas
             tq = config.get("token_quotas", {})

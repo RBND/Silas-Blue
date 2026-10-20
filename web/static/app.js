@@ -565,6 +565,8 @@ async function loadSelectedGuildConfig() {
         if (fIgnoreTags) fIgnoreTags.value = (cfg.forum_ignore_tags || []).join(', ');
         const fPrompt = document.getElementById('cfg-forum-system-prompt');
         if (fPrompt) fPrompt.value = cfg.forum_system_prompt || '';
+        const fDelivery = document.getElementById('cfg-forum-delivery-mode');
+        if (fDelivery) fDelivery.value = cfg.forum_delivery_mode || 'all_chunks';
 
         // Load Token Quotas Configuration
         const tq = cfg.token_quotas || {};
@@ -915,6 +917,7 @@ async function saveServerConfig() {
         forum_auto_reply_tags: document.getElementById('cfg-forum-tags') ? document.getElementById('cfg-forum-tags').value.split(',').map(s => s.trim()).filter(Boolean) : [],
         forum_ignore_tags: document.getElementById('cfg-forum-ignore-tags') ? document.getElementById('cfg-forum-ignore-tags').value.split(',').map(s => s.trim()).filter(Boolean) : [],
         forum_system_prompt: document.getElementById('cfg-forum-system-prompt') ? document.getElementById('cfg-forum-system-prompt').value.trim() : '',
+        forum_delivery_mode: document.getElementById('cfg-forum-delivery-mode') ? document.getElementById('cfg-forum-delivery-mode').value : 'all_chunks',
         token_quotas: {
             enabled: document.getElementById('cfg-quotas-enabled').checked,
             reset_frequency: document.getElementById('cfg-quotas-freq').value,
@@ -1090,7 +1093,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.5.4';
+        const currVer = data.current_version || '3.5.5';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {

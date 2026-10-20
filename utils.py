@@ -100,6 +100,7 @@ DEFAULT_GUILD_CONFIG = {
     "forum_ignore_tags": [],
     "forum_system_prompt": "",
     "forum_include_post_title": True,
+    "forum_delivery_mode": "all_chunks",  # "all_chunks" or "interactive"
     "memory_turns": 6,
     "memory_ttl_minutes": 30,
     "token_quotas": {
@@ -180,6 +181,10 @@ def validate_and_sanitize_guild_config(data: dict) -> dict:
 
     if "forum_system_prompt" in data and isinstance(data["forum_system_prompt"], str):
         sanitized["forum_system_prompt"] = data["forum_system_prompt"][:4000]
+
+    if "forum_delivery_mode" in data and isinstance(data["forum_delivery_mode"], str):
+        mode = data["forum_delivery_mode"].strip().lower()
+        sanitized["forum_delivery_mode"] = mode if mode in ("all_chunks", "interactive") else "all_chunks"
 
     # Monitored forum channels (snowflakes)
     if "forum_monitored_channels" in data and isinstance(data["forum_monitored_channels"], list):

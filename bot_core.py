@@ -223,10 +223,11 @@ def paginate_text(text: str, max_chars: int = 1850) -> List[str]:
     return pages or [""]
 
 class PaginatedView(discord.ui.View):
-    def __init__(self, pages: List[str], author_id: int, timeout: int = 180):
+    def __init__(self, pages: List[str], author_id: int, timeout: Optional[int] = 180, allow_any_user: bool = False):
         super().__init__(timeout=timeout)
         self.pages = pages
         self.author_id = author_id
+        self.allow_any_user = allow_any_user
         self.current_page = 0
         self.total_pages = len(pages)
         self.message: Optional[discord.Message] = None
@@ -241,7 +242,7 @@ class PaginatedView(discord.ui.View):
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.primary, disabled=True)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.author_id:
+        if not self.allow_any_user and interaction.user.id != self.author_id:
             await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
             return
         if self.current_page > 0:
@@ -250,7 +251,7 @@ class PaginatedView(discord.ui.View):
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, disabled=False)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.author_id:
+        if not self.allow_any_user and interaction.user.id != self.author_id:
             await interaction.response.send_message("You can't control this pagination.", ephemeral=True)
             return
         if self.current_page < self.total_pages - 1:
@@ -277,7 +278,8 @@ async def handle_ai_prompt(
     config: dict,
     prompt_override: Optional[str] = None,
     force_web_search: bool = False,
-    system_prompt_override: Optional[str] = None
+    system_prompt_override: Optional[str] = None,
+    is_forum_auto_reply: bool = False
 ):
     """
     Sends message to active AI provider asynchronously without blocking event loop.
@@ -510,8 +512,20 @@ async def handle_ai_prompt(
         if len(text) > 2000:
             text = text[:1997] + "..."
         await message.channel.send(text)
+    elif is_forum_auto_reply and config.get("forum_delivery_mode", "all_chunks") == "all_chunks":
+        # Send all chunks sequentially with Part indicators so the full answer is permanent
+        total = len(pages)
+        for idx, page_content in enumerate(pages, 1):
+            chunk_text = f"**[Part {idx}/{total}]**\n{page_content}"
+            if len(chunk_text) > 2000:
+                chunk_text = chunk_text[:1997] + "..."
+            await message.channel.send(chunk_text)
+            if idx < total:
+                await asyncio.sleep(0.5)
     else:
-        view = PaginatedView(pages, message.author.id)
+        # Interactive pagination buttons (persistent timeout and open to any thread participant if forum auto-reply)
+        view_timeout = None if is_forum_auto_reply else 180
+        view = PaginatedView(pages, message.author.id, timeout=view_timeout, allow_any_user=is_forum_auto_reply)
         first_content = f"Page 1/{len(pages)}\n{pages[0]}"
         if len(first_content) > 2000:
             first_content = first_content[:1997] + "..."
@@ -785,7 +799,8 @@ async def process_forum_auto_reply(thread: discord.Thread, starter_msg: Optional
         starter_msg,
         config,
         prompt_override=prompt_override,
-        system_prompt_override=forum_sys_prompt if forum_sys_prompt else None
+        system_prompt_override=forum_sys_prompt if forum_sys_prompt else None,
+        is_forum_auto_reply=True
     )
 
 @bot.event
