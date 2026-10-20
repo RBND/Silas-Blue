@@ -20,6 +20,7 @@ from typing import Optional, Dict, Any, List
 
 from ai_providers import get_ai_provider, AIProvider
 from permissions import PermissionManager
+from token_limiter import token_limiter
 from utils import load_config, save_config, get_config_path, load_app_config, save_app_config
 from memory import conversation_memory
 from updater import BotUpdater, auto_update_background_loop
@@ -374,6 +375,26 @@ async def handle_ai_prompt(
     else:
         base_sys_prompt = server_prompt if server_prompt else (global_prompt or None)
 
+    # Check role-based token quotas
+    quota_result = None
+    if message.guild:
+        quota_result = token_limiter.check_prompt_allowed(guild_id, message.author, config)
+        if not quota_result.allowed:
+            reset_display = f"<t:{quota_result.reset_epoch}:R>" if quota_result.reset_epoch else "the next reset"
+            overage_policy = config.get("token_quotas", {}).get("overage_policy", {})
+            overage_note = ""
+            if not overage_policy.get("allow_partial_overage", True):
+                overage_note = " *(Strict limit: partial overage disabled)*"
+            try:
+                await message.channel.send(
+                    f"⚠️ **Token Quota Reached**: You have used **{quota_result.used:,} / {quota_result.limit:,} tokens** "
+                    f"for your role **@{quota_result.role_name}**{overage_note}.\n"
+                    f"Your quota resets {reset_display}."
+                )
+            except Exception as send_err:
+                logger.warning(f"Could not send token limit notice: {send_err}")
+            return
+
     try:
         async with message.channel.typing():
             # Perform web search if needed
@@ -401,7 +422,14 @@ async def handle_ai_prompt(
             else:
                 system_prompt = base_sys_prompt
 
-            response = await provider.send_prompt(effective_prompt, default_model, system_prompt=system_prompt, history=history)
+            max_tokens_clamp = quota_result.effective_max_tokens if (quota_result and quota_result.effective_max_tokens) else None
+            response = await provider.send_prompt(
+                effective_prompt,
+                default_model,
+                system_prompt=system_prompt,
+                history=history,
+                max_tokens=max_tokens_clamp
+            )
     except Exception as e:
         logger.error(f"Error getting AI response: {e}")
         response = f"Error processing AI request: {e}"
@@ -415,6 +443,26 @@ async def handle_ai_prompt(
     )
 
     if not is_error_response:
+        # Record token consumption in token limiter
+        if message.guild and quota_result:
+            usage = getattr(provider, "last_usage", {})
+            try:
+                tot_tokens = int(usage.get("total_tokens", 0)) if isinstance(usage, dict) else 0
+                p_tokens = int(usage.get("prompt_tokens", 0)) if isinstance(usage, dict) else 0
+                c_tokens = int(usage.get("completion_tokens", 0)) if isinstance(usage, dict) else 0
+            except (ValueError, TypeError):
+                tot_tokens, p_tokens, c_tokens = 0, 0, 0
+
+            if tot_tokens > 0:
+                token_limiter.record_tokens(
+                    guild_id,
+                    message.author.id,
+                    tokens=tot_tokens,
+                    prompt_tokens=p_tokens,
+                    completion_tokens=c_tokens,
+                    model=default_model
+                )
+
         if citations_footer:
             should_append_citations = True
             if not force_web_search:
@@ -708,6 +756,45 @@ async def on_message(message: discord.Message):
 @bot.command(name="ping")
 async def ping(ctx):
     await ctx.send("Pong!")
+
+@bot.command(name="quota", aliases=["tokens", "myquota"])
+async def check_user_quota(ctx):
+    """Displays your token quota and remaining allowance in this server."""
+    if ctx.guild is None:
+        await ctx.send("Token quotas are only applicable inside Discord servers.")
+        return
+
+    config = server_configs.get(ctx.guild.id) or load_config(ctx.guild.id)
+    quotas_cfg = config.get("token_quotas", {})
+    if not quotas_cfg.get("enabled", False):
+        await ctx.send("ℹ️ Token quotas are currently disabled on this server.")
+        return
+
+    quota = token_limiter.check_prompt_allowed(ctx.guild.id, ctx.author, config)
+    if quota.limit == -1:
+        await ctx.send(f"✨ You have **unlimited tokens** ({quota.role_name}).")
+        return
+
+    reset_rel = f"<t:{quota.reset_epoch}:R>" if quota.reset_epoch else "the next reset"
+    reset_abs = f"<t:{quota.reset_epoch}:f>" if quota.reset_epoch else "N/A"
+    freq = quotas_cfg.get("reset_frequency", "daily").title()
+    overage_cfg = quotas_cfg.get("overage_policy", {})
+    allow_overage = "Yes" if overage_cfg.get("allow_partial_overage", True) else "No"
+    max_ov_val = overage_cfg.get('max_overage_tokens', 1000)
+    max_overage = "Unlimited single turn" if max_ov_val == -1 else f"{max_ov_val:,} tokens"
+
+    embed = discord.Embed(
+        title="📊 Your Token Quota Status",
+        description=f"Server: **{ctx.guild.name}**",
+        color=get_discord_theme_color()
+    )
+    embed.add_field(name="Role Tier", value=f"@{quota.role_name}", inline=True)
+    embed.add_field(name="Reset Cycle", value=freq, inline=True)
+    embed.add_field(name="Tokens Used", value=f"{quota.used:,} / {quota.limit:,}", inline=True)
+    embed.add_field(name="Tokens Remaining", value=f"{quota.remaining:,}", inline=True)
+    embed.add_field(name="Partial Overage", value=f"{allow_overage} ({max_overage})", inline=True)
+    embed.add_field(name="Next Reset", value=f"{reset_rel} ({reset_abs})", inline=False)
+    await ctx.send(embed=embed)
 
 @bot.command(name="invite")
 async def invite_command(ctx):

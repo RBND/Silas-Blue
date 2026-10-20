@@ -19,13 +19,19 @@ class AIProvider(ABC):
         """Base endpoint URL."""
         pass
 
+    @property
+    def last_usage(self) -> Dict[str, int]:
+        """Returns the token usage dict of the last request."""
+        return getattr(self, "_last_usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+
     @abstractmethod
     async def send_prompt(
         self,
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None
+        history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None
     ) -> str:
         """
         Sends a prompt to the AI backend and returns the text response.

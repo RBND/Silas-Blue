@@ -484,13 +484,15 @@ class ServerConfigPage(QWidget):
             "web_search_enabled": self.server_web_search_enabled.isChecked(),
             "web_search_auto": self.server_web_search_auto.isChecked(),
             "memory_turns": self.memory_turns.value(),
-            "memory_ttl_minutes": self.memory_ttl_minutes.value()
+            "memory_ttl_minutes": self.memory_ttl_minutes.value(),
+            "token_quotas": getattr(self, "_current_token_quotas", {})
         }
         return validate_and_sanitize_guild_config(cfg)
 
     def set_widgets_from_config(self, config: dict):
         self.blockSignals(True)
         try:
+            self._current_token_quotas = config.get("token_quotas", {})
             self.perm_reply.set_data(config.get("reply_roles", ["everyone"]), config.get("reply_users", []))
             self.perm_model.set_data(config.get("change_model_roles", []), config.get("change_model_users", []))
             self.perm_admin.set_data(config.get("change_permission_roles", []), config.get("change_permission_users", []))

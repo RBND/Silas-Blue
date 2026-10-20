@@ -306,6 +306,99 @@
                     </div>
                 </div>
 
+                <!-- 5. Role-Based Token Quotas & Reset Schedule -->
+                <div class="card" id="card-token-quotas" style="margin-top: 14px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; padding: 14px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                        <div>
+                            <div class="card-title" style="margin-bottom: 2px;">📊 Role-Based Token Limits & Reset Schedule</div>
+                            <div class="perm-card-desc">Limit AI token consumption per Discord role, schedule automatic quota resets, and configure partial overage policies.</div>
+                        </div>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 13px;">
+                            <input type="checkbox" id="cfg-quotas-enabled" onchange="toggleQuotaSection()" style="width: auto;">
+                            Enable Quotas
+                        </label>
+                    </div>
+
+                    <div id="quota-settings-body" style="display: none;">
+                        <!-- Reset Schedule Row -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 6px; margin-bottom: 14px;">
+                            <div class="form-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
+                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Frequency:</label>
+                                <select id="cfg-quotas-freq" onchange="onQuotaFreqChange()" style="width: 100%;">
+                                    <option value="daily">Daily</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                    <option value="rolling_hours">Rolling 24 Hours</option>
+                                </select>
+                            </div>
+                            <div class="form-row" id="quota-reset-time-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
+                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Time (HH:MM):</label>
+                                <input type="text" id="cfg-quotas-time" placeholder="00:00" style="width: 100%;">
+                            </div>
+                            <div class="form-row" id="quota-tz-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
+                                <label style="font-size: 12px; margin-bottom: 4px;">Timezone Offset (UTC):</label>
+                                <select id="cfg-quotas-tz" style="width: 100%;">
+                                    <option value="-8">UTC-8 (PST)</option>
+                                    <option value="-7">UTC-7 (MST)</option>
+                                    <option value="-6">UTC-6 (CST)</option>
+                                    <option value="-5">UTC-5 (EST)</option>
+                                    <option value="-4">UTC-4 (EDT)</option>
+                                    <option value="0" selected>UTC+0 (GMT/UTC)</option>
+                                    <option value="1">UTC+1 (CET)</option>
+                                    <option value="2">UTC+2 (EET)</option>
+                                    <option value="8">UTC+8 (CST/SGT)</option>
+                                    <option value="9">UTC+9 (JST)</option>
+                                </select>
+                            </div>
+                            <div class="form-row" id="quota-day-week-row" style="display: none; flex-direction: column; align-items: flex-start; margin-bottom: 0;">
+                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Day of Week:</label>
+                                <select id="cfg-quotas-day-of-week" style="width: 100%;">
+                                    <option value="0">Monday</option>
+                                    <option value="1">Tuesday</option>
+                                    <option value="2">Wednesday</option>
+                                    <option value="3">Thursday</option>
+                                    <option value="4">Friday</option>
+                                    <option value="5">Saturday</option>
+                                    <option value="6">Sunday</option>
+                                </select>
+                            </div>
+                            <div class="form-row" id="quota-day-month-row" style="display: none; flex-direction: column; align-items: flex-start; margin-bottom: 0;">
+                                <label style="font-size: 12px; margin-bottom: 4px;">Reset Day of Month:</label>
+                                <input type="number" id="cfg-quotas-day-of-month" min="1" max="28" value="1" style="width: 100%;">
+                            </div>
+                        </div>
+
+                        <!-- Partial Overage Policy Row -->
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 6px; margin-bottom: 14px;">
+                            <div class="form-row" style="margin-bottom: 0; align-items: center;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px;">
+                                    <input type="checkbox" id="cfg-quotas-allow-overage" style="width: auto;" checked>
+                                    Allow Partial Overage on Final Turn
+                                </label>
+                            </div>
+                            <div class="form-row" style="flex-direction: column; align-items: flex-start; margin-bottom: 0;">
+                                <label style="font-size: 12px; margin-bottom: 4px;">Max Overage Buffer (Tokens, -1 for unlimited):</label>
+                                <input type="number" id="cfg-quotas-max-overage" min="-1" value="1000" style="width: 100%;">
+                            </div>
+                        </div>
+
+                        <!-- Role Limits Configuration -->
+                        <div style="margin-bottom: 10px;">
+                            <label style="font-weight: 600; font-size: 13px;">Assigned Role Quotas:</label>
+                            <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">Members with multiple roles will receive the highest configured limit. Server Administrators and Owners are always unlimited.</div>
+                            <div id="role-quotas-list" style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px;"></div>
+                        </div>
+
+                        <!-- Add Role Limit Row -->
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <input type="text" id="input-quota-role" list="available-roles-datalist" placeholder="Role name or @role..." style="flex: 2; min-width: 160px;">
+                            <input type="number" id="input-quota-tokens" min="-1" placeholder="Tokens (e.g. 25000, -1=Unlimited)" style="flex: 2; min-width: 160px;">
+                            <button type="button" onclick="setRoleUnlimitedQuota()" style="flex: 1; min-width: 110px;">♾️ Unlimited</button>
+                            <button type="button" class="primary" onclick="addRoleQuotaEntry()" style="flex: 1; min-width: 100px;">➕ Set Quota</button>
+                        </div>
+                    </div>
+                </div>
+
                 <div style="margin-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 14px;">
                     <div class="form-row" style="align-items: flex-start;">
                         <label>Server System Prompt:</label>

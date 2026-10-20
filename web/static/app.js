@@ -480,6 +480,24 @@ async function loadSelectedGuildConfig() {
         document.getElementById('cfg-server-system-prompt').value = cfg.system_prompt || '';
         document.getElementById('cfg-guild-memory-turns').value = cfg.memory_turns !== undefined ? cfg.memory_turns : 6;
         document.getElementById('cfg-guild-memory-ttl').value = cfg.memory_ttl_minutes !== undefined ? cfg.memory_ttl_minutes : 30;
+
+        // Load Token Quotas Configuration
+        const tq = cfg.token_quotas || {};
+        document.getElementById('cfg-quotas-enabled').checked = !!tq.enabled;
+        document.getElementById('cfg-quotas-freq').value = tq.reset_frequency || 'daily';
+        document.getElementById('cfg-quotas-time').value = tq.reset_time || '00:00';
+        document.getElementById('cfg-quotas-tz').value = tq.reset_timezone_offset !== undefined ? String(tq.reset_timezone_offset) : '0';
+        document.getElementById('cfg-quotas-day-of-week').value = tq.reset_day_of_week !== undefined ? String(tq.reset_day_of_week) : '0';
+        document.getElementById('cfg-quotas-day-of-month').value = tq.reset_day_of_month !== undefined ? tq.reset_day_of_month : 1;
+
+        const ovPolicy = tq.overage_policy || {};
+        document.getElementById('cfg-quotas-allow-overage').checked = ovPolicy.allow_partial_overage !== false;
+        document.getElementById('cfg-quotas-max-overage').value = ovPolicy.max_overage_tokens !== undefined ? ovPolicy.max_overage_tokens : 1000;
+
+        activeRoleQuotas = tq.role_limits ? { ...tq.role_limits } : { 'everyone': 10000 };
+        toggleQuotaSection();
+        onQuotaFreqChange();
+        renderRoleQuotasTable();
     } catch (e) {
         console.error('Failed to load guild config:', e);
     }
@@ -683,7 +701,20 @@ async function saveServerConfig() {
         pagination_max_chars: parseInt(document.getElementById('cfg-max-chars').value) || 1000,
         system_prompt: document.getElementById('cfg-server-system-prompt').value.trim(),
         memory_turns: parseInt(document.getElementById('cfg-guild-memory-turns').value) || 0,
-        memory_ttl_minutes: parseInt(document.getElementById('cfg-guild-memory-ttl').value) || 30
+        memory_ttl_minutes: parseInt(document.getElementById('cfg-guild-memory-ttl').value) || 30,
+        token_quotas: {
+            enabled: document.getElementById('cfg-quotas-enabled').checked,
+            reset_frequency: document.getElementById('cfg-quotas-freq').value,
+            reset_time: document.getElementById('cfg-quotas-time').value.trim() || '00:00',
+            reset_timezone_offset: parseInt(document.getElementById('cfg-quotas-tz').value) || 0,
+            reset_day_of_week: parseInt(document.getElementById('cfg-quotas-day-of-week').value) || 0,
+            reset_day_of_month: parseInt(document.getElementById('cfg-quotas-day-of-month').value) || 1,
+            overage_policy: {
+                allow_partial_overage: document.getElementById('cfg-quotas-allow-overage').checked,
+                max_overage_tokens: parseInt(document.getElementById('cfg-quotas-max-overage').value) || 0
+            },
+            role_limits: activeRoleQuotas
+        }
     };
 
     try {
@@ -697,6 +728,114 @@ async function saveServerConfig() {
     } catch (e) {
         showToast('Failed to save server config', 'error');
     }
+}
+
+// --- Role Token Quotas Helpers ---
+let activeRoleQuotas = {};
+
+function toggleQuotaSection() {
+    const enabled = document.getElementById('cfg-quotas-enabled').checked;
+    const body = document.getElementById('quota-settings-body');
+    if (body) {
+        body.style.display = enabled ? 'block' : 'none';
+    }
+}
+
+function onQuotaFreqChange() {
+    const freq = document.getElementById('cfg-quotas-freq').value;
+    const timeRow = document.getElementById('quota-reset-time-row');
+    const tzRow = document.getElementById('quota-tz-row');
+    const dowRow = document.getElementById('quota-day-week-row');
+    const domRow = document.getElementById('quota-day-month-row');
+
+    if (freq === 'rolling_hours') {
+        if (timeRow) timeRow.style.display = 'none';
+        if (tzRow) tzRow.style.display = 'none';
+        if (dowRow) dowRow.style.display = 'none';
+        if (domRow) domRow.style.display = 'none';
+    } else {
+        if (timeRow) timeRow.style.display = 'flex';
+        if (tzRow) tzRow.style.display = 'flex';
+        if (dowRow) dowRow.style.display = freq === 'weekly' ? 'flex' : 'none';
+        if (domRow) domRow.style.display = freq === 'monthly' ? 'flex' : 'none';
+    }
+}
+
+function renderRoleQuotasTable() {
+    const container = document.getElementById('role-quotas-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const roles = Object.keys(activeRoleQuotas);
+    if (roles.length === 0) {
+        container.innerHTML = '<div style="font-size:12px; color:var(--text-dim); padding:6px 0;">No role limits configured.</div>';
+        return;
+    }
+
+    roles.forEach(roleKey => {
+        const limitVal = activeRoleQuotas[roleKey];
+        const row = document.createElement('div');
+        row.style = 'display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.04); padding:6px 10px; border-radius:4px; font-size:12px;';
+
+        const left = document.createElement('div');
+        left.style = 'display:flex; align-items:center; gap:8px;';
+        left.innerHTML = `<span style="font-weight:600; color:var(--accent-cyan);">🛡️ ${escapeHtml(roleKey)}</span>`;
+
+        const right = document.createElement('div');
+        right.style = 'display:flex; align-items:center; gap:10px;';
+
+        const limitBadge = document.createElement('span');
+        if (limitVal === -1) {
+            limitBadge.style = 'color: #00ff88; font-weight:600;';
+            limitBadge.textContent = '♾️ Unlimited';
+        } else {
+            limitBadge.style = 'color: #ffd700; font-weight:600;';
+            limitBadge.textContent = `${Number(limitVal).toLocaleString()} tokens`;
+        }
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'danger';
+        delBtn.style = 'padding:2px 8px; font-size:11px;';
+        delBtn.textContent = '✕ Remove';
+        delBtn.onclick = () => removeRoleQuota(roleKey);
+
+        right.appendChild(limitBadge);
+        right.appendChild(delBtn);
+        row.appendChild(left);
+        row.appendChild(right);
+        container.appendChild(row);
+    });
+}
+
+function setRoleUnlimitedQuota() {
+    document.getElementById('input-quota-tokens').value = -1;
+}
+
+function addRoleQuotaEntry() {
+    const roleInput = document.getElementById('input-quota-role');
+    const tokensInput = document.getElementById('input-quota-tokens');
+    const role = (roleInput.value || '').trim();
+    const tokensVal = parseInt(tokensInput.value);
+
+    if (!role) {
+        showToast('Please enter or select a role name.', 'error');
+        return;
+    }
+    if (isNaN(tokensVal) || tokensVal < -1) {
+        showToast('Please enter a valid token limit (or -1 for unlimited).', 'error');
+        return;
+    }
+
+    activeRoleQuotas[role] = tokensVal;
+    roleInput.value = '';
+    tokensInput.value = '';
+    renderRoleQuotasTable();
+}
+
+function removeRoleQuota(roleKey) {
+    delete activeRoleQuotas[roleKey];
+    renderRoleQuotasTable();
+}
 }
 
 // --- Updater Management ---

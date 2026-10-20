@@ -95,7 +95,22 @@ DEFAULT_GUILD_CONFIG = {
     "random_prompt_probability": 0,
     "system_prompt": "",
     "memory_turns": 6,
-    "memory_ttl_minutes": 30
+    "memory_ttl_minutes": 30,
+    "token_quotas": {
+        "enabled": False,
+        "role_limits": {
+            "everyone": 10000
+        },
+        "reset_frequency": "daily",
+        "reset_time": "00:00",
+        "reset_timezone_offset": 0,
+        "reset_day_of_week": 0,
+        "reset_day_of_month": 1,
+        "overage_policy": {
+            "allow_partial_overage": True,
+            "max_overage_tokens": 1000
+        }
+    }
 }
 
 SNOWFLAKE_REGEX = re.compile(r"^[1-9]\d{16,19}$")
@@ -159,6 +174,73 @@ def validate_and_sanitize_guild_config(data: dict) -> dict:
 
     if "default_model" in data and isinstance(data["default_model"], str):
         sanitized["default_model"] = data["default_model"].strip()
+
+    # Token quotas sanitization
+    if "token_quotas" in data and isinstance(data["token_quotas"], dict):
+        raw_tq = data["token_quotas"]
+        tq = dict(DEFAULT_GUILD_CONFIG["token_quotas"])
+        tq["enabled"] = bool(raw_tq.get("enabled", False))
+
+        # Role limits: map role_name/id -> integer limit (-1 for unlimited)
+        if "role_limits" in raw_tq and isinstance(raw_tq["role_limits"], dict):
+            clean_limits = {}
+            for r_k, r_v in raw_tq["role_limits"].items():
+                r_key = str(r_k).strip()
+                if not r_key:
+                    continue
+                try:
+                    limit_int = int(r_v)
+                    clean_limits[r_key] = max(-1, limit_int)
+                except (ValueError, TypeError):
+                    continue
+            if clean_limits:
+                tq["role_limits"] = clean_limits
+
+        # Reset frequency
+        raw_freq = str(raw_tq.get("reset_frequency", "daily")).strip().lower()
+        if raw_freq in ("daily", "weekly", "monthly", "rolling_hours"):
+            tq["reset_frequency"] = raw_freq
+
+        # Reset time: HH:MM
+        raw_time = str(raw_tq.get("reset_time", "00:00")).strip()
+        time_match = re.match(r"^([01]?\d|2[0-3]):([0-5]\d)$", raw_time)
+        if time_match:
+            tq["reset_time"] = f"{int(time_match.group(1)):02d}:{int(time_match.group(2)):02d}"
+
+        # Timezone offset (-12 to +14)
+        if "reset_timezone_offset" in raw_tq:
+            try:
+                tq["reset_timezone_offset"] = max(-12, min(int(raw_tq["reset_timezone_offset"]), 14))
+            except (ValueError, TypeError):
+                pass
+
+        # Reset day of week (0=Mon .. 6=Sun)
+        if "reset_day_of_week" in raw_tq:
+            try:
+                tq["reset_day_of_week"] = max(0, min(int(raw_tq["reset_day_of_week"]), 6))
+            except (ValueError, TypeError):
+                pass
+
+        # Reset day of month (1 .. 28)
+        if "reset_day_of_month" in raw_tq:
+            try:
+                tq["reset_day_of_month"] = max(1, min(int(raw_tq["reset_day_of_month"]), 28))
+            except (ValueError, TypeError):
+                pass
+
+        # Partial overage policy
+        raw_overage = raw_tq.get("overage_policy")
+        if isinstance(raw_overage, dict):
+            ov_policy = dict(DEFAULT_GUILD_CONFIG["token_quotas"]["overage_policy"])
+            ov_policy["allow_partial_overage"] = bool(raw_overage.get("allow_partial_overage", True))
+            if "max_overage_tokens" in raw_overage:
+                try:
+                    ov_policy["max_overage_tokens"] = max(-1, int(raw_overage["max_overage_tokens"]))
+                except (ValueError, TypeError):
+                    pass
+            tq["overage_policy"] = ov_policy
+
+        sanitized["token_quotas"] = tq
 
     return sanitized
 

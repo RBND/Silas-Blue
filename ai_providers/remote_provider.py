@@ -111,7 +111,8 @@ class RemoteOpenAIProvider(AIProvider):
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None
+        history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None
     ) -> str:
         """
         Sends a prompt to the OpenAI-compatible chat completions endpoint asynchronously.
@@ -130,6 +131,8 @@ class RemoteOpenAIProvider(AIProvider):
             "stream": False,
             "temperature": 0.7
         }
+        if max_tokens is not None and max_tokens > 0:
+            payload["max_tokens"] = int(max_tokens)
 
         timeout = aiohttp.ClientTimeout(total=300)
         chat_url = self._get_chat_url()
@@ -139,12 +142,26 @@ class RemoteOpenAIProvider(AIProvider):
                 async with session.post(chat_url, json=payload, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        usage = data.get("usage", {})
+                        p_tok = int(usage.get("prompt_tokens", 0))
+                        c_tok = int(usage.get("completion_tokens", 0))
+                        t_tok = int(usage.get("total_tokens", p_tok + c_tok))
                         choices = data.get("choices", [])
+                        content = ""
                         if choices:
                             message = choices[0].get("message", {})
                             content = message.get("content", "")
-                            if content:
-                                return content
+                        if t_tok == 0:
+                            p_tok = max(1, len(prompt) // 4)
+                            c_tok = max(1, len(content) // 4)
+                            t_tok = p_tok + c_tok
+                        self._last_usage = {
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                            "total_tokens": t_tok
+                        }
+                        if content:
+                            return content
                         return "No response content received from remote model."
                     else:
                         try:

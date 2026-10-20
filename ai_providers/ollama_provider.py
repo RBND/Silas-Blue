@@ -41,7 +41,8 @@ class OllamaProvider(AIProvider):
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None
+        history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None
     ) -> str:
         """
         Sends a prompt to Ollama asynchronously.
@@ -69,15 +70,32 @@ class OllamaProvider(AIProvider):
             if system_prompt:
                 payload["system"] = system_prompt
 
+        if max_tokens is not None and max_tokens > 0:
+            payload["options"] = {"num_predict": int(max_tokens)}
+
         timeout = aiohttp.ClientTimeout(total=300)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=payload, headers=self._get_headers()) as response:
                     if response.status == 200:
                         data = await response.json()
+                        p_tok = int(data.get("prompt_eval_count", 0))
+                        c_tok = int(data.get("eval_count", 0))
+                        t_tok = p_tok + c_tok
                         if history:
-                            return data.get("message", {}).get("content", "")
-                        return data.get("response", "")
+                            content = data.get("message", {}).get("content", "")
+                        else:
+                            content = data.get("response", "")
+                        if t_tok == 0:
+                            p_tok = max(1, len(prompt) // 4)
+                            c_tok = max(1, len(content) // 4)
+                            t_tok = p_tok + c_tok
+                        self._last_usage = {
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                            "total_tokens": t_tok
+                        }
+                        return content
                     else:
                         text = await response.text()
                         logger.error(f"Ollama error {response.status}: {text}")

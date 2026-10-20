@@ -50,7 +50,8 @@ class LlamaCppProvider(AIProvider):
         prompt: str,
         model: str,
         system_prompt: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None
+        history: Optional[List[Dict[str, str]]] = None,
+        max_tokens: Optional[int] = None
     ) -> str:
         """
         Sends prompt to llama-server via /v1/chat/completions (OpenAI compatible).
@@ -70,6 +71,8 @@ class LlamaCppProvider(AIProvider):
             "stream": False,
             "temperature": 0.7
         }
+        if max_tokens is not None and max_tokens > 0:
+            payload["max_tokens"] = int(max_tokens)
 
         timeout = aiohttp.ClientTimeout(total=300)
         try:
@@ -77,19 +80,42 @@ class LlamaCppProvider(AIProvider):
                 async with session.post(chat_url, json=payload, headers=self._get_headers()) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        usage = data.get("usage", {})
+                        p_tok = int(usage.get("prompt_tokens", 0))
+                        c_tok = int(usage.get("completion_tokens", 0))
+                        t_tok = int(usage.get("total_tokens", p_tok + c_tok))
                         choices = data.get("choices", [])
+                        content = ""
                         if choices:
-                            return choices[0].get("message", {}).get("content", "")
-                        return ""
+                            content = choices[0].get("message", {}).get("content", "")
+                        if t_tok == 0:
+                            p_tok = max(1, len(prompt) // 4)
+                            c_tok = max(1, len(content) // 4)
+                            t_tok = p_tok + c_tok
+                        self._last_usage = {
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                            "total_tokens": t_tok
+                        }
+                        return content
                     elif resp.status == 404:
                         # Fallback to legacy /completion endpoint
                         legacy_url = f"{self._base_url}/completion"
                         full_prompt = f"System: {system_prompt}\nUser: {prompt}\nAssistant:" if system_prompt else prompt
-                        legacy_payload = {"prompt": full_prompt, "n_predict": 1024, "stream": False}
+                        n_predict = int(max_tokens) if (max_tokens is not None and max_tokens > 0) else 1024
+                        legacy_payload = {"prompt": full_prompt, "n_predict": n_predict, "stream": False}
                         async with session.post(legacy_url, json=legacy_payload, headers=self._get_headers()) as l_resp:
                             if l_resp.status == 200:
                                 l_data = await l_resp.json()
-                                return l_data.get("content", "")
+                                content = l_data.get("content", "")
+                                p_tok = int(l_data.get("tokens_evaluated", max(1, len(full_prompt) // 4)))
+                                c_tok = int(l_data.get("tokens_predicted", max(1, len(content) // 4)))
+                                self._last_usage = {
+                                    "prompt_tokens": p_tok,
+                                    "completion_tokens": c_tok,
+                                    "total_tokens": p_tok + c_tok
+                                }
+                                return content
                             else:
                                 err_text = await l_resp.text()
                                 return f"Llama.cpp Error ({l_resp.status}): {err_text}"
@@ -103,10 +129,24 @@ class LlamaCppProvider(AIProvider):
                                 async with session.post(chat_url, json=payload, headers=self._get_headers()) as retry_resp:
                                     if retry_resp.status == 200:
                                         r_data = await retry_resp.json()
+                                        usage = r_data.get("usage", {})
+                                        p_tok = int(usage.get("prompt_tokens", 0))
+                                        c_tok = int(usage.get("completion_tokens", 0))
+                                        t_tok = int(usage.get("total_tokens", p_tok + c_tok))
                                         choices = r_data.get("choices", [])
+                                        content = ""
                                         if choices:
-                                            return choices[0].get("message", {}).get("content", "")
-                                        return ""
+                                            content = choices[0].get("message", {}).get("content", "")
+                                        if t_tok == 0:
+                                            p_tok = max(1, len(prompt) // 4)
+                                            c_tok = max(1, len(content) // 4)
+                                            t_tok = p_tok + c_tok
+                                        self._last_usage = {
+                                            "prompt_tokens": p_tok,
+                                            "completion_tokens": c_tok,
+                                            "total_tokens": t_tok
+                                        }
+                                        return content
                         logger.error(f"Llama.cpp error {resp.status}: {text}")
                         return f"Llama.cpp Error ({resp.status}): {text}"
                     else:
