@@ -179,7 +179,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.5.0")
+        app_sub = QLabel("AI Discord Assistant v3.5.1")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -202,13 +202,50 @@ class MainWindow(QMainWindow):
         self.btn_nav_logs = QPushButton("  📜  Logs & Console")
         self.btn_nav_settings = QPushButton("  ⚙️  Settings")
 
-        for idx, btn in enumerate([self.btn_nav_dash, self.btn_nav_ai, self.btn_nav_servers, self.btn_nav_logs, self.btn_nav_settings]):
+        # Sub-navigation buttons for Server Config
+        self.btn_sub_perm = QPushButton("   🔑 Permissions")
+        self.btn_sub_tokens = QPushButton("   🪙 Token Settings")
+        self.btn_sub_prompt = QPushButton("   📝 Prompt & Output")
+        self.btn_sub_forum = QPushButton("   💬 Forum Auto-Reply")
+        self.btn_sub_raw = QPushButton("   📄 Raw JSON")
+
+        self.server_sub_buttons = [
+            self.btn_sub_perm,
+            self.btn_sub_tokens,
+            self.btn_sub_prompt,
+            self.btn_sub_forum,
+            self.btn_sub_raw
+        ]
+
+        main_nav_items = [
+            (0, self.btn_nav_dash),
+            (1, self.btn_nav_ai),
+            (2, self.btn_nav_servers),
+            (3, self.btn_nav_logs),
+            (4, self.btn_nav_settings),
+        ]
+
+        for page_idx, btn in main_nav_items:
             btn.setObjectName("navButton")
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked=False, i=idx: self.switch_page(i))
+            if page_idx == 2:
+                btn.clicked.connect(lambda checked=False: self.switch_to_server_config(
+                    getattr(self.server_config_tab, "_current_subpage_index", 0) if hasattr(self, "server_config_tab") else 0
+                ))
+            else:
+                btn.clicked.connect(lambda checked=False, i=page_idx: self.switch_page(i))
             sidebar_layout.addWidget(btn)
             self.nav_buttons.append(btn)
+
+            # Place subnav buttons directly under Server Config
+            if page_idx == 2:
+                for sub_idx, sub_btn in enumerate(self.server_sub_buttons):
+                    sub_btn.setObjectName("subnavButton")
+                    sub_btn.setCheckable(True)
+                    sub_btn.setCursor(Qt.PointingHandCursor)
+                    sub_btn.clicked.connect(lambda checked=False, s_i=sub_idx: self.switch_to_server_config(s_i))
+                    sidebar_layout.addWidget(sub_btn)
 
         sidebar_layout.addStretch(1)
 
@@ -255,6 +292,31 @@ class MainWindow(QMainWindow):
             btn.setChecked(is_active)
             if is_active:
                 btn.setStyleSheet("border-left: 3px solid #ff5ecb; font-weight: bold; background-color: rgba(255, 94, 203, 0.15);")
+            else:
+                btn.setStyleSheet("")
+
+        if page_index == 2:
+            curr_sub = getattr(self.server_config_tab, "_current_subpage_index", 0) if hasattr(self, "server_config_tab") else 0
+            self.update_subnav_buttons(curr_sub)
+        else:
+            self.update_subnav_buttons(-1)
+
+    def switch_to_server_config(self, subpage_index: int = 0):
+        """Switches to Server Config and navigates to the specified sub-page."""
+        self.switch_page(2)
+        if hasattr(self, "server_config_tab"):
+            self.server_config_tab.switch_subpage(subpage_index)
+        self.update_subnav_buttons(subpage_index)
+
+    def update_subnav_buttons(self, active_sub_idx: int):
+        """Updates active indicator on Server Config sub-navigation buttons."""
+        if not hasattr(self, "server_sub_buttons"):
+            return
+        for idx, btn in enumerate(self.server_sub_buttons):
+            is_active = (idx == active_sub_idx)
+            btn.setChecked(is_active)
+            if is_active:
+                btn.setStyleSheet("border-left: 2px solid #00f0ff; font-weight: 700; color: #00f0ff; background-color: rgba(0, 240, 255, 0.12);")
             else:
                 btn.setStyleSheet("")
 

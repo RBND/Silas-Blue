@@ -1,17 +1,18 @@
 """
 GUI page for editing per-server configuration with modern Discord-grade UX/UI.
 Features:
-- Sticky server selector header and sticky action footer.
-- Root QScrollArea preventing layout crushing and 1-line boxes across all screen resolutions and DPI scalings.
+- Sticky server selector header and sticky action footer (server selection unchanged across sub-tabs).
+- Sub-pages split into: Permissions, Token Settings, Server Prompt & Pagination, Forum Auto-Reply, and Raw JSON.
+- System prompt text box auto-expands to use all empty vertical space and pushes bottom controls to the bottom without a scroll bar.
 - Scalable 4-domain Access Control supporting Roles and specific User Snowflake IDs via FlowLayout chips.
-- Expanded System Prompt editor with live character counter and templates.
+- Role-based token quotas editor with schedule and overage controls.
+- Dedicated Discord Forum Auto-Reply settings card.
 - Dirty-state tracking with unsaved changes confirmation modal on server switch.
-- Robust JSON syntax validation.
 """
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QComboBox,
-    QSpinBox, QTextEdit, QLineEdit, QPushButton, QTabWidget, QCheckBox, QFrame,
+    QSpinBox, QTextEdit, QLineEdit, QPushButton, QStackedWidget, QCheckBox, QFrame,
     QScrollArea, QMessageBox, QSizePolicy
 )
 from PySide6.QtCore import QTimer, Qt, Signal
@@ -28,6 +29,7 @@ logger = logging.getLogger("silasblue")
 class ServerConfigPage(QWidget):
     """
     Overhauled per-server configuration page designed for scalability and high-DPI responsiveness.
+    Preserves active server selection while allowing modular sub-page navigation.
     """
 
     def __init__(self, main_window):
@@ -35,8 +37,9 @@ class ServerConfigPage(QWidget):
         self.main_window = main_window
         self.is_dirty = False
         self._prev_guild_index = -1
+        self._current_subpage_index = 0
 
-        # Root Layout: Sticky Header + Tabs + Sticky Footer
+        # Root Layout: Sticky Header + Subpage Stack + Sticky Footer
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(16, 14, 16, 12)
         root_layout.setSpacing(10)
@@ -72,16 +75,30 @@ class ServerConfigPage(QWidget):
         root_layout.addWidget(header_card)
 
         # ---------------------------------------------------------------------
-        # 2. MAIN CONTENT TABS
+        # 2. MAIN CONTENT STACK (Modular Sub-Pages)
         # ---------------------------------------------------------------------
-        self.tabs = QTabWidget()
-        root_layout.addWidget(self.tabs, 1)
+        self.subpage_stack = QStackedWidget()
+        root_layout.addWidget(self.subpage_stack, 1)
 
-        # Build GUI Editor Tab (Wrapped in QScrollArea)
-        self._setup_gui_editor_tab()
+        # Subpage 0: Permissions
+        self.page_permissions = self._setup_permissions_subpage()
+        self.subpage_stack.addWidget(self.page_permissions)
 
-        # Build Raw JSON Tab
-        self._setup_raw_json_tab()
+        # Subpage 1: Token Settings
+        self.page_tokens = self._setup_token_settings_subpage()
+        self.subpage_stack.addWidget(self.page_tokens)
+
+        # Subpage 2: Server Prompt & Output / Pagination (Auto-expanding, No scrollbar)
+        self.page_prompt_pagination = self._setup_prompt_pagination_subpage()
+        self.subpage_stack.addWidget(self.page_prompt_pagination)
+
+        # Subpage 3: Forum Auto-Reply
+        self.page_forum = self._setup_forum_subpage()
+        self.subpage_stack.addWidget(self.page_forum)
+
+        # Subpage 4: Raw JSON
+        self.page_raw_json = self._setup_raw_json_subpage()
+        self.subpage_stack.addWidget(self.page_raw_json)
 
         # ---------------------------------------------------------------------
         # 3. BOTTOM STICKY ACTION FOOTER
@@ -124,31 +141,293 @@ class ServerConfigPage(QWidget):
         # CONNECTIONS & INITIALIZATION
         # ---------------------------------------------------------------------
         self.guild_select.currentIndexChanged.connect(self._on_guild_select_changed)
-        self.tabs.currentChanged.connect(self.on_tab_changed)
 
         self.update_guilds()
         self.load_config()
 
     # -------------------------------------------------------------------------
-    # TAB 1: GUI EDITOR
+    # COMPATIBILITY & NAVIGATION
     # -------------------------------------------------------------------------
-    def _setup_gui_editor_tab(self):
-        self.gui_tab_wrapper = QWidget()
-        wrapper_layout = QVBoxLayout(self.gui_tab_wrapper)
-        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+    @property
+    def tabs(self):
+        """Backwards compatibility shim for external references."""
+        class _TabsProxy:
+            def __init__(proxy_self, page):
+                proxy_self.page = page
+            def currentIndex(proxy_self):
+                return proxy_self.page._current_subpage_index
+            def setCurrentIndex(proxy_self, idx):
+                proxy_self.page.switch_subpage(idx)
+        return _TabsProxy(self)
 
-        # Top-level QScrollArea guarantees no vertical crushing
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameShape(QFrame.NoFrame)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    def switch_subpage(self, index: int):
+        """Switches the active modular subpage while keeping server selection unchanged."""
+        prev_idx = self._current_subpage_index
+        # If leaving Raw JSON, sync changes back to widgets
+        if prev_idx == 4 and index != 4:
+            try:
+                cfg = json.loads(self.raw_config.toPlainText())
+                self.set_widgets_from_config(cfg)
+            except Exception:
+                pass
+        # If entering Raw JSON, sync widgets into JSON view
+        elif index == 4 and prev_idx != 4:
+            cfg = self.get_config_from_widgets()
+            self.raw_config.blockSignals(True)
+            self.raw_config.setPlainText(json.dumps(cfg, indent=2))
+            self.raw_config.blockSignals(False)
+
+        self._current_subpage_index = index
+        self.subpage_stack.setCurrentIndex(index)
+        if hasattr(self.main_window, "update_subnav_buttons"):
+            self.main_window.update_subnav_buttons(index)
+
+    def _create_subpage_header(self, title: str, subtitle: str) -> QFrame:
+        """Helper to create a crisp section header for each sub-page."""
+        header_card = QFrame()
+        header_card.setObjectName("card")
+        layout = QVBoxLayout(header_card)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(3)
+
+        t_lbl = QLabel(title)
+        t_lbl.setStyleSheet("font-weight: 700; font-size: 14px; color: #00f0ff;")
+        layout.addWidget(t_lbl)
+
+        s_lbl = QLabel(subtitle)
+        s_lbl.setStyleSheet("font-size: 11px; opacity: 0.8;")
+        layout.addWidget(s_lbl)
+        return header_card
+
+    # -------------------------------------------------------------------------
+    # SUBPAGE 0: PERMISSIONS
+    # -------------------------------------------------------------------------
+    def _setup_permissions_subpage(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(10)
+
+        header = self._create_subpage_header(
+            "🔑 Role-Based & User Access Control",
+            "Configure which Discord roles or specific user Snowflake IDs are authorized for each bot capability."
+        )
+        page_layout.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(8, 10, 8, 12)
-        container_layout.setSpacing(14)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(12)
 
-        # SECTION 1: System Prompt / Persona Override Card
+        perm_grid = QGridLayout()
+        perm_grid.setHorizontalSpacing(14)
+        perm_grid.setVerticalSpacing(14)
+
+        # 1. Bot Chat & Replies
+        self.perm_reply = PermissionGrantCard(
+            title="💬 Bot Chat & Replies",
+            description="Who can prompt Silas Blue in server channels and threads to receive AI responses.",
+            default_everyone=True
+        )
+        self.perm_reply.changed.connect(self._on_field_edited)
+        perm_grid.addWidget(self.perm_reply, 0, 0)
+
+        # 2. Change AI Model
+        self.perm_model = PermissionGrantCard(
+            title="🧠 Change Active AI Model",
+            description="Who can switch the server's AI model via Discord commands (e.g. !model).",
+            default_everyone=False
+        )
+        self.perm_model.changed.connect(self._on_field_edited)
+        perm_grid.addWidget(self.perm_model, 0, 1)
+
+        # 3. Change Server Permissions
+        self.perm_admin = PermissionGrantCard(
+            title="⚙️ Configure Server Settings",
+            description="Who can modify server personas, memory turns, token limits, and forum settings.",
+            default_everyone=False
+        )
+        self.perm_admin.changed.connect(self._on_field_edited)
+        perm_grid.addWidget(self.perm_admin, 1, 0)
+
+        # 4. Web Search Features
+        self.perm_search = PermissionGrantCard(
+            title="🌐 Web Search & RAG Grounding",
+            description="Who can use live web queries (!search, !links) and trigger auto-grounded responses.",
+            default_everyone=True
+        )
+        self.perm_search.changed.connect(self._on_field_edited)
+        perm_grid.addWidget(self.perm_search, 1, 1)
+
+        container_layout.addLayout(perm_grid)
+        container_layout.addStretch(1)
+
+        scroll.setWidget(container)
+        page_layout.addWidget(scroll, 1)
+        return page
+
+    # -------------------------------------------------------------------------
+    # SUBPAGE 1: TOKEN SETTINGS
+    # -------------------------------------------------------------------------
+    def _setup_token_settings_subpage(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(10)
+
+        header = self._create_subpage_header(
+            "🪙 Role-Based Token Quotas & Reset Schedules",
+            "Set token usage quotas per role, automated reset intervals, timezone offsets, and partial overage policies."
+        )
+        page_layout.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(12)
+
+        # Card 1: Activation & Reset Schedule
+        sched_card = QFrame()
+        sched_card.setObjectName("card")
+        sc_layout = QVBoxLayout(sched_card)
+        sc_layout.setContentsMargins(14, 12, 14, 12)
+        sc_layout.setSpacing(10)
+
+        self.quotas_enabled = QCheckBox("Enable Role-Based Token Quotas")
+        self.quotas_enabled.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+        self.quotas_enabled.toggled.connect(self._on_field_edited)
+        sc_layout.addWidget(self.quotas_enabled)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(15)
+        grid.setVerticalSpacing(8)
+
+        grid.addWidget(QLabel("Reset Frequency:"), 0, 0)
+        self.quotas_frequency = QComboBox()
+        self.quotas_frequency.addItems(["daily", "weekly", "monthly", "rolling_hours"])
+        self.quotas_frequency.currentTextChanged.connect(self._on_field_edited)
+        grid.addWidget(self.quotas_frequency, 0, 1)
+
+        grid.addWidget(QLabel("Reset Time (24h HH:MM):"), 0, 2)
+        self.quotas_reset_time = QLineEdit("00:00")
+        self.quotas_reset_time.textChanged.connect(self._on_field_edited)
+        grid.addWidget(self.quotas_reset_time, 0, 3)
+
+        grid.addWidget(QLabel("Timezone Offset:"), 1, 0)
+        self.quotas_tz_offset = QSpinBox()
+        self.quotas_tz_offset.setRange(-12, 14)
+        self.quotas_tz_offset.setValue(0)
+        self.quotas_tz_offset.setSuffix(" hrs UTC")
+        self.quotas_tz_offset.valueChanged.connect(self._on_field_edited)
+        grid.addWidget(self.quotas_tz_offset, 1, 1)
+
+        grid.addWidget(QLabel("Day of Week (for Weekly):"), 1, 2)
+        self.quotas_day_of_week = QComboBox()
+        self.quotas_day_of_week.addItems([
+            "Monday (0)", "Tuesday (1)", "Wednesday (2)", "Thursday (3)",
+            "Friday (4)", "Saturday (5)", "Sunday (6)"
+        ])
+        self.quotas_day_of_week.currentIndexChanged.connect(self._on_field_edited)
+        grid.addWidget(self.quotas_day_of_week, 1, 3)
+
+        grid.addWidget(QLabel("Day of Month (for Monthly):"), 2, 0)
+        self.quotas_day_of_month = QSpinBox()
+        self.quotas_day_of_month.setRange(1, 31)
+        self.quotas_day_of_month.setValue(1)
+        self.quotas_day_of_month.valueChanged.connect(self._on_field_edited)
+        grid.addWidget(self.quotas_day_of_month, 2, 1)
+
+        sc_layout.addLayout(grid)
+        c_layout.addWidget(sched_card)
+
+        # Card 2: Overage Policy
+        ov_card = QFrame()
+        ov_card.setObjectName("card")
+        ov_layout = QVBoxLayout(ov_card)
+        ov_layout.setContentsMargins(14, 12, 14, 12)
+        ov_layout.setSpacing(8)
+
+        ov_title = QLabel("Partial Overage Policy")
+        ov_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #ffb142;")
+        ov_layout.addWidget(ov_title)
+
+        ov_row = QHBoxLayout()
+        self.quotas_allow_overage = QCheckBox("Allow Partial Overage on Final Turn")
+        self.quotas_allow_overage.setChecked(True)
+        self.quotas_allow_overage.toggled.connect(self._on_field_edited)
+        ov_row.addWidget(self.quotas_allow_overage)
+
+        ov_row.addWidget(QLabel("Max Overage Buffer (Tokens):"))
+        self.quotas_max_overage = QSpinBox()
+        self.quotas_max_overage.setRange(-1, 500000)
+        self.quotas_max_overage.setValue(1000)
+        self.quotas_max_overage.setSpecialValueText("Unlimited (-1)")
+        self.quotas_max_overage.valueChanged.connect(self._on_field_edited)
+        ov_row.addWidget(self.quotas_max_overage)
+        ov_row.addStretch(1)
+
+        ov_layout.addLayout(ov_row)
+        c_layout.addWidget(ov_card)
+
+        # Card 3: Role Limits Editor
+        limits_card = QFrame()
+        limits_card.setObjectName("card")
+        lm_layout = QVBoxLayout(limits_card)
+        lm_layout.setContentsMargins(14, 12, 14, 12)
+        lm_layout.setSpacing(8)
+
+        lm_title = QLabel("Role Limits & Quota Allowances")
+        lm_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00ff88;")
+        lm_layout.addWidget(lm_title)
+
+        every_row = QHBoxLayout()
+        every_row.addWidget(QLabel("Default @everyone Role Limit (Tokens):"))
+        self.quotas_everyone_limit = QSpinBox()
+        self.quotas_everyone_limit.setRange(-1, 100000000)
+        self.quotas_everyone_limit.setValue(10000)
+        self.quotas_everyone_limit.setSpecialValueText("Unlimited (-1)")
+        self.quotas_everyone_limit.valueChanged.connect(self._on_field_edited)
+        every_row.addWidget(self.quotas_everyone_limit)
+        every_row.addStretch(1)
+        lm_layout.addLayout(every_row)
+
+        cust_lbl = QLabel("Custom Role Allowances (format: RoleNameOrID = Limit, one per line):")
+        cust_lbl.setStyleSheet("font-size: 11px; opacity: 0.8; margin-top: 4px;")
+        lm_layout.addWidget(cust_lbl)
+
+        self.quotas_custom_limits = QTextEdit()
+        self.quotas_custom_limits.setPlaceholderText("VIP = 50000\nSupporter = 25000\nModerator = -1")
+        self.quotas_custom_limits.setMaximumHeight(90)
+        self.quotas_custom_limits.textChanged.connect(self._on_field_edited)
+        lm_layout.addWidget(self.quotas_custom_limits)
+
+        c_layout.addWidget(limits_card)
+        c_layout.addStretch(1)
+
+        scroll.setWidget(container)
+        page_layout.addWidget(scroll, 1)
+        return page
+
+    # -------------------------------------------------------------------------
+    # SUBPAGE 2: SERVER PROMPT & PAGINATION (Auto-expanding, No scrollbar)
+    # -------------------------------------------------------------------------
+    def _setup_prompt_pagination_subpage(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(10)
+
+        # SECTION 1: System Prompt Card (Stretch factor 1: Auto-expands to fill all empty space)
         prompt_card = QFrame()
         prompt_card.setObjectName("card")
         prompt_layout = QVBoxLayout(prompt_card)
@@ -164,7 +443,6 @@ class ServerConfigPage(QWidget):
         self.char_counter_label = QLabel("0 / 4,000 chars")
         self.char_counter_label.setStyleSheet("font-size: 11px; opacity: 0.75;")
         p_header.addWidget(self.char_counter_label)
-
         prompt_layout.addLayout(p_header)
 
         p_desc = QLabel(
@@ -178,9 +456,11 @@ class ServerConfigPage(QWidget):
         self.server_system_prompt_input.setPlaceholderText(
             "e.g. You are an expert Python tutor for the Developers server. Keep replies technical, precise, and use Discord code blocks."
         )
-        self.server_system_prompt_input.setMinimumHeight(105)
+        self.server_system_prompt_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.server_system_prompt_input.setMinimumHeight(140)
         self.server_system_prompt_input.textChanged.connect(self._on_prompt_text_changed)
-        prompt_layout.addWidget(self.server_system_prompt_input)
+        # Stretch factor 1 inside prompt_layout makes the text editor use all vertical card space
+        prompt_layout.addWidget(self.server_system_prompt_input, 1)
 
         p_tools_row = QHBoxLayout()
         reset_prompt_btn = QPushButton("↺ Reset to Global Default")
@@ -202,76 +482,26 @@ class ServerConfigPage(QWidget):
         p_tools_row.addStretch(1)
         prompt_layout.addLayout(p_tools_row)
 
-        container_layout.addWidget(prompt_card)
+        # Stretch 1 inside page_layout ensures prompt_card uses all available height
+        page_layout.addWidget(prompt_card, 1)
 
-        # SECTION 2: Access Control & Permissions (2x2 Grid)
-        access_header = QLabel("Role-Based & User Access Control")
-        access_header.setStyleSheet("font-weight: 700; font-size: 14px; margin-top: 4px;")
-        container_layout.addWidget(access_header)
-
-        perm_grid = QGridLayout()
-        perm_grid.setHorizontalSpacing(14)
-        perm_grid.setVerticalSpacing(14)
-
-        # 1. Bot Chat & Replies
-        self.perm_reply = PermissionGrantCard(
-            title="💬 Bot Chat & Replies",
-            description="Who can prompt Silas Blue in server channels and threads to receive AI responses.",
-            default_everyone=True
-        )
-        self.perm_reply.changed.connect(self._on_field_edited)
-        perm_grid.addWidget(self.perm_reply, 0, 0)
-
-        # 2. AI Model Switching
-        self.perm_model = PermissionGrantCard(
-            title="⚡ AI Model Switching",
-            description="Who can use the !model command to change the active LLM for this server.",
-            default_everyone=False
-        )
-        self.perm_model.changed.connect(self._on_field_edited)
-        perm_grid.addWidget(self.perm_model, 0, 1)
-
-        # 3. Server Bot Settings
-        self.perm_admin = PermissionGrantCard(
-            title="🛡️ Server Bot Administration",
-            description="Who can configure prompts, memory, and permissions via bot commands (!setprompt, !setmemory, !setttl).",
-            default_everyone=False
-        )
-        self.perm_admin.changed.connect(self._on_field_edited)
-        perm_grid.addWidget(self.perm_admin, 1, 0)
-
-        # 4. Web Search & Grounding
-        self.perm_search = PermissionGrantCard(
-            title="🌐 Web Search & Grounding",
-            description="Who can use !search or trigger real-time AI web search grounding in this server.",
-            default_everyone=True
-        )
-        self.perm_search.changed.connect(self._on_field_edited)
-        perm_grid.addWidget(self.perm_search, 1, 1)
-
-        container_layout.addLayout(perm_grid)
-
-        # SECTION 3: Response & Memory Tuning (2 Columns)
-        options_header = QLabel("Server Response & Memory Behaviors")
-        options_header.setStyleSheet("font-weight: 700; font-size: 14px; margin-top: 4px;")
-        container_layout.addWidget(options_header)
-
+        # SECTION 2: Output Delivery & Conversation Memory Card (Anchored to the bottom)
         options_card = QFrame()
         options_card.setObjectName("card")
         options_card_layout = QHBoxLayout(options_card)
-        options_card_layout.setContentsMargins(14, 12, 14, 12)
+        options_card_layout.setContentsMargins(14, 10, 14, 10)
         options_card_layout.setSpacing(20)
 
-        # Left Column: Output & Search
+        # Left Column: Output & Web Search
         col_left = QVBoxLayout()
-        col_left.setSpacing(10)
+        col_left.setSpacing(8)
 
         out_title = QLabel("Output Delivery & Web Search")
         out_title.setStyleSheet("font-weight: 700; font-size: 12px; color: #00f0ff;")
         col_left.addWidget(out_title)
 
         pag_row = QHBoxLayout()
-        self.pagination_enabled = QCheckBox("Enable Message Pagination")
+        self.pagination_enabled = QCheckBox("Enable Pagination")
         self.pagination_enabled.toggled.connect(self._on_field_edited)
         pag_row.addWidget(self.pagination_enabled)
 
@@ -291,13 +521,12 @@ class ServerConfigPage(QWidget):
         search_row.addWidget(self.server_web_search_enabled)
         search_row.addWidget(self.server_web_search_auto)
         col_left.addLayout(search_row)
-        col_left.addStretch(1)
 
         options_card_layout.addLayout(col_left, 1)
 
         # Right Column: Memory & Engagement
         col_right = QVBoxLayout()
-        col_right.setSpacing(10)
+        col_right.setSpacing(8)
 
         mem_title = QLabel("Conversation Memory & Engagement")
         mem_title.setStyleSheet("font-weight: 700; font-size: 12px; color: #00f0ff;")
@@ -331,31 +560,47 @@ class ServerConfigPage(QWidget):
         rand_row.addWidget(self.random_prompt_probability)
         rand_row.addStretch(1)
         col_right.addLayout(rand_row)
-        col_right.addStretch(1)
 
         options_card_layout.addLayout(col_right, 1)
 
-        container_layout.addWidget(options_card)
+        # Stretch 0 pushes options_card to the bottom of the window without any scrollbar!
+        page_layout.addWidget(options_card, 0)
+        return page
 
-        # ---------------------------------------------------------------------
-        # SECTION 4: DISCORD FORUM AUTO-REPLY
-        # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # SUBPAGE 3: FORUM AUTO-REPLY
+    # -------------------------------------------------------------------------
+    def _setup_forum_subpage(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(10)
+
+        header = self._create_subpage_header(
+            "💬 Discord Forum Auto-Reply",
+            "Silas Blue automatically monitors newly created forum posts and generates proactive answers."
+        )
+        page_layout.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        c_layout = QVBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(12)
+
         forum_card = QFrame()
         forum_card.setObjectName("card")
-        forum_card_layout = QVBoxLayout(forum_card)
-        forum_card_layout.setContentsMargins(14, 12, 14, 12)
-        forum_card_layout.setSpacing(10)
-
-        forum_header = QLabel("💬 Discord Forum Auto-Reply")
-        forum_header.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
-        forum_card_layout.addWidget(forum_header)
-
-        forum_sub = QLabel("Silas Blue can automatically monitor new forum posts and generate proactive answers.")
-        forum_sub.setStyleSheet("font-size: 11px; color: #888;")
-        forum_card_layout.addWidget(forum_sub)
+        f_card_layout = QVBoxLayout(forum_card)
+        f_card_layout.setContentsMargins(14, 12, 14, 12)
+        f_card_layout.setSpacing(10)
 
         f_toggles_row = QHBoxLayout()
         self.forum_auto_reply_enabled = QCheckBox("Enable Forum Post Auto-Reply")
+        self.forum_auto_reply_enabled.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
         self.forum_auto_reply_enabled.toggled.connect(self._on_field_edited)
         f_toggles_row.addWidget(self.forum_auto_reply_enabled)
 
@@ -364,7 +609,7 @@ class ServerConfigPage(QWidget):
         self.forum_include_post_title.toggled.connect(self._on_field_edited)
         f_toggles_row.addWidget(self.forum_include_post_title)
         f_toggles_row.addStretch(1)
-        forum_card_layout.addLayout(f_toggles_row)
+        f_card_layout.addLayout(f_toggles_row)
 
         f_fields_grid = QGridLayout()
         f_fields_grid.setHorizontalSpacing(15)
@@ -388,84 +633,78 @@ class ServerConfigPage(QWidget):
         self.forum_ignore_tags.textChanged.connect(self._on_field_edited)
         f_fields_grid.addWidget(self.forum_ignore_tags, 2, 1)
 
-        forum_card_layout.addLayout(f_fields_grid)
+        f_card_layout.addLayout(f_fields_grid)
 
         f_prompt_lbl = QLabel("Forum-Specific System Prompt (Optional):")
-        f_prompt_lbl.setStyleSheet("font-size: 11px; font-weight: 600;")
-        forum_card_layout.addWidget(f_prompt_lbl)
+        f_prompt_lbl.setStyleSheet("font-size: 11px; font-weight: 600; margin-top: 4px;")
+        f_card_layout.addWidget(f_prompt_lbl)
 
         self.forum_system_prompt = QTextEdit()
         self.forum_system_prompt.setPlaceholderText("Leave empty to use server default system prompt, or define specialized persona/instructions for forum answers...")
-        self.forum_system_prompt.setMaximumHeight(85)
+        self.forum_system_prompt.setMaximumHeight(100)
         self.forum_system_prompt.textChanged.connect(self._on_field_edited)
-        forum_card_layout.addWidget(self.forum_system_prompt)
+        f_card_layout.addWidget(self.forum_system_prompt)
 
-        container_layout.addWidget(forum_card)
+        c_layout.addWidget(forum_card)
+        c_layout.addStretch(1)
 
-        self.scroll_area.setWidget(container)
-        wrapper_layout.addWidget(self.scroll_area)
-        self.tabs.addTab(self.gui_tab_wrapper, "GUI Editor")
+        scroll.setWidget(container)
+        page_layout.addWidget(scroll, 1)
+        return page
 
     # -------------------------------------------------------------------------
-    # TAB 2: RAW JSON
+    # SUBPAGE 4: RAW JSON
     # -------------------------------------------------------------------------
-    def _setup_raw_json_tab(self):
-        self.raw_tab = QWidget()
-        raw_layout = QVBoxLayout(self.raw_tab)
-        raw_layout.setContentsMargins(12, 12, 12, 12)
+    def _setup_raw_json_subpage(self) -> QWidget:
+        page = QWidget()
+        raw_layout = QVBoxLayout(page)
+        raw_layout.setContentsMargins(0, 0, 0, 0)
         raw_layout.setSpacing(10)
 
-        raw_header = QLabel("Raw Server JSON Configuration:")
-        raw_header.setStyleSheet("font-weight: 600; font-size: 13px;")
-        raw_layout.addWidget(raw_header)
+        header = self._create_subpage_header(
+            "📄 Raw Server JSON Configuration",
+            "Directly view and edit the underlying server JSON schema. Changes are validated on save."
+        )
+        raw_layout.addWidget(header)
 
         self.raw_config = QTextEdit()
         self.raw_config.textChanged.connect(self._on_field_edited)
         raw_layout.addWidget(self.raw_config, 1)
-
-        raw_save_row = QHBoxLayout()
-        raw_save_row.addStretch(1)
-        raw_save_btn = QPushButton("Save Raw JSON")
-        raw_save_btn.setObjectName("primaryBtn")
-        raw_save_btn.clicked.connect(self.save_config)
-        raw_save_row.addWidget(raw_save_btn)
-        raw_layout.addLayout(raw_save_row)
-
-        self.tabs.addTab(self.raw_tab, "Raw JSON")
+        return page
 
     # -------------------------------------------------------------------------
-    # DIRTY STATE & CHANGE DETECTION
+    # DIRTY TRACKING & FEEDBACK
     # -------------------------------------------------------------------------
     def _on_field_edited(self, *args):
         self.mark_dirty(True)
 
     def _on_prompt_text_changed(self):
         text = self.server_system_prompt_input.toPlainText()
-        self.char_counter_label.setText(f"{len(text):,} / 4,000 chars")
-        if len(text) > 4000:
-            self.char_counter_label.setStyleSheet("font-size: 11px; color: #ff5252; font-weight: 700;")
+        length = len(text)
+        self.char_counter_label.setText(f"{length:,} / 4,000 chars")
+        if length > 4000:
+            self.char_counter_label.setStyleSheet("color: #ff5252; font-weight: 700; font-size: 11px;")
         else:
             self.char_counter_label.setStyleSheet("font-size: 11px; opacity: 0.75;")
         self.mark_dirty(True)
 
-    def mark_dirty(self, is_dirty: bool):
-        self.is_dirty = is_dirty
-        self.dirty_banner.setVisible(is_dirty)
-        self.discard_btn.setEnabled(is_dirty)
-        if is_dirty:
-            self.save_btn.setStyleSheet("background-color: #5865f2; color: #ffffff; font-weight: 700;")
-        else:
-            self.save_btn.setStyleSheet("")
+    def mark_dirty(self, dirty: bool):
+        self.is_dirty = dirty
+        self.dirty_banner.setVisible(dirty)
+        self.discard_btn.setEnabled(dirty)
 
-    def _on_guild_select_changed(self, new_idx: int):
-        if self._prev_guild_index == new_idx or new_idx == -1:
+    # -------------------------------------------------------------------------
+    # SERVER SELECTION & DATA SYNC
+    # -------------------------------------------------------------------------
+    def _on_guild_select_changed(self, new_index: int):
+        if self._prev_guild_index == new_index or new_index < 0:
             return
 
         if self.is_dirty:
             reply = QMessageBox.question(
                 self,
                 "Unsaved Changes",
-                "You have unsaved changes for the active server. Would you like to save them before switching?",
+                "You have unsaved configuration changes for this server. Do you want to save them before switching?",
                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
                 QMessageBox.Save
             )
@@ -477,27 +716,26 @@ class ServerConfigPage(QWidget):
                 self.guild_select.blockSignals(False)
                 return
 
-        self._prev_guild_index = new_idx
+        self._prev_guild_index = new_index
         self.load_config()
 
-    # -------------------------------------------------------------------------
-    # CONFIG LOAD & SAVE
-    # -------------------------------------------------------------------------
     def update_guilds(self):
-        """Populate the guild selection box with connected servers."""
+        current_data = self.guild_select.currentData()
+        self.guild_select.blockSignals(True)
+        self.guild_select.clear()
         try:
-            current_ids = [self.guild_select.itemData(i) for i in range(self.guild_select.count())]
-            new_guilds = [(guild.name, guild.id) for guild in getattr(bot, 'guilds', [])]
-            if len(current_ids) != len(new_guilds) or any(str(gid) not in [str(x[1]) for x in new_guilds] for gid in current_ids):
-                self.guild_select.blockSignals(True)
-                self.guild_select.clear()
-                for name, gid in new_guilds:
-                    self.guild_select.addItem(f"{name} ({gid})", userData=gid)
-                self.guild_select.blockSignals(False)
-                self._prev_guild_index = self.guild_select.currentIndex()
-                self.load_config()
-        except Exception as e:
-            logger.error(f"Failed to update guilds: {e}")
+            guilds = getattr(bot, 'guilds', [])
+            for g in guilds:
+                self.guild_select.addItem(f"{g.name} ({g.id})", g.id)
+
+            idx = self.guild_select.findData(current_data)
+            if idx >= 0:
+                self.guild_select.setCurrentIndex(idx)
+            elif self.guild_select.count() > 0:
+                self.guild_select.setCurrentIndex(0)
+            self._prev_guild_index = self.guild_select.currentIndex()
+        finally:
+            self.guild_select.blockSignals(False)
 
     def load_config(self):
         guild_id = self.guild_select.currentData()
@@ -532,6 +770,33 @@ class ServerConfigPage(QWidget):
 
         max_chars = min(self.pagination_max_chars.value(), 1900)
 
+        # Parse custom token limits
+        role_limits = {"everyone": self.quotas_everyone_limit.value()}
+        for line in self.quotas_custom_limits.toPlainText().splitlines():
+            line = line.strip()
+            if "=" in line:
+                rk, rv = line.split("=", 1)
+                rk = rk.strip()
+                if rk:
+                    try:
+                        role_limits[rk] = int(rv.strip())
+                    except ValueError:
+                        pass
+
+        token_quotas = {
+            "enabled": self.quotas_enabled.isChecked(),
+            "role_limits": role_limits,
+            "reset_frequency": self.quotas_frequency.currentText().lower(),
+            "reset_time": self.quotas_reset_time.text().strip() or "00:00",
+            "reset_timezone_offset": self.quotas_tz_offset.value(),
+            "reset_day_of_week": self.quotas_day_of_week.currentIndex(),
+            "reset_day_of_month": self.quotas_day_of_month.value(),
+            "overage_policy": {
+                "allow_partial_overage": self.quotas_allow_overage.isChecked(),
+                "max_overage_tokens": self.quotas_max_overage.value()
+            }
+        }
+
         cfg = {
             "reply_roles": reply_roles,
             "reply_users": reply_users,
@@ -556,14 +821,13 @@ class ServerConfigPage(QWidget):
             "forum_auto_reply_tags": [x.strip() for x in self.forum_auto_reply_tags.text().split(",") if x.strip()],
             "forum_ignore_tags": [x.strip() for x in self.forum_ignore_tags.text().split(",") if x.strip()],
             "forum_system_prompt": self.forum_system_prompt.toPlainText().strip(),
-            "token_quotas": getattr(self, "_current_token_quotas", {})
+            "token_quotas": token_quotas
         }
         return validate_and_sanitize_guild_config(cfg)
 
     def set_widgets_from_config(self, config: dict):
         self.blockSignals(True)
         try:
-            self._current_token_quotas = config.get("token_quotas", {})
             self.perm_reply.set_data(config.get("reply_roles", ["everyone"]), config.get("reply_users", []))
             self.perm_model.set_data(config.get("change_model_roles", []), config.get("change_model_users", []))
             self.perm_admin.set_data(config.get("change_permission_roles", []), config.get("change_permission_users", []))
@@ -578,6 +842,7 @@ class ServerConfigPage(QWidget):
             self.server_web_search_auto.setChecked(config.get("web_search_auto", True))
             self.memory_turns.setValue(int(config.get("memory_turns", 6)))
             self.memory_ttl_minutes.setValue(int(config.get("memory_ttl_minutes", 30)))
+
             self.forum_auto_reply_enabled.setChecked(config.get("forum_auto_reply_enabled", False))
             self.forum_include_post_title.setChecked(config.get("forum_include_post_title", True))
             self.forum_monitored_channels.setText(", ".join(config.get("forum_monitored_channels", [])))
@@ -585,31 +850,37 @@ class ServerConfigPage(QWidget):
             self.forum_ignore_tags.setText(", ".join(config.get("forum_ignore_tags", [])))
             self.forum_system_prompt.setPlainText(config.get("forum_system_prompt", ""))
 
+            # Token Quotas
+            tq = config.get("token_quotas", {})
+            self.quotas_enabled.setChecked(bool(tq.get("enabled", False)))
+            raw_freq = str(tq.get("reset_frequency", "daily")).lower()
+            idx_freq = self.quotas_frequency.findText(raw_freq, Qt.MatchFixedString)
+            if idx_freq >= 0:
+                self.quotas_frequency.setCurrentIndex(idx_freq)
+            self.quotas_reset_time.setText(str(tq.get("reset_time", "00:00")))
+            self.quotas_tz_offset.setValue(int(tq.get("reset_timezone_offset", 0)))
+            self.quotas_day_of_week.setCurrentIndex(max(0, min(int(tq.get("reset_day_of_week", 0)), 6)))
+            self.quotas_day_of_month.setValue(max(1, min(int(tq.get("reset_day_of_month", 1)), 31)))
+
+            op = tq.get("overage_policy", {})
+            self.quotas_allow_overage.setChecked(bool(op.get("allow_partial_overage", True)))
+            self.quotas_max_overage.setValue(int(op.get("max_overage_tokens", 1000)))
+
+            rl = tq.get("role_limits", {"everyone": 10000})
+            self.quotas_everyone_limit.setValue(int(rl.get("everyone", 10000)))
+            custom_lines = [f"{k} = {v}" for k, v in rl.items() if str(k).lower() != "everyone"]
+            self.quotas_custom_limits.setPlainText("\n".join(custom_lines))
+
             self.raw_config.setPlainText(json.dumps(config, indent=2))
         finally:
             self.blockSignals(False)
-
-    def on_tab_changed(self, idx: int):
-        if idx == 1:
-            config = self.get_config_from_widgets()
-            self.raw_config.blockSignals(True)
-            self.raw_config.setPlainText(json.dumps(config, indent=2))
-            self.raw_config.blockSignals(False)
-        elif idx == 0:
-            try:
-                config = json.loads(self.raw_config.toPlainText())
-                self.set_widgets_from_config(config)
-            except Exception:
-                pass
 
     def save_config(self):
         guild_id = self.guild_select.currentData()
         if guild_id is None:
             return
 
-        if self.tabs.currentIndex() == 0:
-            config = self.get_config_from_widgets()
-        else:
+        if self._current_subpage_index == 4:
             try:
                 raw_text = self.raw_config.toPlainText()
                 config = json.loads(raw_text)
@@ -617,6 +888,8 @@ class ServerConfigPage(QWidget):
             except json.JSONDecodeError as e:
                 QMessageBox.critical(self, "Invalid JSON", f"Syntax error in JSON:\n{e}")
                 return
+        else:
+            config = self.get_config_from_widgets()
 
         # Save to disk atomically
         save_config(guild_id, config)

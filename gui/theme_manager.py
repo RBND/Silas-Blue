@@ -151,6 +151,30 @@ class ThemeManager:
                 border-left: 3px solid {accent1};
             }}
 
+            #subnavButton {{
+                background-color: transparent;
+                color: {self._hex_to_rgba(text, 0.75)};
+                border: none;
+                border-radius: 6px;
+                padding: 7px 12px 7px 24px;
+                text-align: left;
+                font-size: 12px;
+                font-weight: 500;
+                margin: 1px 8px;
+            }}
+
+            #subnavButton:hover {{
+                background-color: {nav_hover};
+                color: #ffffff;
+            }}
+
+            #subnavButton:checked, #subnavButtonActive {{
+                background-color: {nav_active_bg};
+                color: #00f0ff;
+                font-weight: 600;
+                border-left: 2px solid #00f0ff;
+            }}
+
             /* Modern Card Containers */
             QFrame.card, QWidget#card, QFrame#card {{
                 background-color: {card_bg};

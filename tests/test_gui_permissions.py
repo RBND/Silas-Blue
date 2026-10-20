@@ -113,5 +113,87 @@ class TestGuiPermissions(unittest.TestCase):
         finally:
             win.close()
 
+    def test_server_config_subpages_and_navigation(self):
+        from gui.main_window import MainWindow
+        from PySide6.QtWidgets import QSizePolicy
+        from unittest.mock import MagicMock
+        win = MainWindow(start_bot=MagicMock(), stop_bot=MagicMock(), restart_bot=MagicMock())
+        try:
+            # 1. Verify 5 sub-nav buttons exist
+            self.assertEqual(len(win.server_sub_buttons), 5)
+            scp = win.server_config_tab
+            self.assertEqual(scp.subpage_stack.count(), 5)
+
+            # Mock some guilds in guild_select
+            scp.guild_select.addItem("Guild Alpha", 111111)
+            scp.guild_select.addItem("Guild Beta", 222222)
+            scp.guild_select.setCurrentIndex(1)
+            initial_guild = scp.guild_select.currentIndex()
+
+            # 2. Navigate to Subpage 2 (Prompt & Output) via main window subnav
+            win.switch_to_server_config(2)
+            self.assertEqual(win.content_stack.currentIndex(), 2)
+            self.assertEqual(scp.subpage_stack.currentIndex(), 2)
+            self.assertEqual(scp._current_subpage_index, 2)
+            # Guild selection must remain unchanged!
+            self.assertEqual(scp.guild_select.currentIndex(), initial_guild)
+
+            # 3. Navigate to Subpage 1 (Token Settings)
+            win.switch_to_server_config(1)
+            self.assertEqual(scp.subpage_stack.currentIndex(), 1)
+            self.assertEqual(scp.guild_select.currentIndex(), initial_guild)
+
+            # 4. Navigate to Subpage 3 (Forum Auto-Reply)
+            win.switch_to_server_config(3)
+            self.assertEqual(scp.subpage_stack.currentIndex(), 3)
+            self.assertEqual(scp.guild_select.currentIndex(), initial_guild)
+
+            # 5. Check Prompt page layout properties (expanding textbox, no scroll area)
+            self.assertEqual(scp.server_system_prompt_input.sizePolicy().verticalPolicy(), QSizePolicy.Expanding)
+            # The prompt page itself is a direct QWidget layout, not a QScrollArea
+            from PySide6.QtWidgets import QScrollArea
+            self.assertFalse(isinstance(scp.page_prompt_pagination, QScrollArea))
+        finally:
+            win.close()
+
+    def test_server_config_multi_subpage_save_integration(self):
+        from gui.main_window import MainWindow
+        from unittest.mock import MagicMock
+        win = MainWindow(start_bot=MagicMock(), stop_bot=MagicMock(), restart_bot=MagicMock())
+        try:
+            scp = win.server_config_tab
+            # Populate fields on different subpages:
+            # Subpage 2: Prompt
+            scp.server_system_prompt_input.setPlainText("Custom system persona test")
+            scp.pagination_enabled.setChecked(True)
+            scp.pagination_max_chars.setValue(1250)
+
+            # Subpage 1: Token Quotas
+            scp.quotas_enabled.setChecked(True)
+            scp.quotas_frequency.setCurrentText("weekly")
+            scp.quotas_everyone_limit.setValue(25000)
+            scp.quotas_custom_limits.setPlainText("VIP = 80000\nMod = -1")
+
+            # Subpage 3: Forum
+            scp.forum_auto_reply_enabled.setChecked(True)
+            scp.forum_include_post_title.setChecked(True)
+            scp.forum_auto_reply_tags.setText("help, questions")
+            scp.forum_system_prompt.setPlainText("Forum persona test")
+
+            # Verify get_config_from_widgets gathers everything together
+            cfg = scp.get_config_from_widgets()
+            self.assertEqual(cfg["system_prompt"], "Custom system persona test")
+            self.assertEqual(cfg["pagination_max_chars"], 1250)
+            self.assertTrue(cfg["token_quotas"]["enabled"])
+            self.assertEqual(cfg["token_quotas"]["reset_frequency"], "weekly")
+            self.assertEqual(cfg["token_quotas"]["role_limits"]["everyone"], 25000)
+            self.assertEqual(cfg["token_quotas"]["role_limits"]["VIP"], 80000)
+            self.assertEqual(cfg["token_quotas"]["role_limits"]["Mod"], -1)
+            self.assertTrue(cfg["forum_auto_reply_enabled"])
+            self.assertEqual(cfg["forum_auto_reply_tags"], ["help", "questions"])
+            self.assertEqual(cfg["forum_system_prompt"], "Forum persona test")
+        finally:
+            win.close()
+
 if __name__ == "__main__":
     unittest.main()

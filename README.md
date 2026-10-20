@@ -1,6 +1,6 @@
-# Silas Blue v3.5.0
+# Silas Blue v3.5.1
 
-[![Version](https://img.shields.io/badge/version-3.5.0-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.1-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,25 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.5.0 introduces automated Discord forum monitoring and replies, tag whitelist/blacklist filtering, forum-specific system persona overrides, and Discord/GUI/Web configuration controls.
+Silas Blue v3.5.1 introduces modular sub-page navigation for Server Config (Permissions, Token Settings, Prompt & Output, Forum Auto-Reply, Raw JSON) with persistent server selection, and an auto-expanding system prompt editor without page scrollbars.
 
 ---
 
-## 🚀 What's New in Version 3.5.0
+## 🚀 What's New in Version 3.5.1
+
+* **Modular Server Config Sub-Navigation**:
+  * Dedicated left navigation rail sub-tabs under **Server Config**:
+    * 🔑 **Permissions**: 4-domain role and user Snowflake access control.
+    * 🪙 **Token Settings**: Role-based token quotas, automated reset schedules, and overage buffers.
+    * 📝 **Prompt & Output**: System prompt persona override, message pagination, and conversation memory.
+    * 💬 **Forum Auto-Reply**: Discord forum monitoring, channel whitelists, and tag filters.
+    * 📄 **Raw JSON**: Direct JSON configuration viewer and validator.
+  * **Persistent Server Selection**: Active server choice remains locked across all sub-tab switches, ensuring unified saving without state loss.
+  * **Auto-Expanding System Prompt**: The system prompt text box now automatically stretches to fill all available vertical window space, pinning secondary controls to the bottom without page scrollbars.
+
+---
+
+## 🚀 Prior Features (v3.5.0)
 
 * **Discord Forum Post Monitoring & Auto-Replies**:
   * Proactively monitors newly created forum threads in Discord `ForumChannel`s and generates AI responses without requiring user @mentions.
