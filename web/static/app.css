@@ -96,6 +96,85 @@ body {
     border-left: 3px solid var(--accent-pink);
 }
 
+/* Sub-Navigation for Server Config */
+.subnav-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 14px;
+    margin-top: 2px;
+    margin-bottom: 6px;
+}
+
+.subnav-item {
+    background: transparent;
+    color: var(--text-muted);
+    border: none;
+    border-radius: 6px;
+    padding: 7px 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.subnav-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-main);
+}
+
+.subnav-item.active {
+    background-color: rgba(0, 240, 255, 0.15);
+    color: var(--accent-cyan);
+    font-weight: 600;
+    border-left: 2px solid var(--accent-cyan);
+}
+
+/* Prompt Subpage Layout: Auto-expanding text area without page scroll */
+#main.no-scroll {
+    overflow: hidden !important;
+}
+
+#page-servers.no-scroll-view {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden !important;
+}
+
+#subpage-servers-prompt {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    gap: 12px;
+}
+
+.prompt-card-expanding {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.prompt-card-expanding textarea {
+    flex: 1 1 auto;
+    min-height: 140px;
+    resize: none !important;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.prompt-bottom-card {
+    flex: 0 0 auto;
+    margin-top: auto;
+}
+
 .sidebar-user {
     background-color: var(--bg-card);
     border: 1px solid var(--border-color);

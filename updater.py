@@ -45,7 +45,7 @@ def get_current_version() -> str:
                         return parts[1].strip().strip('"').strip("'")
     except Exception as e:
         logger.debug(f"Could not read __version__ from SilasBlue.py: {e}")
-    return "3.5.1"
+    return "3.5.2"
 
 def parse_semver(v_str: str) -> Tuple[int, ...]:
     """Extracts numeric semver tuple (major, minor, patch) from version string."""

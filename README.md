@@ -1,6 +1,6 @@
-# Silas Blue v3.5.1
+# Silas Blue v3.5.2
 
-[![Version](https://img.shields.io/badge/version-3.5.1-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.2-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,25 +9,25 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.5.1 introduces modular sub-page navigation for Server Config (Permissions, Token Settings, Prompt & Output, Forum Auto-Reply, Raw JSON) with persistent server selection, and an auto-expanding system prompt editor without page scrollbars.
+Silas Blue v3.5.2 brings full modular sub-page navigation to the Web Dashboard under Server Config (Permissions, Token Settings, Server Prompt & Pagination, Forum Auto-Reply), persistent server selection across sub-tabs, auto-expanding system prompt layout without page scrollbars, and asset cache-busting.
 
 ---
 
-## 🚀 What's New in Version 3.5.1
+## 🚀 What's New in Version 3.5.2
 
-* **Modular Server Config Sub-Navigation**:
-  * Dedicated left navigation rail sub-tabs under **Server Config**:
-    * 🔑 **Permissions**: 4-domain role and user Snowflake access control.
+* **Web Management Console Modular Sub-Navigation**:
+  * Added dedicated left rail sub-tabs under **Server Config**:
+    * 🔑 **Permissions**: Role-based and user Snowflake access control across chat, models, administration, and web search.
     * 🪙 **Token Settings**: Role-based token quotas, automated reset schedules, and overage buffers.
-    * 📝 **Prompt & Output**: System prompt persona override, message pagination, and conversation memory.
+    * 📝 **Prompt & Pagination**: Server persona override, response pagination, and inactivity memory TTL.
     * 💬 **Forum Auto-Reply**: Discord forum monitoring, channel whitelists, and tag filters.
-    * 📄 **Raw JSON**: Direct JSON configuration viewer and validator.
-  * **Persistent Server Selection**: Active server choice remains locked across all sub-tab switches, ensuring unified saving without state loss.
-  * **Auto-Expanding System Prompt**: The system prompt text box now automatically stretches to fill all available vertical window space, pinning secondary controls to the bottom without page scrollbars.
+  * **Persistent Server Selection**: Active server choice remains locked across all sub-tab switches in both Web and Desktop interfaces, ensuring seamless saving without state loss.
+  * **Auto-Expanding System Prompt Layout**: The system prompt text editor dynamically expands to consume all available vertical space, neatly pushing secondary controls to the bottom of the viewport without adding a vertical scrollbar for the page.
+  * **Asset Cache-Busting**: Added versioned asset query parameters to prevent browser caching stale UI assets on bot updates.
 
 ---
 
-## 🚀 Prior Features (v3.5.0)
+## 🚀 Prior Features (v3.5.1 & v3.5.0)
 
 * **Discord Forum Post Monitoring & Auto-Replies**:
   * Proactively monitors newly created forum threads in Discord `ForumChannel`s and generates AI responses without requiring user @mentions.

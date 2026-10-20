@@ -48,6 +48,8 @@ function dismissToast(toast) {
 }
 
 // --- Navigation ---
+let activeServerSubpage = 'permissions';
+
 function switchPage(pageId) {
     activePage = pageId;
     document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
@@ -56,14 +58,56 @@ function switchPage(pageId) {
     const pageEl = document.getElementById(`page-${pageId}`);
     if (pageEl) pageEl.classList.add('active');
 
-    const navBtn = Array.from(document.querySelectorAll('.nav-item')).find(btn => 
-        btn.getAttribute('onclick')?.includes(pageId)
+    const navBtn = document.getElementById(`nav-btn-${pageId}`) || Array.from(document.querySelectorAll('.nav-item')).find(btn => 
+        btn.getAttribute('onclick')?.includes(`'${pageId}'`) || btn.getAttribute('onclick')?.includes(pageId)
     );
     if (navBtn) navBtn.classList.add('active');
+
+    const subnavServers = document.getElementById('subnav-servers');
+    const mainEl = document.getElementById('main');
+    if (pageId === 'servers') {
+        if (subnavServers) subnavServers.style.display = 'flex';
+        switchServerSubpage(activeServerSubpage || 'permissions');
+    } else {
+        if (subnavServers) subnavServers.style.display = 'none';
+        if (mainEl) mainEl.classList.remove('no-scroll');
+    }
 
     if (pageId === 'ai') loadAiSettings();
     if (pageId === 'servers') loadGuildsList();
     if (pageId === 'updates') loadUpdateStatus();
+}
+
+function switchServerSubpage(subId) {
+    activeServerSubpage = subId;
+
+    if (activePage !== 'servers') {
+        switchPage('servers');
+    }
+
+    // Update active class on subnav items
+    document.querySelectorAll('.subnav-item').forEach(btn => btn.classList.remove('active'));
+    const activeSubBtn = document.getElementById(`subnav-item-${subId}`);
+    if (activeSubBtn) activeSubBtn.classList.add('active');
+
+    // Show/hide subpages
+    const subpages = ['permissions', 'tokens', 'prompt', 'forum'];
+    subpages.forEach(id => {
+        const el = document.getElementById(`subpage-servers-${id}`);
+        if (el) {
+            el.style.display = (id === subId) ? (id === 'prompt' ? 'flex' : 'block') : 'none';
+        }
+    });
+
+    const pageServers = document.getElementById('page-servers');
+    const mainEl = document.getElementById('main');
+    if (subId === 'prompt') {
+        if (pageServers) pageServers.classList.add('no-scroll-view');
+        if (mainEl) mainEl.classList.add('no-scroll');
+    } else {
+        if (pageServers) pageServers.classList.remove('no-scroll-view');
+        if (mainEl) mainEl.classList.remove('no-scroll');
+    }
 }
 
 // --- WebSocket Real-Time Log Streaming ---
@@ -419,6 +463,8 @@ let serverAvailableRoles = [];
 
 async function loadGuildsList() {
     const select = document.getElementById('guild-select');
+    if (!select) return;
+    const prevVal = select.value;
     select.innerHTML = '';
     currentGuilds.forEach(g => {
         const opt = document.createElement('option');
@@ -426,7 +472,10 @@ async function loadGuildsList() {
         opt.textContent = `${g.name} (${g.id})`;
         select.appendChild(opt);
     });
-    if (currentGuilds.length > 0) {
+    if (prevVal && Array.from(select.options).some(o => o.value === prevVal)) {
+        select.value = prevVal;
+    }
+    if (select.value) {
         loadSelectedGuildConfig();
     }
 }
@@ -921,7 +970,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.5.1';
+        const currVer = data.current_version || '3.5.2';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {

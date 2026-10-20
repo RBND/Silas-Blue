@@ -4,21 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silas Blue - Web Management Console</title>
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/app.css?v=3.5.2">
 </head>
 <body>
     <!-- Sidebar Navigation Rail -->
     <nav id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-title">SILAS BLUE</div>
-            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.1</div>
+            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.2</div>
             <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
         </div>
 
         <div class="nav-menu">
             <button class="nav-item active" onclick="switchPage('dashboard')">📊 Dashboard</button>
             <button class="nav-item" onclick="switchPage('ai')">🧠 AI & Models</button>
-            <button class="nav-item" onclick="switchPage('servers')">🛡️ Server Config</button>
+            <button class="nav-item" id="nav-btn-servers" onclick="switchPage('servers')">🛡️ Server Config</button>
+            <div id="subnav-servers" class="subnav-menu" style="display: none;">
+                <button class="subnav-item active" id="subnav-item-permissions" onclick="switchServerSubpage('permissions')">🔑 Permissions</button>
+                <button class="subnav-item" id="subnav-item-tokens" onclick="switchServerSubpage('tokens')">🪙 Token Settings</button>
+                <button class="subnav-item" id="subnav-item-prompt" onclick="switchServerSubpage('prompt')">📝 Prompt & Pagination</button>
+                <button class="subnav-item" id="subnav-item-forum" onclick="switchServerSubpage('forum')">💬 Forum Auto-Reply</button>
+            </div>
             <button class="nav-item" onclick="switchPage('logs')">📜 Live Console</button>
             <button class="nav-item" onclick="switchPage('updates')">🔄 Updates</button>
             <button class="nav-item" onclick="openInviteModal()" style="margin-top: 10px; border: 1px dashed rgba(0, 240, 255, 0.4); color: var(--accent-cyan);">➕ Invite Bot</button>
@@ -225,89 +231,95 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="form-row">
+            <div class="card" style="margin-bottom: 0;">
+                <div class="form-row" style="margin-bottom: 0;">
                     <label>Select Server:</label>
                     <select id="guild-select" onchange="loadSelectedGuildConfig()"></select>
                 </div>
             </div>
 
-            <div class="card" id="guild-config-card">
-                <div class="card-title">Role-Based & User Access Control</div>
-                <datalist id="available-roles-datalist"></datalist>
+            <datalist id="available-roles-datalist"></datalist>
 
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
-                    <!-- 1. Bot Chat & Replies -->
-                    <div class="perm-card" id="card-perm-reply">
-                        <div class="perm-card-title">💬 Bot Chat & Replies</div>
-                        <div class="perm-card-desc">Who can prompt Silas Blue in server channels and threads to receive AI responses.</div>
-                        <div class="perm-mode-toggle">
-                            <label><input type="radio" name="perm-mode-reply" value="everyone" onchange="togglePermMode('reply', 'everyone')"> Everyone (@everyone)</label>
-                            <label><input type="radio" name="perm-mode-reply" value="restricted" onchange="togglePermMode('reply', 'restricted')"> Restricted</label>
-                        </div>
-                        <div id="chips-reply" class="chips-cloud"></div>
-                        <div id="empty-reply" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
-                        <div class="perm-input-row" id="input-row-reply">
-                            <input type="text" id="input-reply" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('reply')">
-                            <button onclick="addPermGrant('reply')">➕ Add</button>
-                        </div>
-                        <div id="status-reply" style="font-size: 11px; margin-top: 4px; display: none;"></div>
-                    </div>
+            <!-- SUBPAGE 1: Permissions -->
+            <div id="subpage-servers-permissions" class="server-subpage">
+                <div class="card">
+                    <div class="card-title">Role-Based & User Access Control</div>
 
-                    <!-- 2. AI Model Switching -->
-                    <div class="perm-card" id="card-perm-model">
-                        <div class="perm-card-title">⚡ AI Model Switching</div>
-                        <div class="perm-card-desc">Who can use the !model command to change the active LLM for this server.</div>
-                        <div class="perm-mode-toggle">
-                            <label><input type="radio" name="perm-mode-model" value="everyone" onchange="togglePermMode('model', 'everyone')"> Everyone (@everyone)</label>
-                            <label><input type="radio" name="perm-mode-model" value="restricted" onchange="togglePermMode('model', 'restricted')"> Restricted</label>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+                        <!-- 1. Bot Chat & Replies -->
+                        <div class="perm-card" id="card-perm-reply">
+                            <div class="perm-card-title">💬 Bot Chat & Replies</div>
+                            <div class="perm-card-desc">Who can prompt Silas Blue in server channels and threads to receive AI responses.</div>
+                            <div class="perm-mode-toggle">
+                                <label><input type="radio" name="perm-mode-reply" value="everyone" onchange="togglePermMode('reply', 'everyone')"> Everyone (@everyone)</label>
+                                <label><input type="radio" name="perm-mode-reply" value="restricted" onchange="togglePermMode('reply', 'restricted')"> Restricted</label>
+                            </div>
+                            <div id="chips-reply" class="chips-cloud"></div>
+                            <div id="empty-reply" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                            <div class="perm-input-row" id="input-row-reply">
+                                <input type="text" id="input-reply" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('reply')">
+                                <button onclick="addPermGrant('reply')">➕ Add</button>
+                            </div>
+                            <div id="status-reply" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                         </div>
-                        <div id="chips-model" class="chips-cloud"></div>
-                        <div id="empty-model" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
-                        <div class="perm-input-row" id="input-row-model">
-                            <input type="text" id="input-model" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('model')">
-                            <button onclick="addPermGrant('model')">➕ Add</button>
-                        </div>
-                        <div id="status-model" style="font-size: 11px; margin-top: 4px; display: none;"></div>
-                    </div>
 
-                    <!-- 3. Server Bot Administration -->
-                    <div class="perm-card" id="card-perm-perm">
-                        <div class="perm-card-title">🛡️ Server Bot Administration</div>
-                        <div class="perm-card-desc">Who can configure prompts, memory, and permissions via bot commands (!setprompt, !setmemory, !setttl).</div>
-                        <div class="perm-mode-toggle">
-                            <label><input type="radio" name="perm-mode-perm" value="everyone" onchange="togglePermMode('perm', 'everyone')"> Everyone (@everyone)</label>
-                            <label><input type="radio" name="perm-mode-perm" value="restricted" onchange="togglePermMode('perm', 'restricted')"> Restricted</label>
+                        <!-- 2. AI Model Switching -->
+                        <div class="perm-card" id="card-perm-model">
+                            <div class="perm-card-title">⚡ AI Model Switching</div>
+                            <div class="perm-card-desc">Who can use the !model command to change the active LLM for this server.</div>
+                            <div class="perm-mode-toggle">
+                                <label><input type="radio" name="perm-mode-model" value="everyone" onchange="togglePermMode('model', 'everyone')"> Everyone (@everyone)</label>
+                                <label><input type="radio" name="perm-mode-model" value="restricted" onchange="togglePermMode('model', 'restricted')"> Restricted</label>
+                            </div>
+                            <div id="chips-model" class="chips-cloud"></div>
+                            <div id="empty-model" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                            <div class="perm-input-row" id="input-row-model">
+                                <input type="text" id="input-model" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('model')">
+                                <button onclick="addPermGrant('model')">➕ Add</button>
+                            </div>
+                            <div id="status-model" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                         </div>
-                        <div id="chips-perm" class="chips-cloud"></div>
-                        <div id="empty-perm" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
-                        <div class="perm-input-row" id="input-row-perm">
-                            <input type="text" id="input-perm" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('perm')">
-                            <button onclick="addPermGrant('perm')">➕ Add</button>
-                        </div>
-                        <div id="status-perm" style="font-size: 11px; margin-top: 4px; display: none;"></div>
-                    </div>
 
-                    <!-- 4. Web Search & Grounding -->
-                    <div class="perm-card" id="card-perm-search">
-                        <div class="perm-card-title">🌐 Web Search & Grounding</div>
-                        <div class="perm-card-desc">Who can use !search or trigger real-time AI web search grounding in this server.</div>
-                        <div class="perm-mode-toggle">
-                            <label><input type="radio" name="perm-mode-search" value="everyone" onchange="togglePermMode('search', 'everyone')"> Everyone (@everyone)</label>
-                            <label><input type="radio" name="perm-mode-search" value="restricted" onchange="togglePermMode('search', 'restricted')"> Restricted</label>
+                        <!-- 3. Server Bot Administration -->
+                        <div class="perm-card" id="card-perm-perm">
+                            <div class="perm-card-title">🛡️ Server Bot Administration</div>
+                            <div class="perm-card-desc">Who can configure prompts, memory, and permissions via bot commands (!setprompt, !setmemory, !setttl).</div>
+                            <div class="perm-mode-toggle">
+                                <label><input type="radio" name="perm-mode-perm" value="everyone" onchange="togglePermMode('perm', 'everyone')"> Everyone (@everyone)</label>
+                                <label><input type="radio" name="perm-mode-perm" value="restricted" onchange="togglePermMode('perm', 'restricted')"> Restricted</label>
+                            </div>
+                            <div id="chips-perm" class="chips-cloud"></div>
+                            <div id="empty-perm" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                            <div class="perm-input-row" id="input-row-perm">
+                                <input type="text" id="input-perm" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('perm')">
+                                <button onclick="addPermGrant('perm')">➕ Add</button>
+                            </div>
+                            <div id="status-perm" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                         </div>
-                        <div id="chips-search" class="chips-cloud"></div>
-                        <div id="empty-search" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
-                        <div class="perm-input-row" id="input-row-search">
-                            <input type="text" id="input-search" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('search')">
-                            <button onclick="addPermGrant('search')">➕ Add</button>
+
+                        <!-- 4. Web Search & Grounding -->
+                        <div class="perm-card" id="card-perm-search">
+                            <div class="perm-card-title">🌐 Web Search & Grounding</div>
+                            <div class="perm-card-desc">Who can use !search or trigger real-time AI web search grounding in this server.</div>
+                            <div class="perm-mode-toggle">
+                                <label><input type="radio" name="perm-mode-search" value="everyone" onchange="togglePermMode('search', 'everyone')"> Everyone (@everyone)</label>
+                                <label><input type="radio" name="perm-mode-search" value="restricted" onchange="togglePermMode('search', 'restricted')"> Restricted</label>
+                            </div>
+                            <div id="chips-search" class="chips-cloud"></div>
+                            <div id="empty-search" class="perm-empty-state" style="display: none;">No roles or users granted. (Server Administrators always have access)</div>
+                            <div class="perm-input-row" id="input-row-search">
+                                <input type="text" id="input-search" list="available-roles-datalist" placeholder="Role name, @role, or User Snowflake ID..." onkeydown="if(event.key==='Enter') addPermGrant('search')">
+                                <button onclick="addPermGrant('search')">➕ Add</button>
+                            </div>
+                            <div id="status-search" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                         </div>
-                        <div id="status-search" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
                 </div>
+            </div>
 
-                <!-- 5. Role-Based Token Quotas & Reset Schedule -->
-                <div class="card" id="card-token-quotas" style="margin-top: 14px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px;">
+            <!-- SUBPAGE 2: Token Settings -->
+            <div id="subpage-servers-tokens" class="server-subpage" style="display: none;">
+                <div class="card" id="card-token-quotas" style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(0, 240, 255, 0.25); border-radius: 8px; padding: 14px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
                         <div>
                             <div class="card-title" style="margin-bottom: 2px;">📊 Role-Based Token Limits & Reset Schedule</div>
@@ -428,32 +440,45 @@
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <div style="margin-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 14px;">
-                    <div class="form-row" style="align-items: flex-start;">
-                        <label>Server System Prompt:</label>
-                        <textarea id="cfg-server-system-prompt" rows="3" style="width: 100%;" placeholder="Leave empty to use global system prompt, or define a custom persona for this server..."></textarea>
+            <!-- SUBPAGE 3: Server Prompt & Pagination -->
+            <div id="subpage-servers-prompt" class="server-subpage" style="display: none;">
+                <div class="card prompt-card-expanding">
+                    <div class="card-title">Server System Prompt</div>
+                    <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 8px;">
+                        Define a custom system persona or instructions for Silas Blue in this server. Leave empty to use global system prompt.
                     </div>
-                    <div class="form-row">
-                        <label>Enable Pagination:</label>
-                        <input type="checkbox" id="cfg-pagination" style="width: auto;">
-                    </div>
-                    <div class="form-row">
-                        <label>Max chars per page:</label>
-                        <input type="number" id="cfg-max-chars" min="500" max="1900" value="1000">
-                    </div>
-                    <div class="form-row">
-                        <label>Memory Turns (0=off):</label>
-                        <input type="number" id="cfg-guild-memory-turns" min="0" max="50" value="6">
-                    </div>
-                    <div class="form-row">
-                        <label>Inactivity TTL (Minutes):</label>
-                        <input type="number" id="cfg-guild-memory-ttl" min="1" max="1440" value="30">
-                    </div>
+                    <textarea id="cfg-server-system-prompt" placeholder="Leave empty to use global system prompt, or define a custom persona for this server..."></textarea>
                 </div>
 
-                <div style="margin-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 14px;">
-                    <div style="font-weight: 700; font-size: 13px; color: var(--accent); margin-bottom: 10px;">💬 Discord Forum Auto-Reply</div>
+                <div class="card prompt-bottom-card">
+                    <div class="card-title" style="margin-bottom: 10px;">Output & Memory Controls</div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+                        <div class="form-row" style="margin-bottom: 0;">
+                            <label>Enable Pagination:</label>
+                            <input type="checkbox" id="cfg-pagination" style="width: auto;">
+                        </div>
+                        <div class="form-row" style="margin-bottom: 0;">
+                            <label>Max chars per page:</label>
+                            <input type="number" id="cfg-max-chars" min="500" max="1900" value="1000">
+                        </div>
+                        <div class="form-row" style="margin-bottom: 0;">
+                            <label>Memory Turns (0=off):</label>
+                            <input type="number" id="cfg-guild-memory-turns" min="0" max="50" value="6">
+                        </div>
+                        <div class="form-row" style="margin-bottom: 0;">
+                            <label>Inactivity TTL (Minutes):</label>
+                            <input type="number" id="cfg-guild-memory-ttl" min="1" max="1440" value="30">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SUBPAGE 4: Forum Auto-Reply -->
+            <div id="subpage-servers-forum" class="server-subpage" style="display: none;">
+                <div class="card">
+                    <div class="card-title" style="color: var(--accent); margin-bottom: 10px;">💬 Discord Forum Auto-Reply</div>
                     <div class="form-row">
                         <label>Enable Forum Auto-Reply:</label>
                         <input type="checkbox" id="cfg-forum-auto-reply" style="width: auto;">
@@ -517,7 +542,7 @@
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-title">Current Version</div>
-                    <div class="kpi-value" id="update-curr-version">3.5.1</div>
+                    <div class="kpi-value" id="update-curr-version">3.5.2</div>
                     <div class="kpi-subtext" id="update-curr-commit">#-------</div>
                 </div>
                 <div class="kpi-card">
@@ -662,6 +687,6 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=3.5.1"></script>
+    <script src="/static/app.js?v=3.5.2"></script>
 </body>
 </html>
