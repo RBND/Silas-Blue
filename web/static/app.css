@@ -524,6 +524,12 @@ input:focus, select:focus, textarea:focus {
     color: var(--accent-pink);
 }
 
+.perm-chip.channel {
+    background: rgba(0, 255, 136, 0.12);
+    border: 1px solid rgba(0, 255, 136, 0.4);
+    color: var(--accent-green);
+}
+
 .perm-chip .del-btn {
     background: transparent;
     border: none;

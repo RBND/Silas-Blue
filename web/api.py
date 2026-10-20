@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from datetime import datetime
+import discord
 from aiohttp import web, WSMsgType
 
 from bot_core import (
@@ -226,8 +227,9 @@ class ApiHandler:
             return web.json_response({"error": "Guild ID required"}, status=400)
 
         cfg = load_config(guild_id)
-        # Find roles in bot cache if available
+        # Find roles and channels in bot cache if available
         roles = []
+        channels = []
         try:
             guild = next((g for g in getattr(bot, "guilds", []) if str(g.id) == str(guild_id)), None)
             if guild:
@@ -235,10 +237,22 @@ class ApiHandler:
                     if not r.is_default():
                         roles.append({"id": str(r.id), "name": r.name})
                 roles.append({"id": "everyone", "name": "@everyone"})
+                for c in getattr(guild, "channels", []):
+                    is_forum = isinstance(c, getattr(discord, "ForumChannel", ()))
+                    channels.append({
+                        "id": str(c.id),
+                        "name": getattr(c, "name", str(c.id)),
+                        "is_forum": is_forum,
+                        "type": str(getattr(c, "type", "text"))
+                    })
         except Exception:
             pass
 
-        return web.json_response({"config": cfg, "available_roles": roles})
+        return web.json_response({
+            "config": cfg,
+            "available_roles": roles,
+            "available_channels": channels
+        })
 
     async def save_guild_config(self, request):
         """Updates and applies per-server configuration."""

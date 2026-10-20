@@ -2,7 +2,7 @@ import unittest
 import sys
 from PySide6.QtWidgets import QApplication
 from gui.flow_layout import FlowLayout
-from gui.permission_chips import PermissionChip, PermissionGrantCard
+from gui.permission_chips import PermissionChip, PermissionGrantCard, ChannelChip, ChannelSelectCard
 
 app = QApplication.instance()
 if app is None:
@@ -177,6 +177,7 @@ class TestGuiPermissions(unittest.TestCase):
             # Subpage 3: Forum
             scp.forum_auto_reply_enabled.setChecked(True)
             scp.forum_include_post_title.setChecked(True)
+            scp.forum_channel_card.set_channels(["111222333444555666", "777888999000111222"])
             scp.forum_auto_reply_tags.setText("help, questions")
             scp.forum_system_prompt.setPlainText("Forum persona test")
 
@@ -190,10 +191,48 @@ class TestGuiPermissions(unittest.TestCase):
             self.assertEqual(cfg["token_quotas"]["role_limits"]["VIP"], 80000)
             self.assertEqual(cfg["token_quotas"]["role_limits"]["Mod"], -1)
             self.assertTrue(cfg["forum_auto_reply_enabled"])
+            self.assertEqual(cfg["forum_monitored_channels"], ["111222333444555666", "777888999000111222"])
             self.assertEqual(cfg["forum_auto_reply_tags"], ["help", "questions"])
             self.assertEqual(cfg["forum_system_prompt"], "Forum persona test")
         finally:
             win.close()
+
+    def test_channel_select_card_functionality(self):
+        card = ChannelSelectCard()
+        # Initial empty state
+        self.assertFalse(card.empty_label.isHidden())
+        self.assertEqual(card.get_channels(), [])
+
+        # Set fake available channels
+        card.available_channels = [("support-forum", "123456789012345678"), ("general-chat", "987654321098765432")]
+        card.channel_id_to_name = {"123456789012345678": "support-forum", "987654321098765432": "general-chat"}
+
+        # 1. Add by channel name with hash
+        card.add_input.setText("#support-forum")
+        card._on_add()
+        self.assertEqual(card.get_channels(), ["123456789012345678"])
+        self.assertTrue(card.empty_label.isHidden())
+
+        # 2. Add by snowflake ID
+        card.add_input.setText("987654321098765432")
+        card._on_add()
+        self.assertEqual(card.get_channels(), ["123456789012345678", "987654321098765432"])
+
+        # 3. Add by channel mention
+        card.add_input.setText("<#555666777888999000>")
+        card._on_add()
+        self.assertIn("555666777888999000", card.get_channels())
+
+        # 4. Remove channel
+        card._on_remove("123456789012345678")
+        self.assertNotIn("123456789012345678", card.get_channels())
+
+    def test_channel_chip_signal(self):
+        chip = ChannelChip("bugs-forum", "123456789012345678")
+        removed = []
+        chip.removed.connect(lambda cid: removed.append(cid))
+        chip.del_btn.click()
+        self.assertEqual(removed, ["123456789012345678"])
 
 if __name__ == "__main__":
     unittest.main()

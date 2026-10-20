@@ -16,6 +16,7 @@ from .flow_layout import FlowLayout
 SNOWFLAKE_REGEX = re.compile(r"^[1-9]\d{16,19}$")
 MENTION_REGEX = re.compile(r"^<@!?([1-9]\d{16,19})>$")
 ROLE_MENTION_REGEX = re.compile(r"^<@&([1-9]\d{16,19})>$")
+CHANNEL_MENTION_REGEX = re.compile(r"^<#([1-9]\d{16,19})>$")
 
 
 class PermissionChip(QFrame):
@@ -354,3 +355,234 @@ class PermissionGrantCard(QFrame):
         self.status_label.setText(msg)
         self.status_label.setStyleSheet("color: #ff5252; font-size: 11px;")
         self.status_label.setVisible(True)
+
+
+class ChannelChip(QFrame):
+    """
+    Interactive badge representing a monitored Discord forum channel.
+    """
+    removed = Signal(str)  # channel_id
+
+    def __init__(self, name: str, channel_id: str, parent=None):
+        super().__init__(parent)
+        self.name = name
+        self.channel_id = channel_id
+
+        self.setObjectName("permChipChannel")
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 3, 6, 3)
+        layout.setSpacing(6)
+
+        display_text = f"💬 #{name}" if name else f"💬 Channel ({channel_id})"
+        self.setToolTip(f"Discord Channel ID: {channel_id}")
+
+        self.label = QLabel(display_text)
+        self.label.setStyleSheet("font-size: 11px; font-weight: 600; border: none; background: transparent;")
+        layout.addWidget(self.label)
+
+        self.del_btn = QPushButton("✕")
+        self.del_btn.setFixedSize(16, 16)
+        self.del_btn.setCursor(Qt.PointingHandCursor)
+        self.del_btn.setToolTip("Remove channel")
+        self.del_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                font-size: 11px;
+                font-weight: bold;
+                color: rgba(255, 255, 255, 0.6);
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #ff5252;
+                font-weight: 800;
+            }
+        """)
+        self.del_btn.clicked.connect(lambda: self.removed.emit(self.channel_id))
+        layout.addWidget(self.del_btn)
+
+
+class ChannelSelectCard(QFrame):
+    """
+    Discord-grade channel search and chip selector for Monitored Forum Channels.
+    Identical UX to PermissionGrantCard:
+    - Chip cloud with individual remove buttons
+    - Search input with QCompleter for available forum channels
+    - Support for channel name, #channel, <#channel_id>, or raw snowflake
+    - Empty state message
+    """
+    changed = Signal()
+
+    def __init__(
+        self,
+        title: str = "💬 Monitored Forum Channels",
+        description: str = "Select specific forum channels Silas Blue should monitor for new posts. If empty, all forum channels in this server are monitored.",
+        parent=None
+    ):
+        super().__init__(parent)
+        self.setObjectName("card")
+        self.title = title
+        self.description = description
+
+        self.channels: List[str] = []
+        self.available_channels: List[Tuple[str, str]] = []  # (name, id)
+        self.channel_id_to_name: Dict[str, str] = {}
+        self.current_guild = None
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        if self.title:
+            t_lbl = QLabel(self.title)
+            t_lbl.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
+            layout.addWidget(t_lbl)
+
+        if self.description:
+            d_lbl = QLabel(self.description)
+            d_lbl.setStyleSheet("font-size: 11px; opacity: 0.8;")
+            d_lbl.setWordWrap(True)
+            layout.addWidget(d_lbl)
+
+        # Active Channels Chip Cloud (FlowLayout)
+        self.chips_container = QWidget()
+        self.flow_layout = FlowLayout(self.chips_container, margin=2, h_spacing=6, v_spacing=6)
+        self.chips_container.setMinimumHeight(36)
+        layout.addWidget(self.chips_container)
+
+        # Empty state label
+        self.empty_label = QLabel("Monitoring all forum channels in this server. (Add specific channels below to restrict auto-replies)")
+        self.empty_label.setStyleSheet("font-size: 11px; font-style: italic; color: rgba(255,255,255,0.45); padding: 4px;")
+        layout.addWidget(self.empty_label)
+
+        # Search / Add Input Row
+        input_row = QHBoxLayout()
+        self.add_input = QLineEdit()
+        self.add_input.setPlaceholderText("Search channel name (#forum) or paste Channel ID (Snowflake)...")
+        self.add_btn = QPushButton("➕ Add Channel")
+        self.add_btn.setObjectName("primaryBtn")
+        self.add_btn.setCursor(Qt.PointingHandCursor)
+
+        input_row.addWidget(self.add_input, 1)
+        input_row.addWidget(self.add_btn)
+        layout.addLayout(input_row)
+
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("font-size: 11px; color: #ff5252;")
+        self.status_label.setVisible(False)
+        layout.addWidget(self.status_label)
+
+        self.add_btn.clicked.connect(self._on_add)
+        self.add_input.returnPressed.connect(self._on_add)
+
+    def set_guild(self, guild):
+        self.current_guild = guild
+        self.available_channels = []
+        self.channel_id_to_name = {}
+
+        if guild:
+            try:
+                import discord
+                has_discord = True
+            except ImportError:
+                has_discord = False
+
+            forum_channels = []
+            other_channels = []
+            for c in getattr(guild, "channels", []):
+                cid = str(c.id)
+                cname = getattr(c, "name", cid)
+                self.channel_id_to_name[cid] = cname
+                if has_discord and isinstance(c, getattr(discord, "ForumChannel", ())):
+                    forum_channels.append((cname, cid))
+                else:
+                    other_channels.append((cname, cid))
+            self.available_channels = forum_channels + other_channels
+
+            completer_items = []
+            for cname, cid in self.available_channels:
+                completer_items.append(f"#{cname}")
+                completer_items.append(f"#{cname} ({cid})")
+                completer_items.append(cname)
+            completer = QCompleter(completer_items, self)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            self.add_input.setCompleter(completer)
+
+        self._refresh_chips()
+
+    def set_channels(self, channels: List[str]):
+        self.channels = [str(c).strip() for c in channels if str(c).strip()]
+        self._refresh_chips()
+
+    def get_channels(self) -> List[str]:
+        return list(self.channels)
+
+    def _refresh_chips(self):
+        while self.flow_layout.count() > 0:
+            item = self.flow_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for cid in self.channels:
+            name = self.channel_id_to_name.get(cid, "")
+            chip = ChannelChip(name, cid, self.chips_container)
+            chip.removed.connect(self._on_remove)
+            self.flow_layout.addWidget(chip)
+
+        self.empty_label.setVisible(len(self.channels) == 0)
+
+    def _on_remove(self, cid: str):
+        if cid in self.channels:
+            self.channels = [c for c in self.channels if c != cid]
+            self._refresh_chips()
+            self.changed.emit()
+
+    def _on_add(self):
+        val = self.add_input.text().strip()
+        if not val:
+            return
+
+        self.status_label.setVisible(False)
+        target_id = None
+
+        # 1. Channel Mention <#123456789...>
+        mention_m = CHANNEL_MENTION_REGEX.match(val)
+        if mention_m:
+            target_id = mention_m.group(1)
+        elif SNOWFLAKE_REGEX.match(val):
+            # 2. Raw Snowflake ID
+            target_id = val
+        else:
+            # 3. Clean "#name (id)" or "#name"
+            paren_m = re.search(r"\((\d{16,20})\)", val)
+            if paren_m:
+                target_id = paren_m.group(1)
+            else:
+                clean_name = val.lstrip("#").strip().lower()
+                for cname, cid in self.available_channels:
+                    if cname.lower() == clean_name:
+                        target_id = cid
+                        break
+
+        if not target_id:
+            self.status_label.setText(f"Channel '{val}' not found. Select from the dropdown or paste a Discord Channel ID.")
+            self.status_label.setStyleSheet("color: #ff5252; font-size: 11px;")
+            self.status_label.setVisible(True)
+            return
+
+        if target_id in self.channels:
+            self.status_label.setText("Channel is already added.")
+            self.status_label.setStyleSheet("color: #00f0ff; font-size: 11px;")
+            self.status_label.setVisible(True)
+            return
+
+        self.channels.append(target_id)
+        self.add_input.clear()
+        self._refresh_chips()
+        self.changed.emit()

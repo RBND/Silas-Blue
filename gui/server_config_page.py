@@ -21,7 +21,7 @@ import logging
 
 from utils import load_config, save_config, validate_and_sanitize_guild_config
 from bot_core import bot, update_server_config
-from .permission_chips import PermissionGrantCard
+from .permission_chips import PermissionGrantCard, ChannelSelectCard
 
 logger = logging.getLogger("silasblue")
 
@@ -159,6 +159,19 @@ class ServerConfigPage(QWidget):
             def setCurrentIndex(proxy_self, idx):
                 proxy_self.page.switch_subpage(idx)
         return _TabsProxy(self)
+
+    @property
+    def forum_monitored_channels(self):
+        """Backwards compatibility shim for external references expecting QLineEdit."""
+        class _ChannelsShim:
+            def __init__(proxy_self, card):
+                proxy_self.card = card
+            def text(proxy_self):
+                return ", ".join(proxy_self.card.get_channels())
+            def setText(proxy_self, val):
+                channels = [x.strip() for x in str(val).split(",") if x.strip()]
+                proxy_self.card.set_channels(channels)
+        return _ChannelsShim(self.forum_channel_card)
 
     def switch_subpage(self, index: int):
         """Switches the active modular subpage while keeping server selection unchanged."""
@@ -611,27 +624,29 @@ class ServerConfigPage(QWidget):
         f_toggles_row.addStretch(1)
         f_card_layout.addLayout(f_toggles_row)
 
+        # Monitored Channels Card (search & chip selector, matches permissions)
+        self.forum_channel_card = ChannelSelectCard(
+            title="💬 Monitored Forum Channels",
+            description="Select specific forum channels Silas Blue should monitor for new posts. If empty, all forum channels in this server are monitored."
+        )
+        self.forum_channel_card.changed.connect(self._on_field_edited)
+        f_card_layout.addWidget(self.forum_channel_card)
+
         f_fields_grid = QGridLayout()
         f_fields_grid.setHorizontalSpacing(15)
         f_fields_grid.setVerticalSpacing(8)
 
-        f_fields_grid.addWidget(QLabel("Monitored Forum Channel IDs:"), 0, 0)
-        self.forum_monitored_channels = QLineEdit()
-        self.forum_monitored_channels.setPlaceholderText("e.g. 123456789, 987654321 (leave empty for all forum channels)")
-        self.forum_monitored_channels.textChanged.connect(self._on_field_edited)
-        f_fields_grid.addWidget(self.forum_monitored_channels, 0, 1)
-
-        f_fields_grid.addWidget(QLabel("Required Tags (Whitelist):"), 1, 0)
+        f_fields_grid.addWidget(QLabel("Required Tags (Whitelist):"), 0, 0)
         self.forum_auto_reply_tags = QLineEdit()
         self.forum_auto_reply_tags.setPlaceholderText("e.g. help, question (leave empty to reply to all tags)")
         self.forum_auto_reply_tags.textChanged.connect(self._on_field_edited)
-        f_fields_grid.addWidget(self.forum_auto_reply_tags, 1, 1)
+        f_fields_grid.addWidget(self.forum_auto_reply_tags, 0, 1)
 
-        f_fields_grid.addWidget(QLabel("Ignored Tags (Blacklist):"), 2, 0)
+        f_fields_grid.addWidget(QLabel("Ignored Tags (Blacklist):"), 1, 0)
         self.forum_ignore_tags = QLineEdit()
         self.forum_ignore_tags.setPlaceholderText("e.g. resolved, closed, announcement")
         self.forum_ignore_tags.textChanged.connect(self._on_field_edited)
-        f_fields_grid.addWidget(self.forum_ignore_tags, 2, 1)
+        f_fields_grid.addWidget(self.forum_ignore_tags, 1, 1)
 
         f_card_layout.addLayout(f_fields_grid)
 
@@ -753,6 +768,7 @@ class ServerConfigPage(QWidget):
         self.perm_model.set_guild(guild)
         self.perm_admin.set_guild(guild)
         self.perm_search.set_guild(guild)
+        self.forum_channel_card.set_guild(guild)
 
         config = load_config(guild_id)
         self.set_widgets_from_config(config)
@@ -817,7 +833,7 @@ class ServerConfigPage(QWidget):
             "memory_ttl_minutes": self.memory_ttl_minutes.value(),
             "forum_auto_reply_enabled": self.forum_auto_reply_enabled.isChecked(),
             "forum_include_post_title": self.forum_include_post_title.isChecked(),
-            "forum_monitored_channels": [x.strip() for x in self.forum_monitored_channels.text().split(",") if x.strip()],
+            "forum_monitored_channels": self.forum_channel_card.get_channels(),
             "forum_auto_reply_tags": [x.strip() for x in self.forum_auto_reply_tags.text().split(",") if x.strip()],
             "forum_ignore_tags": [x.strip() for x in self.forum_ignore_tags.text().split(",") if x.strip()],
             "forum_system_prompt": self.forum_system_prompt.toPlainText().strip(),
@@ -845,7 +861,7 @@ class ServerConfigPage(QWidget):
 
             self.forum_auto_reply_enabled.setChecked(config.get("forum_auto_reply_enabled", False))
             self.forum_include_post_title.setChecked(config.get("forum_include_post_title", True))
-            self.forum_monitored_channels.setText(", ".join(config.get("forum_monitored_channels", [])))
+            self.forum_channel_card.set_channels(config.get("forum_monitored_channels", []))
             self.forum_auto_reply_tags.setText(", ".join(config.get("forum_auto_reply_tags", [])))
             self.forum_ignore_tags.setText(", ".join(config.get("forum_ignore_tags", [])))
             self.forum_system_prompt.setPlainText(config.get("forum_system_prompt", ""))

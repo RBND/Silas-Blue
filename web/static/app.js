@@ -460,6 +460,10 @@ let permData = {
     search: { roles: ['everyone'], users: [] }
 };
 let serverAvailableRoles = [];
+let serverAvailableChannels = [];
+let forumMonitoredChannels = [];
+
+const CHANNEL_MENTION_REGEX = /^<#([1-9]\d{16,19})>$/;
 
 async function loadGuildsList() {
     const select = document.getElementById('guild-select');
@@ -489,6 +493,7 @@ async function loadSelectedGuildConfig() {
         const data = await res.json();
         const cfg = data.config || {};
         serverAvailableRoles = data.available_roles || [];
+        serverAvailableChannels = data.available_channels || [];
 
         // Update datalist for role autocompletion
         const datalist = document.getElementById('available-roles-datalist');
@@ -500,6 +505,22 @@ async function loadSelectedGuildConfig() {
                     opt.value = r.name;
                     datalist.appendChild(opt);
                 }
+            });
+        }
+
+        // Update datalist for forum channel autocompletion
+        const chDatalist = document.getElementById('available-channels-datalist');
+        if (chDatalist) {
+            chDatalist.innerHTML = '';
+            const sortedChannels = [...serverAvailableChannels].sort((a, b) => (b.is_forum ? 1 : 0) - (a.is_forum ? 1 : 0));
+            sortedChannels.forEach(c => {
+                const optWithId = document.createElement('option');
+                optWithId.value = `#${c.name} (${c.id})`;
+                chDatalist.appendChild(optWithId);
+
+                const optName = document.createElement('option');
+                optName.value = `#${c.name}`;
+                chDatalist.appendChild(optName);
             });
         }
 
@@ -534,8 +555,10 @@ async function loadSelectedGuildConfig() {
         if (fAutoReply) fAutoReply.checked = Boolean(cfg.forum_auto_reply_enabled);
         const fIncTitle = document.getElementById('cfg-forum-include-title');
         if (fIncTitle) fIncTitle.checked = cfg.forum_include_post_title !== false;
+        forumMonitoredChannels = Array.isArray(cfg.forum_monitored_channels) ? [...cfg.forum_monitored_channels] : [];
+        renderForumChannels();
         const fChans = document.getElementById('cfg-forum-channels');
-        if (fChans) fChans.value = (cfg.forum_monitored_channels || []).join(', ');
+        if (fChans) fChans.value = forumMonitoredChannels.join(', ');
         const fTags = document.getElementById('cfg-forum-tags');
         if (fTags) fTags.value = (cfg.forum_auto_reply_tags || []).join(', ');
         const fIgnoreTags = document.getElementById('cfg-forum-ignore-tags');
@@ -755,6 +778,103 @@ function removePermGrant(scope, type, val) {
     renderPermScope(scope);
 }
 
+// --- Forum Channel Multi-Select Grants ---
+function renderForumChannels() {
+    const chipsContainer = document.getElementById('chips-forum-channels');
+    const emptyState = document.getElementById('empty-forum-channels');
+    if (!chipsContainer) return;
+
+    chipsContainer.innerHTML = '';
+    forumMonitoredChannels.forEach(cid => {
+        const found = serverAvailableChannels.find(c => String(c.id) === String(cid));
+        const displayName = found ? `#${found.name}` : `Channel (${String(cid).slice(-4)})`;
+        const chip = document.createElement('div');
+        chip.className = 'perm-chip channel';
+        const span = document.createElement('span');
+        span.textContent = `💬 ${displayName}`;
+        span.title = `Discord Channel ID: ${cid}`;
+        const btn = document.createElement('button');
+        btn.className = 'del-btn';
+        btn.textContent = '✕';
+        btn.title = 'Remove channel';
+        btn.onclick = () => removeForumChannel(cid);
+        chip.appendChild(span);
+        chip.appendChild(btn);
+        chipsContainer.appendChild(chip);
+    });
+
+    if (emptyState) {
+        emptyState.style.display = (forumMonitoredChannels.length === 0) ? 'block' : 'none';
+    }
+
+    const fChans = document.getElementById('cfg-forum-channels');
+    if (fChans) fChans.value = forumMonitoredChannels.join(', ');
+}
+
+function removeForumChannel(cid) {
+    forumMonitoredChannels = forumMonitoredChannels.filter(id => String(id) !== String(cid));
+    renderForumChannels();
+}
+
+function addForumChannelGrant() {
+    const input = document.getElementById('input-forum-channel');
+    const status = document.getElementById('status-forum-channels');
+    if (!input) return;
+
+    const val = input.value.trim();
+    if (!val) return;
+
+    if (status) {
+        status.style.display = 'none';
+        status.textContent = '';
+    }
+
+    let targetId = null;
+
+    // 1. Channel Mention <#123456789...>
+    const mentionMatch = val.match(CHANNEL_MENTION_REGEX);
+    if (mentionMatch) {
+        targetId = mentionMatch[1];
+    } else if (SNOWFLAKE_REGEX.test(val)) {
+        // 2. Raw Snowflake ID
+        targetId = val;
+    } else {
+        // 3. Name or "#name" or "#name (id)"
+        const parenMatch = val.match(/\(([1-9]\d{16,19})\)/);
+        if (parenMatch) {
+            targetId = parenMatch[1];
+        } else {
+            const cleanName = val.replace(/^#/, '').trim().toLowerCase();
+            const matched = serverAvailableChannels.find(c => c.name.toLowerCase() === cleanName);
+            if (matched) {
+                targetId = String(matched.id);
+            }
+        }
+    }
+
+    if (!targetId) {
+        if (status) {
+            status.textContent = `Channel '${val}' not found. Select from the dropdown or paste a Discord Channel ID.`;
+            status.style.color = '#ff5252';
+            status.style.display = 'block';
+        }
+        return;
+    }
+
+    if (forumMonitoredChannels.some(id => String(id) === String(targetId))) {
+        if (status) {
+            status.textContent = `Channel is already added.`;
+            status.style.color = 'var(--accent-cyan)';
+            status.style.display = 'block';
+        }
+        return;
+    }
+
+    forumMonitoredChannels.push(String(targetId));
+    input.value = '';
+    renderForumChannels();
+}
+
 function getScopeDataForSave(scope) {
     const isEveryone = permData[scope].roles.some(r => typeof r === 'string' && ['everyone', '@everyone'].includes(r.toLowerCase()));
     if (isEveryone) {
@@ -791,7 +911,7 @@ async function saveServerConfig() {
         memory_ttl_minutes: parseInt(document.getElementById('cfg-guild-memory-ttl').value) || 30,
         forum_auto_reply_enabled: document.getElementById('cfg-forum-auto-reply') ? document.getElementById('cfg-forum-auto-reply').checked : false,
         forum_include_post_title: document.getElementById('cfg-forum-include-title') ? document.getElementById('cfg-forum-include-title').checked : true,
-        forum_monitored_channels: document.getElementById('cfg-forum-channels') ? document.getElementById('cfg-forum-channels').value.split(',').map(s => s.trim()).filter(Boolean) : [],
+        forum_monitored_channels: forumMonitoredChannels.length > 0 ? [...forumMonitoredChannels] : (document.getElementById('cfg-forum-channels') ? document.getElementById('cfg-forum-channels').value.split(',').map(s => s.trim()).filter(Boolean) : []),
         forum_auto_reply_tags: document.getElementById('cfg-forum-tags') ? document.getElementById('cfg-forum-tags').value.split(',').map(s => s.trim()).filter(Boolean) : [],
         forum_ignore_tags: document.getElementById('cfg-forum-ignore-tags') ? document.getElementById('cfg-forum-ignore-tags').value.split(',').map(s => s.trim()).filter(Boolean) : [],
         forum_system_prompt: document.getElementById('cfg-forum-system-prompt') ? document.getElementById('cfg-forum-system-prompt').value.trim() : '',
@@ -970,7 +1090,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.5.2';
+        const currVer = data.current_version || '3.5.3';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {

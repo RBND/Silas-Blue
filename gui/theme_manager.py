@@ -490,6 +490,16 @@ class ThemeManager:
                 border-color: {accent2};
             }}
 
+            QFrame#permChipChannel {{
+                background-color: {self._hex_to_rgba(accent1, 0.20)};
+                border: 1px solid {self._hex_to_rgba(accent1, 0.50)};
+                border-radius: 6px;
+            }}
+
+            QFrame#permChipChannel:hover {{
+                border-color: {accent1};
+            }}
+
             /* Accessibility Focus Rings */
             QPushButton:focus, QComboBox:focus, QSpinBox:focus {{
                 border: 1px solid {accent_focus};

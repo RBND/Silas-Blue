@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Silas Blue - Web Management Console</title>
-    <link rel="stylesheet" href="/static/app.css?v=3.5.2">
+    <link rel="stylesheet" href="/static/app.css?v=3.5.3">
 </head>
 <body>
     <!-- Sidebar Navigation Rail -->
     <nav id="sidebar">
         <div class="sidebar-brand">
             <div class="brand-title">SILAS BLUE</div>
-            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.2</div>
+            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.3</div>
             <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
         </div>
 
@@ -239,6 +239,7 @@
             </div>
 
             <datalist id="available-roles-datalist"></datalist>
+            <datalist id="available-channels-datalist"></datalist>
 
             <!-- SUBPAGE 1: Permissions -->
             <div id="subpage-servers-permissions" class="server-subpage">
@@ -487,9 +488,17 @@
                         <label>Include Post Title in Prompt:</label>
                         <input type="checkbox" id="cfg-forum-include-title" style="width: auto;" checked>
                     </div>
-                    <div class="form-row">
-                        <label>Monitored Forum Channel IDs:</label>
-                        <input type="text" id="cfg-forum-channels" placeholder="e.g. 123456789, 987654321 (leave empty for all forums)" style="width: 100%;">
+                    <!-- Channel Search & Chips selector (matches Permissions UX) -->
+                    <div class="perm-card" id="card-forum-channels" style="margin-top: 10px; margin-bottom: 12px; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(0, 240, 255, 0.25);">
+                        <div class="perm-card-title">💬 Monitored Forum Channels</div>
+                        <div class="perm-card-desc">Select specific forum channels Silas Blue should monitor for new posts. If empty, all forum channels in this server are monitored.</div>
+                        <div id="chips-forum-channels" class="chips-cloud"></div>
+                        <div id="empty-forum-channels" class="perm-empty-state">Monitoring all forum channels in this server. (Add specific channels below to restrict auto-replies)</div>
+                        <div class="perm-input-row" id="input-row-forum-channels">
+                            <input type="text" id="input-forum-channel" list="available-channels-datalist" placeholder="Select or type channel name (#forum), or Snowflake ID..." onkeydown="if(event.key==='Enter') addForumChannelGrant()">
+                            <button type="button" onclick="addForumChannelGrant()">➕ Add Channel</button>
+                        </div>
+                        <div id="status-forum-channels" style="font-size: 11px; margin-top: 4px; display: none;"></div>
                     </div>
                     <div class="form-row">
                         <label>Required Tags (Whitelist):</label>
@@ -542,7 +551,7 @@
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-title">Current Version</div>
-                    <div class="kpi-value" id="update-curr-version">3.5.2</div>
+                    <div class="kpi-value" id="update-curr-version">3.5.3</div>
                     <div class="kpi-subtext" id="update-curr-commit">#-------</div>
                 </div>
                 <div class="kpi-card">
@@ -687,6 +696,6 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=3.5.2"></script>
+    <script src="/static/app.js?v=3.5.3"></script>
 </body>
 </html>

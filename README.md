@@ -1,6 +1,6 @@
-# Silas Blue v3.5.2
+# Silas Blue v3.5.3
 
-[![Version](https://img.shields.io/badge/version-3.5.2-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.3-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -9,11 +9,22 @@
 
 **Silas Blue** is a powerful, privacy-first Discord AI Assistant bot designed to run either completely locally using **Ollama** or **Llama.cpp**, or connected to high-performance **OpenAI-compatible Cloud APIs** (Xiaomi MiMo, Groq, OpenRouter, DeepSeek, xAI).
 
-Silas Blue v3.5.2 brings full modular sub-page navigation to the Web Dashboard under Server Config (Permissions, Token Settings, Server Prompt & Pagination, Forum Auto-Reply), persistent server selection across sub-tabs, auto-expanding system prompt layout without page scrollbars, and asset cache-busting.
+Silas Blue v3.5.3 upgrades the Forum Auto-Reply channel selector into a search-and-chip badge interface identical to the permissions control system across both the Web Management Console and Desktop PySide6 GUI.
 
 ---
 
-## 🚀 What's New in Version 3.5.2
+## 🚀 What's New in Version 3.5.3
+
+* **Searchable Forum Channel Selector (Permissions UX)**:
+  * Upgraded Forum Channel whitelist selection from a comma-separated ID text field to a Discord-grade chip and search interface matching the permissions manager:
+    * 💬 **Channel Badges & Chips**: Monitored channels display as discrete chips with individual `✕` removal buttons.
+    * 🔍 **Autocomplete & Smart Search**: Type channel names (`#forum`), `#channel (ID)`, raw Snowflake IDs, or channel mentions (`<#channel_id>`) with autocomplete populated from live server forum channels.
+    * 🌐 **Server Default Empty State**: Clearly indicates when all forum channels are monitored by default vs restricted to specific channels.
+    * 💻 **Unified Web & Desktop Support**: Available in both the Web Management Console and PySide6 Desktop GUI with full state persistence.
+
+---
+
+## 🚀 Prior Features (v3.5.2 & v3.5.1)
 
 * **Web Management Console Modular Sub-Navigation**:
   * Added dedicated left rail sub-tabs under **Server Config**:
@@ -27,7 +38,7 @@ Silas Blue v3.5.2 brings full modular sub-page navigation to the Web Dashboard u
 
 ---
 
-## 🚀 Prior Features (v3.5.1 & v3.5.0)
+## 🚀 Prior Features (v3.5.0)
 
 * **Discord Forum Post Monitoring & Auto-Replies**:
   * Proactively monitors newly created forum threads in Discord `ForumChannel`s and generates AI responses without requiring user @mentions.
