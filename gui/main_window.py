@@ -19,16 +19,12 @@ from PySide6.QtGui import QFont, QDesktopServices
 from .theme_manager import ThemeManager
 from .server_config_page import ServerConfigPage
 from ai_providers import get_ai_provider, AIProvider, RemoteOpenAIProvider, REMOTE_PRESETS
-from bot_core import bot, reload_ai_provider, gui_event_queue
+from bot_core import bot, reload_ai_provider, gui_event_queue, format_gui_event
 from utils import load_app_config, save_app_config
 from updater import BotUpdater, get_current_version, get_current_commit
 import config
 
 logger = logging.getLogger("silasblue")
-
-def debug_print(msg):
-    if config.DEBUG:
-        print(msg)
 
 # --- File log handlers ---
 class FileLogger(logging.Handler):
@@ -179,7 +175,7 @@ class MainWindow(QMainWindow):
 
         app_title = QLabel("SILAS BLUE")
         app_title.setObjectName("appTitle")
-        app_sub = QLabel("AI Discord Assistant v3.5.8")
+        app_sub = QLabel("AI Discord Assistant v3.5.9")
         app_sub.setObjectName("appSubtitle")
         h_layout.addWidget(app_title)
         h_layout.addWidget(app_sub)
@@ -1079,29 +1075,6 @@ class MainWindow(QMainWindow):
         t_layout.addLayout(theme_row)
         layout.addWidget(theme_card)
 
-        # --- Auto-Restart & Daemon Management Card ---
-        restart_card = QFrame()
-        restart_card.setObjectName("card")
-        r_layout = QVBoxLayout(restart_card)
-        r_layout.setContentsMargins(14, 12, 14, 12)
-        r_layout.setSpacing(10)
-
-        r_title = QLabel("Bot Daemon Reliability & Auto-Restart")
-        r_title.setStyleSheet("font-weight: 700; font-size: 13px; color: #00f0ff;")
-        r_layout.addWidget(r_title)
-
-        restart_row = QHBoxLayout()
-        self.auto_restart_checkbox = QCheckBox("Enable Periodic Auto-Restart")
-        self.auto_restart_interval = QComboBox()
-        interval_labels = ["30 Min", "1 Hour", "2 Hours", "4 Hours", "8 Hours", "12 Hours", "24 Hours"]
-        self.auto_restart_interval.addItems(interval_labels)
-        restart_row.addWidget(self.auto_restart_checkbox)
-        restart_row.addWidget(QLabel("Interval:"))
-        restart_row.addWidget(self.auto_restart_interval)
-        restart_row.addStretch(1)
-        r_layout.addLayout(restart_row)
-        layout.addWidget(restart_card)
-
         # --- File Storage & Diagnostics Card ---
         diag_card = QFrame()
         diag_card.setObjectName("card")
@@ -1928,7 +1901,7 @@ class MainWindow(QMainWindow):
     def update_servers_list(self):
         try:
             current_servers = [self.servers_list.itemData(i) for i in range(self.servers_list.count())]
-            new_servers = [(guild.name, guild.id) for guild in getattr(bot, "guilds", [])]
+            new_servers = [(guild.name, guild.id) for guild in list(getattr(bot, "guilds", []))]
             if len(current_servers) != len(new_servers) or any(str(gid) not in [str(x[1]) for x in new_servers] for gid in current_servers):
                 self.servers_list.clear()
                 for name, gid in new_servers:
@@ -1950,43 +1923,15 @@ class MainWindow(QMainWindow):
         while not gui_event_queue.empty():
             try:
                 entry = gui_event_queue.get_nowait()
-                event = entry.get("event")
-                data = entry.get("data", {})
-                if event == "config_change":
-                    msg = f"[{now_str}] [Config Change] Guild {data.get('guild_id')}: {data.get('field')} -> {data.get('value')}"
+                event_type, msg = format_gui_event(entry, now_str)
+                if not msg:
+                    continue
+                if event_type in ("config", "server", "system"):
                     self.system_log_output.append(msg)
-                    self.recent_activity_output.append(msg)
-                elif event == "prompt":
-                    guild = data.get("guild_name") or data.get("guild_id")
-                    msg = f"[{now_str}] [{guild}] {data.get('user')}: {data.get('prompt')}"
+                else:
                     self.bot_log_output.append(msg)
-                    self.recent_activity_output.append(msg)
-                elif event == "reply":
-                    guild = data.get("guild_name") or data.get("guild_id")
-                    reply_snippet = data.get("reply", "")[:180]
-                    msg = f"[{now_str}] [{guild}] Silas Blue -> {reply_snippet}..."
-                    self.bot_log_output.append(msg)
-                    self.recent_activity_output.append(msg)
-                elif event == "web_search":
-                    guild = data.get("guild_name") or data.get("guild_id") or "Direct Message"
-                    query_snippet = data.get("query", "")[:50]
-                    res_count = data.get("results_count", 0)
-                    msg = f"[{now_str}] [{guild}] 🌐 Web Search: \"{query_snippet}\" ({res_count} results)"
-                    self.bot_log_output.append(msg)
-                    self.recent_activity_output.append(msg)
-                elif event == "server_joined":
-                    guild_name = data.get("guild_name", "Unknown Server")
-                    guild_id = data.get("guild_id", "")
-                    msg = f"[{now_str}] [Discord] Silas Blue joined server: {guild_name} ({guild_id})"
-                    self.system_log_output.append(msg)
-                    self.recent_activity_output.append(msg)
-                    self.update_servers_list()
-                elif event == "server_left":
-                    guild_name = data.get("guild_name", "Unknown Server")
-                    guild_id = data.get("guild_id", "")
-                    msg = f"[{now_str}] [Discord] Silas Blue left server: {guild_name} ({guild_id})"
-                    self.system_log_output.append(msg)
-                    self.recent_activity_output.append(msg)
+                self.recent_activity_output.append(msg)
+                if event_type == "server":
                     self.update_servers_list()
             except queue.Empty:
                 break

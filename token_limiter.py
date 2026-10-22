@@ -39,6 +39,7 @@ class TokenLimiter:
 
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
+        self._last_prune_ts = 0.0
         self._ensure_db()
 
     def _ensure_db(self):
@@ -98,6 +99,11 @@ class TokenLimiter:
                     """,
                     (int(guild_id), int(user_id), tokens_int, p_tok, c_tok, str(model), now_ts)
                 )
+                # Periodically prune records older than 35 days (once per 24h) to bound SQLite growth
+                if now_ts - self._last_prune_ts > 86400:
+                    cutoff_ts = now_ts - (35 * 86400)
+                    cursor.execute("DELETE FROM token_records WHERE timestamp < ?", (cutoff_ts,))
+                    self._last_prune_ts = now_ts
                 conn.commit()
         except Exception as e:
             logger.error(f"Failed to record token usage in {self.db_path}: {e}")
@@ -197,7 +203,7 @@ class TokenLimiter:
             # 24-hour sliding window
             window_start_utc = now_utc - timedelta(hours=24)
             window_end_utc = now_utc + timedelta(hours=24)
-            return window_start_utc, now_utc, int(window_end_utc.timestamp())
+            return window_start_utc, window_end_utc, int(window_end_utc.timestamp())
 
         else:
             # Default: daily

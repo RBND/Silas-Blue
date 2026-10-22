@@ -81,20 +81,11 @@ class OllamaProvider(AIProvider):
                         data = await response.json()
                         p_tok = int(data.get("prompt_eval_count", 0))
                         c_tok = int(data.get("eval_count", 0))
-                        t_tok = p_tok + c_tok
                         if history:
                             content = data.get("message", {}).get("content", "")
                         else:
                             content = data.get("response", "")
-                        if t_tok == 0:
-                            p_tok = max(1, len(prompt) // 4)
-                            c_tok = max(1, len(content) // 4)
-                            t_tok = p_tok + c_tok
-                        self._last_usage = {
-                            "prompt_tokens": p_tok,
-                            "completion_tokens": c_tok,
-                            "total_tokens": t_tok
-                        }
+                        self._record_or_estimate_usage(prompt, content, p_tok, c_tok)
                         return content
                     else:
                         text = await response.text()
@@ -227,29 +218,3 @@ class OllamaProvider(AIProvider):
             self._local_process = None
             return True
         return False
-
-    # --- Synchronous compatibility helpers for PySide6 GUI background threads ---
-    def status_sync(self) -> bool:
-        try:
-            return asyncio.run(self.check_status())
-        except Exception:
-            return False
-
-    def list_models_sync(self) -> List[str]:
-        try:
-            return asyncio.run(self.list_models())
-        except Exception:
-            return []
-
-    def send_prompt_sync(self, prompt: str, model: str) -> str:
-        try:
-            return asyncio.run(self.send_prompt(prompt, model))
-        except Exception as e:
-            return f"Error: {e}"
-
-    def pull_model_sync(self, model_name: str, progress_callback: Optional[Callable[[int, str], None]] = None) -> bool:
-        try:
-            return asyncio.run(self.pull_model(model_name, progress_callback))
-        except Exception as e:
-            logger.error(f"Sync pull failed: {e}")
-            return False

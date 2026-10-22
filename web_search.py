@@ -325,10 +325,17 @@ class SearchService:
 
         cache_key = f"{query.lower()}_{limit}"
         now = time.time()
+        if len(self._cache) > 100:
+            expired = [k for k, (ts, _) in self._cache.items() if now - ts >= self._cache_ttl]
+            for k in expired:
+                del self._cache[k]
+
         if cache_key in self._cache:
             ts, cached_results = self._cache[cache_key]
             if now - ts < self._cache_ttl:
                 return cached_results
+            else:
+                del self._cache[cache_key]
 
         provider = self._get_provider()
         results = await provider.search(query, max_results=limit)

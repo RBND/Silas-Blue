@@ -4,15 +4,19 @@ import logging
 import os
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 import discord
 from aiohttp import web, WSMsgType
 
 from bot_core import (
     bot, start_bot, stop_bot, restart_bot,
-    get_provider, reload_ai_provider, gui_event_queue,
+    get_provider, reload_ai_provider, web_event_queue, format_gui_event,
     update_server_config, _bot_thread
 )
-from utils import load_app_config, save_app_config, load_config, save_config
+from utils import (
+    load_app_config, save_app_config, load_config, save_config,
+    is_valid_guild_id, DEFAULT_APP_CONFIG
+)
 from ai_providers import REMOTE_PRESETS, get_ai_provider
 from updater import BotUpdater, get_current_version, get_current_commit, parse_semver
 import config
@@ -20,6 +24,16 @@ import config
 logger = logging.getLogger("silasblue.web.api")
 
 start_time = time.time()
+
+_MASKED_SECRET_KEYS = (
+    "api_key",
+    "remote_api_key",
+    "discord_token",
+    "discord_oauth_client_secret",
+    "tavily_api_key",
+    "brave_api_key",
+)
+_ALLOWED_AI_CONFIG_KEYS = set(DEFAULT_APP_CONFIG.keys())
 
 class ApiHandler:
     """
@@ -33,12 +47,23 @@ class ApiHandler:
         self.ws_dispatcher_task = None
 
     def require_auth(self, handler):
-        """Decorator ensuring request has valid authenticated session."""
+        """Decorator ensuring request has valid authenticated session and same-origin on state changes."""
         async def wrapper(request):
             session_cookie = request.cookies.get("sb_session")
             session = self.auth_manager.verify_session_token(session_cookie)
             if not session:
                 return web.json_response({"error": "Unauthorized", "login_url": "/login"}, status=401)
+
+            if request.method in ("POST", "PUT", "DELETE"):
+                origin = request.headers.get("Origin")
+                if origin:
+                    origin_host = urlparse(origin).netloc.lower()
+                    req_host = (request.host or "").lower()
+                    fwd_host = request.headers.get("X-Forwarded-Host", "").split(",")[0].strip().lower()
+                    if origin_host and origin_host not in (req_host, fwd_host):
+                        logger.warning(f"Rejected cross-origin {request.method} from Origin '{origin}' to Host '{req_host}'")
+                        return web.json_response({"error": "Cross-origin request forbidden"}, status=403)
+
             request["user"] = session
             return await handler(request)
         return wrapper
@@ -58,41 +83,14 @@ class ApiHandler:
             await ws.close()
 
     async def _log_dispatcher_loop(self):
-        """Monitors gui_event_queue and broadcasts to active WebSocket connections."""
+        """Monitors web_event_queue and broadcasts to active WebSocket connections."""
         while True:
             try:
                 now_str = datetime.now().strftime("%H:%M:%S")
                 # Read any pending events from the queue
-                while not gui_event_queue.empty():
-                    entry = gui_event_queue.get_nowait()
-                    event = entry.get("event")
-                    data = entry.get("data", {})
-
-                    formatted_msg = None
-                    event_type = "system"
-
-                    if event == "config_change":
-                        event_type = "config"
-                        formatted_msg = f"[{now_str}] [Config Change] Guild {data.get('guild_id')}: {data.get('field')} -> {data.get('value')}"
-                    elif event == "prompt":
-                        event_type = "prompt"
-                        guild = data.get("guild_name") or data.get("guild_id")
-                        formatted_msg = f"[{now_str}] [{guild}] {data.get('user')}: {data.get('prompt')}"
-                    elif event == "reply":
-                        event_type = "reply"
-                        guild = data.get("guild_name") or data.get("guild_id")
-                        reply_snippet = data.get("reply", "")[:180]
-                        formatted_msg = f"[{now_str}] [{guild}] Silas Blue -> {reply_snippet}..."
-                    elif event == "server_joined":
-                        event_type = "server"
-                        formatted_msg = f"[{now_str}] [Discord] Joined server: {data.get('guild_name')} ({data.get('guild_id')})"
-                    elif event == "server_left":
-                        event_type = "server"
-                        formatted_msg = f"[{now_str}] [Discord] Left server: {data.get('guild_name')} ({data.get('guild_id')})"
-                    elif event == "web_search":
-                        event_type = "search"
-                        guild = data.get("guild_name") or data.get("guild_id") or "Direct Message"
-                        formatted_msg = f"[{now_str}] [{guild}] 🌐 Web Search: \"{data.get('query', '')[:50]}\" ({data.get('results_count', 0)} results)"
+                while not web_event_queue.empty():
+                    entry = web_event_queue.get_nowait()
+                    event_type, formatted_msg = format_gui_event(entry, now_str)
 
                     if formatted_msg and self.active_ws_clients:
                         payload = json.dumps({
@@ -124,12 +122,14 @@ class ApiHandler:
         bot_running = (_bot_thread is not None and _bot_thread.is_alive())
         provider = get_provider()
 
-        loop = asyncio.get_running_loop()
-        ai_online = await loop.run_in_executor(None, provider.status_sync)
+        try:
+            ai_online = await provider.check_status()
+        except Exception:
+            ai_online = False
 
         guilds_list = []
         try:
-            for g in getattr(bot, "guilds", []):
+            for g in list(getattr(bot, "guilds", [])):
                 guilds_list.append({
                     "id": str(g.id),
                     "name": g.name,
@@ -186,9 +186,8 @@ class ApiHandler:
     async def get_models(self, request):
         """Fetches list of available models from the active provider."""
         provider = get_provider()
-        loop = asyncio.get_running_loop()
         try:
-            models = await loop.run_in_executor(None, provider.list_models_sync)
+            models = await provider.list_models()
             return web.json_response({"models": models or [], "active": self.app_cfg.get("active_model", "")})
         except Exception as e:
             return web.json_response({"models": [], "error": str(e)})
@@ -223,21 +222,21 @@ class ApiHandler:
     async def get_guild_config(self, request):
         """Returns per-server access roles and response configuration."""
         guild_id = request.match_info.get("guild_id")
-        if not guild_id:
-            return web.json_response({"error": "Guild ID required"}, status=400)
+        if not guild_id or not is_valid_guild_id(guild_id):
+            return web.json_response({"error": "Valid Guild ID required"}, status=400)
 
         cfg = load_config(guild_id)
         # Find roles and channels in bot cache if available
         roles = []
         channels = []
         try:
-            guild = next((g for g in getattr(bot, "guilds", []) if str(g.id) == str(guild_id)), None)
+            guild = next((g for g in list(getattr(bot, "guilds", [])) if str(g.id) == str(guild_id)), None)
             if guild:
-                for r in guild.roles:
+                for r in list(guild.roles):
                     if not r.is_default():
                         roles.append({"id": str(r.id), "name": r.name})
                 roles.append({"id": "everyone", "name": "@everyone"})
-                for c in getattr(guild, "channels", []):
+                for c in list(getattr(guild, "channels", [])):
                     is_forum = isinstance(c, getattr(discord, "ForumChannel", ()))
                     channels.append({
                         "id": str(c.id),
@@ -255,34 +254,42 @@ class ApiHandler:
         })
 
     async def save_guild_config(self, request):
-        """Updates and applies per-server configuration."""
+        """Updates and applies per-server configuration while preserving existing unexposed keys."""
         guild_id = request.match_info.get("guild_id")
-        if not guild_id:
-            return web.json_response({"error": "Guild ID required"}, status=400)
+        if not guild_id or not is_valid_guild_id(guild_id):
+            return web.json_response({"error": "Valid Guild ID required"}, status=400)
 
-        cfg = await request.json()
+        incoming = await request.json()
+        if not isinstance(incoming, dict):
+            return web.json_response({"error": "Invalid configuration payload"}, status=400)
+
+        existing = load_config(guild_id)
+        cfg = {**existing, **incoming}
         if cfg.get("pagination_max_chars", 1900) > 1900:
             cfg["pagination_max_chars"] = 1900
 
         save_config(guild_id, cfg)
-        update_server_config(guild_id, cfg)
+        sanitized_cfg = load_config(guild_id)
+        update_server_config(guild_id, sanitized_cfg)
         return web.json_response({"success": True, "message": "Server settings saved & applied."})
 
     async def get_ai_config(self, request):
         """Returns AI provider settings with sensitive API keys masked."""
         cfg = dict(self.app_cfg)
         # Mask api keys
-        for key in ["api_key", "remote_api_key", "discord_token", "discord_oauth_client_secret"]:
+        for key in _MASKED_SECRET_KEYS:
             if cfg.get(key):
-                cfg[key] = "●●●●●●●●" if len(cfg[key]) > 0 else ""
+                cfg[key] = "●●●●●●●●" if len(str(cfg[key])) > 0 else ""
         return web.json_response({"config": cfg, "presets": list(REMOTE_PRESETS.keys()), "preset_details": REMOTE_PRESETS})
 
     async def save_ai_config(self, request):
         """Saves AI provider settings and reloads the active provider."""
         data = await request.json()
+        if not isinstance(data, dict):
+            return web.json_response({"error": "Invalid JSON payload"}, status=400)
 
         for key, val in data.items():
-            if val != "●●●●●●●●":  # Don't overwrite with mask
+            if key in _ALLOWED_AI_CONFIG_KEYS and val != "●●●●●●●●":  # Only allow known config keys & don't overwrite with mask
                 self.app_cfg[key] = val
 
         if self.app_cfg.get("backend_type") in ("remote", "remote_openai", "openai", "remote_api"):
@@ -352,12 +359,14 @@ class ApiHandler:
             cached_commit = (cached.get("latest_commit", "") or "")[:7]
             curr_c = (curr_commit or "")[:7]
 
-            if curr_c and cached_commit and curr_c == cached_commit:
-                cached["update_available"] = False
-                cached["commits_behind"] = 0
-            elif cached_ver and parse_semver(curr_ver) >= parse_semver(cached_ver) and channel == "stable":
-                cached["update_available"] = False
-                cached["commits_behind"] = 0
+            if channel == "stable":
+                if cached_ver and parse_semver(curr_ver) >= parse_semver(cached_ver):
+                    cached["update_available"] = False
+                    cached["commits_behind"] = 0
+            else:
+                if curr_c and cached_commit and curr_c == cached_commit:
+                    cached["update_available"] = False
+                    cached["commits_behind"] = 0
 
         return web.json_response({
             "current_version": curr_ver,

@@ -45,7 +45,7 @@ def get_current_version() -> str:
                         return parts[1].strip().strip('"').strip("'")
     except Exception as e:
         logger.debug(f"Could not read __version__ from SilasBlue.py: {e}")
-    return "3.5.8"
+    return "3.5.9"
 
 def parse_semver(v_str: str) -> Tuple[int, ...]:
     """Extracts numeric semver tuple (major, minor, patch) from version string."""
@@ -96,13 +96,6 @@ def get_current_commit() -> str:
         return "unknown"
     rc, out, _ = run_git(["rev-parse", "--short", "HEAD"])
     return out if rc == 0 else "unknown"
-
-def get_current_branch() -> str:
-    """Returns current active git branch name."""
-    if not is_git_repo():
-        return "main"
-    rc, out, _ = run_git(["rev-parse", "--abbrev-ref", "HEAD"])
-    return out if rc == 0 else "main"
 
 class BotUpdater:
     """Core updater engine for Silas Blue."""
@@ -157,6 +150,25 @@ class BotUpdater:
             if channel == "stable":
                 # Check GitHub Releases
                 candidates = []
+                tag_commits: Dict[str, str] = {}
+
+                # Inspect tags first so we have tag -> commit SHA mapping
+                tags_data = cls.query_github_api("tags")
+                if tags_data and isinstance(tags_data, list):
+                    for t in tags_data[:10]:
+                        tag_name = t.get("name", "")
+                        remote_ver = tag_name.lstrip("vV")
+                        commit_sha = ((t.get("commit") or {}).get("sha") or "")[:7]
+                        if tag_name and commit_sha:
+                            tag_commits[tag_name] = commit_sha
+                        candidates.append({
+                            "version": remote_ver,
+                            "tag": tag_name,
+                            "commit": commit_sha,
+                            "url": f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
+                            "body": ""
+                        })
+
                 rel_data = cls.query_github_api("releases/latest")
                 if rel_data and "tag_name" in rel_data:
                     tag = rel_data["tag_name"]
@@ -164,28 +176,17 @@ class BotUpdater:
                     candidates.append({
                         "version": remote_ver,
                         "tag": tag,
+                        "commit": tag_commits.get(tag, ""),
                         "url": rel_data.get("html_url", status["release_url"]),
                         "body": rel_data.get("body", "")
                     })
 
-                # Also inspect tags
-                tags_data = cls.query_github_api("tags")
-                if tags_data and isinstance(tags_data, list):
-                    for t in tags_data[:10]:
-                        tag_name = t.get("name", "")
-                        remote_ver = tag_name.lstrip("vV")
-                        candidates.append({
-                            "version": remote_ver,
-                            "tag": tag_name,
-                            "url": f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
-                            "body": ""
-                        })
-
                 if candidates:
-                    # Pick candidate with highest parsed semver
-                    candidates.sort(key=lambda c: parse_semver(c["version"]), reverse=True)
+                    # Pick candidate with highest parsed semver (preferring entries with release body on ties)
+                    candidates.sort(key=lambda c: (parse_semver(c["version"]), bool(c.get("body"))), reverse=True)
                     best = candidates[0]
                     status["latest_version"] = best["version"]
+                    status["latest_commit"] = best.get("commit") or ""
                     status["release_url"] = best["url"]
                     if best["body"]:
                         status["changelog"] = [line.strip() for line in best["body"].splitlines() if line.strip()][:10]

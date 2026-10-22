@@ -91,6 +91,7 @@ DEFAULT_GUILD_CONFIG = {
     "web_search_auto": True,
     "pagination_enabled": True,
     "pagination_max_chars": 1000,
+    "non_paginated_max_chars": 0,
     "random_prompt_enabled": False,
     "random_prompt_probability": 0,
     "system_prompt": "",
@@ -121,6 +122,17 @@ DEFAULT_GUILD_CONFIG = {
 }
 
 SNOWFLAKE_REGEX = re.compile(r"^[1-9]\d{16,19}$")
+SAFE_GUILD_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_RESERVED_CONFIG_NAMES = {"app_config", "web_secret", "bot_token"}
+
+def is_valid_guild_id(guild_id) -> bool:
+    """Validates that a guild_id is a safe identifier and cannot traverse paths or clobber app_config."""
+    if guild_id is None:
+        return False
+    s = str(guild_id).strip()
+    if not s or s.lower() in _RESERVED_CONFIG_NAMES:
+        return False
+    return bool(SAFE_GUILD_ID_REGEX.match(s))
 
 def validate_and_sanitize_guild_config(data: dict) -> dict:
     """Validates and sanitizes a guild configuration dict against the canonical schema."""
@@ -148,6 +160,13 @@ def validate_and_sanitize_guild_config(data: dict) -> dict:
         try:
             val = int(data["pagination_max_chars"])
             sanitized["pagination_max_chars"] = max(500, min(val, 1900))
+        except (ValueError, TypeError):
+            pass
+
+    if "non_paginated_max_chars" in data:
+        try:
+            val = int(data["non_paginated_max_chars"])
+            sanitized["non_paginated_max_chars"] = 0 if val <= 0 else max(500, min(val, 20000))
         except (ValueError, TypeError):
             pass
 
@@ -323,7 +342,9 @@ def save_app_config(config: dict):
         pass
 
 def get_config_path(guild_id) -> str:
-    return os.path.join(CONFIG_DIR, f"{guild_id}.json")
+    if not is_valid_guild_id(guild_id):
+        raise ValueError(f"Invalid guild_id: {guild_id!r}")
+    return os.path.join(CONFIG_DIR, f"{str(guild_id).strip()}.json")
 
 def load_config(guild_id) -> dict:
     """
@@ -336,6 +357,10 @@ def load_config(guild_id) -> dict:
         if app_cfg.get("dm_default_model"):
             dm_cfg["default_model"] = app_cfg.get("dm_default_model")
         return dm_cfg
+
+    if not is_valid_guild_id(guild_id):
+        logger.warning(f"Rejected invalid guild_id in load_config: {guild_id!r}")
+        return dict(DEFAULT_GUILD_CONFIG)
 
     os.makedirs(CONFIG_DIR, exist_ok=True)
     path = get_config_path(guild_id)
@@ -355,6 +380,9 @@ def load_config(guild_id) -> dict:
 def save_config(guild_id, config: dict):
     """Saves the config for a given guild atomically."""
     if guild_id is None:
+        return
+    if not is_valid_guild_id(guild_id):
+        logger.warning(f"Rejected invalid guild_id in save_config: {guild_id!r}")
         return
     sanitized = validate_and_sanitize_guild_config(config)
     path = get_config_path(guild_id)

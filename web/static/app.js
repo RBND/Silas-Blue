@@ -5,6 +5,23 @@ let ws = null;
 let reconnectTimer = null;
 let currentGuilds = [];
 
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function onPaginationToggle() {
+    const pagEnabled = document.getElementById('cfg-pagination')?.checked;
+    const rowPageChars = document.getElementById('row-cfg-max-chars');
+    const rowNonPagChars = document.getElementById('row-cfg-non-paginated-max-chars');
+    if (rowPageChars) rowPageChars.style.opacity = pagEnabled ? '1' : '0.5';
+    if (rowNonPagChars) rowNonPagChars.style.opacity = pagEnabled ? '0.5' : '1';
+}
+
 // --- Toast Notifications ---
 function showToast(message, type = 'success', duration = 3500) {
     const container = document.getElementById('toast-container');
@@ -547,9 +564,16 @@ async function loadSelectedGuildConfig() {
 
         document.getElementById('cfg-pagination').checked = cfg.pagination_enabled !== false;
         document.getElementById('cfg-max-chars').value = cfg.pagination_max_chars || 1000;
+        const nonPagEl = document.getElementById('cfg-non-paginated-max-chars');
+        if (nonPagEl) nonPagEl.value = cfg.non_paginated_max_chars !== undefined ? cfg.non_paginated_max_chars : 0;
+        onPaginationToggle();
         document.getElementById('cfg-server-system-prompt').value = cfg.system_prompt || '';
         document.getElementById('cfg-guild-memory-turns').value = cfg.memory_turns !== undefined ? cfg.memory_turns : 6;
         document.getElementById('cfg-guild-memory-ttl').value = cfg.memory_ttl_minutes !== undefined ? cfg.memory_ttl_minutes : 30;
+        const randEnabledEl = document.getElementById('cfg-random-prompt-enabled');
+        if (randEnabledEl) randEnabledEl.checked = Boolean(cfg.random_prompt_enabled);
+        const randProbEl = document.getElementById('cfg-random-prompt-prob');
+        if (randProbEl) randProbEl.value = cfg.random_prompt_probability !== undefined ? cfg.random_prompt_probability : 0;
 
         const fAutoReply = document.getElementById('cfg-forum-auto-reply');
         if (fAutoReply) fAutoReply.checked = Boolean(cfg.forum_auto_reply_enabled);
@@ -911,6 +935,9 @@ async function saveServerConfig() {
         search_users: search.users,
         pagination_enabled: document.getElementById('cfg-pagination').checked,
         pagination_max_chars: parseInt(document.getElementById('cfg-max-chars').value) || 1000,
+        non_paginated_max_chars: parseInt(document.getElementById('cfg-non-paginated-max-chars')?.value) || 0,
+        random_prompt_enabled: document.getElementById('cfg-random-prompt-enabled') ? document.getElementById('cfg-random-prompt-enabled').checked : false,
+        random_prompt_probability: parseInt(document.getElementById('cfg-random-prompt-prob')?.value) || 0,
         system_prompt: document.getElementById('cfg-server-system-prompt').value.trim(),
         memory_turns: parseInt(document.getElementById('cfg-guild-memory-turns').value) || 0,
         memory_ttl_minutes: parseInt(document.getElementById('cfg-guild-memory-ttl').value) || 30,
@@ -1096,7 +1123,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.5.8';
+        const currVer = data.current_version || '3.5.9';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {
@@ -1136,11 +1163,13 @@ async function loadUpdateStatus() {
         if (data.cached_status && Object.keys(data.cached_status).length > 0) {
             const cachedLatestCommit = (data.cached_status.latest_commit || '').substring(0, 7);
             const cachedLatestVer = data.cached_status.latest_version || '';
-            if (currSha && cachedLatestCommit && currSha === cachedLatestCommit) {
-                data.cached_status.update_available = false;
-                data.cached_status.commits_behind = 0;
-            }
-            if (cachedLatestVer && currVer === cachedLatestVer && (data.config?.update_channel || 'stable') === 'stable') {
+            const activeChannel = data.config?.update_channel || 'stable';
+            if (activeChannel === 'stable') {
+                if (cachedLatestVer && currVer === cachedLatestVer) {
+                    data.cached_status.update_available = false;
+                    data.cached_status.commits_behind = 0;
+                }
+            } else if (currSha && cachedLatestCommit && currSha === cachedLatestCommit) {
                 data.cached_status.update_available = false;
                 data.cached_status.commits_behind = 0;
             }

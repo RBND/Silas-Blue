@@ -10,7 +10,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="shortcut icon" href="/favicon.ico">
     <link rel="manifest" href="/static/site.webmanifest">
-    <link rel="stylesheet" href="/static/app.css?v=3.5.8">
+    <link rel="stylesheet" href="/static/app.css?v=3.5.9">
 </head>
 <body>
     <!-- Sidebar Navigation Rail -->
@@ -20,7 +20,7 @@
                 <img src="/static/favicon.svg" alt="Silas Blue" style="width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;">
                 <div class="brand-title">SILAS BLUE</div>
             </div>
-            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.8</div>
+            <div class="brand-subtitle" id="sidebar-version-text">Remote Management v3.5.9</div>
             <div id="sidebar-bot-pill" class="status-pill offline">STOPPED</div>
         </div>
 
@@ -467,11 +467,15 @@
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
                         <div class="form-row" style="margin-bottom: 0;">
                             <label>Enable Pagination:</label>
-                            <input type="checkbox" id="cfg-pagination" style="width: auto;">
+                            <input type="checkbox" id="cfg-pagination" onchange="onPaginationToggle()" style="width: auto;">
                         </div>
-                        <div class="form-row" style="margin-bottom: 0;">
+                        <div class="form-row" id="row-cfg-max-chars" style="margin-bottom: 0;">
                             <label>Max chars per page:</label>
                             <input type="number" id="cfg-max-chars" min="500" max="1900" value="1000">
+                        </div>
+                        <div class="form-row" id="row-cfg-non-paginated-max-chars" style="margin-bottom: 0;">
+                            <label title="When pagination is disabled, long replies are sent as follow-up messages up to this total character limit (0 = Unlimited).">Max reply chars (0=Unlimited):</label>
+                            <input type="number" id="cfg-non-paginated-max-chars" min="0" max="20000" step="100" value="0">
                         </div>
                         <div class="form-row" style="margin-bottom: 0;">
                             <label>Forum Reply Pagination:</label>
@@ -488,6 +492,14 @@
                         <div class="form-row" style="margin-bottom: 0;">
                             <label>Inactivity TTL (Minutes):</label>
                             <input type="number" id="cfg-guild-memory-ttl" min="1" max="1440" value="30">
+                        </div>
+                        <div class="form-row" style="margin-bottom: 0;">
+                            <label>Random Reply Mode:</label>
+                            <input type="checkbox" id="cfg-random-prompt-enabled" style="width: auto;">
+                        </div>
+                        <div class="form-row" style="margin-bottom: 0;">
+                            <label>Random Reply Chance (%):</label>
+                            <input type="number" id="cfg-random-prompt-prob" min="0" max="100" value="0">
                         </div>
                     </div>
                 </div>
@@ -579,7 +591,7 @@
             <div class="kpi-grid">
                 <div class="kpi-card">
                     <div class="kpi-title">Current Version</div>
-                    <div class="kpi-value" id="update-curr-version">3.5.8</div>
+                    <div class="kpi-value" id="update-curr-version">3.5.9</div>
                     <div class="kpi-subtext" id="update-curr-commit">#-------</div>
                 </div>
                 <div class="kpi-card">
@@ -724,6 +736,6 @@
     </div>
 
     <div id="toast-container"></div>
-    <script src="/static/app.js?v=3.5.8"></script>
+    <script src="/static/app.js?v=3.5.9"></script>
 </body>
 </html>

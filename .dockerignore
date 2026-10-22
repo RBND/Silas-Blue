@@ -1,0 +1,11 @@
+.git
+.venv
+venv
+__pycache__/
+*.py[cod]
+config/*
+logs/*
+state/*
+backups/*
+dist/
+build/

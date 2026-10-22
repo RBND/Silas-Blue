@@ -163,6 +163,38 @@ class TestWebApiEndpoints(AioHTTPTestCase):
         manifest_data = await manifest_resp.json()
         self.assertEqual(manifest_data.get("name"), "Silas Blue Web Management")
 
+    @unittest_run_loop
+    async def test_guild_config_rejects_invalid_guild_id(self):
+        auth_mgr = self.app["auth_manager"]
+        session_token = auth_mgr.sign_session_data({"id": "admin", "username": "Admin", "exp": 9999999999})
+        self.client.session.cookie_jar.update_cookies({SESSION_COOKIE_NAME: session_token})
+
+        # Attempt to read or clobber app_config via guild endpoint
+        resp = await self.client.get("/api/guild/app_config")
+        self.assertEqual(resp.status, 400)
+
+        resp_post = await self.client.post("/api/guild/app_config", json={"pagination_max_chars": 1000})
+        self.assertEqual(resp_post.status, 400)
+
+    @unittest_run_loop
+    async def test_ai_config_masks_search_keys_and_blocks_unknown_keys(self):
+        auth_mgr = self.app["auth_manager"]
+        self.cfg["tavily_api_key"] = "tvly-secret-123"
+        self.cfg["brave_api_key"] = "BSA-secret-456"
+        session_token = auth_mgr.sign_session_data({"id": "admin", "username": "Admin", "exp": 9999999999})
+        self.client.session.cookie_jar.update_cookies({SESSION_COOKIE_NAME: session_token})
+
+        resp = await self.client.get("/api/ai/config")
+        self.assertEqual(resp.status, 200)
+        data = await resp.json()
+        self.assertEqual(data["config"]["tavily_api_key"], "●●●●●●●●")
+        self.assertEqual(data["config"]["brave_api_key"], "●●●●●●●●")
+
+    @unittest_run_loop
+    async def test_oauth_callback_requires_matching_state_cookie(self):
+        resp = await self.client.get("/auth/discord/callback?code=fake_code&state=mismatch")
+        self.assertEqual(resp.status, 400)
+
 if __name__ == "__main__":
     unittest.main()
 

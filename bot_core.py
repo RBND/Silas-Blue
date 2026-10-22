@@ -34,8 +34,9 @@ from web_search import (
 
 logger = logging.getLogger("silasblue")
 
-# Thread-safe event queue for GUI communication without disk bottleneck
+# Thread-safe event queues for GUI and Web Console communication without disk bottleneck
 gui_event_queue = queue.Queue()
+web_event_queue = queue.Queue()
 
 # Theme helper
 _THEME_CACHE = None
@@ -184,13 +185,60 @@ def update_server_config(guild_id, config: dict):
     logger.debug(f"In-memory config updated for guild {guild_id}")
 
 def log_to_gui(event_type: str, data: dict):
-    """Pushes event to the in-memory thread-safe queue without blocking event loop with disk I/O."""
+    """Pushes event to the in-memory thread-safe queues without blocking event loop with disk I/O."""
     entry = {
         "event": event_type,
         "data": data,
         "timestamp": time.time()
     }
-    gui_event_queue.put(entry)
+    for q in (gui_event_queue, web_event_queue):
+        try:
+            if q.qsize() > 1000:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    pass
+            q.put_nowait(entry)
+        except Exception:
+            pass
+
+def format_gui_event(entry: dict, now_str: str) -> tuple[str, Optional[str]]:
+    """
+    Formats a telemetry queue entry into (event_category, formatted_message).
+    Shared by both the Web Console WebSocket stream and the Legacy Qt GUI.
+    """
+    event = entry.get("event")
+    data = entry.get("data", {})
+
+    if event == "config_change":
+        return "config", f"[{now_str}] [Config Change] Guild {data.get('guild_id')}: {data.get('field')} -> {data.get('value')}"
+    elif event == "prompt":
+        guild = data.get("guild_name") or data.get("guild_id")
+        return "prompt", f"[{now_str}] [{guild}] {data.get('user')}: {data.get('prompt')}"
+    elif event == "reply":
+        guild = data.get("guild_name") or data.get("guild_id")
+        reply_snippet = data.get("reply", "")[:180]
+        return "reply", f"[{now_str}] [{guild}] Silas Blue -> {reply_snippet}..."
+    elif event == "forum_post_replied":
+        guild = data.get("guild_name") or data.get("guild_id")
+        title = data.get("post_title", "Untitled")
+        author = data.get("author", "User")
+        return "reply", f"[{now_str}] [{guild}] 💬 Auto-replied to forum post \"{title}\" by {author}"
+    elif event == "web_search":
+        guild = data.get("guild_name") or data.get("guild_id") or "Direct Message"
+        query_snippet = data.get("query", "")[:50]
+        res_count = data.get("results_count", 0)
+        return "search", f"[{now_str}] [{guild}] 🌐 Web Search: \"{query_snippet}\" ({res_count} results)"
+    elif event == "server_joined":
+        guild_name = data.get("guild_name", "Unknown Server")
+        guild_id = data.get("guild_id", "")
+        return "server", f"[{now_str}] [Discord] Joined server: {guild_name} ({guild_id})"
+    elif event == "server_left":
+        guild_name = data.get("guild_name", "Unknown Server")
+        guild_id = data.get("guild_id", "")
+        return "server", f"[{now_str}] [Discord] Left server: {guild_name} ({guild_id})"
+
+    return "system", None
 
 def paginate_text(text: str, max_chars: int = 1850) -> List[str]:
     """
@@ -292,9 +340,6 @@ async def handle_ai_prompt(
 
     # Determine default model from active provider and configuration
     app_cfg = load_app_config()
-    available = await provider.list_models()
-    active_loaded = available[0] if available else "default"
-
     guild_id = message.guild.id if message.guild else None
     guild_name = message.guild.name if message.guild else "Direct Message"
 
@@ -302,32 +347,27 @@ async def handle_ai_prompt(
         mem_key = f"dm_user_{message.author.id}"
         max_turns = int(app_cfg.get("dm_memory_turns", 6))
         ttl_minutes = int(app_cfg.get("dm_memory_ttl_minutes", 30))
-        # DM handling: check dm_default_model or active_model
-        dm_model = app_cfg.get("dm_default_model")
-        if dm_model and (not available or dm_model in available):
-            default_model = dm_model
-        elif app_cfg.get("active_model") and app_cfg.get("active_model") in available:
-            default_model = app_cfg.get("active_model")
+        configured_dm_model = app_cfg.get("dm_default_model") or app_cfg.get("active_model")
+        if configured_dm_model:
+            default_model = configured_dm_model
         else:
-            default_model = active_loaded
+            available = await provider.list_models()
+            default_model = available[0] if available else "default"
     else:
         mem_key = f"guild_{message.guild.id}_{message.channel.id}"
         max_turns = int(config.get("memory_turns", 6))
         ttl_minutes = int(config.get("memory_ttl_minutes", 30))
-        # Guild handling:
         server_model = config.get("default_model")
-        # If server has a model configured that actually exists on current provider, use it
-        if server_model and (not available or server_model in available):
+        if server_model:
             default_model = server_model
-        # Otherwise, if app_config has an active_model that exists on current provider, use that
-        elif app_cfg.get("active_model") and app_cfg.get("active_model") in available:
+        elif app_cfg.get("active_model"):
             default_model = app_cfg.get("active_model")
             config["default_model"] = default_model
             save_config(guild_id, config)
-        # Otherwise, fall back to the actively loaded model on the provider
         else:
-            default_model = active_loaded
-            if server_model != default_model and available:
+            available = await provider.list_models()
+            default_model = available[0] if available else "default"
+            if available:
                 config["default_model"] = default_model
                 save_config(guild_id, config)
 
@@ -447,9 +487,16 @@ async def handle_ai_prompt(
     is_error_response = (
         not response
         or response.startswith("Error processing AI request:")
+        or response.startswith("Error:")
+        or response.startswith("Error communicating with")
+        or response.startswith("Error connecting to")
+        or response.startswith("Cannot connect to")
+        or response.startswith("AI Request Timed Out")
         or response.startswith("Ollama Error (")
         or response.startswith("Llama.cpp Error (")
         or response.startswith("OpenAI/Remote Error (")
+        or response.startswith("Remote API Error")
+        or response.startswith("Unexpected error communicating with")
     )
 
     if not is_error_response:
@@ -503,6 +550,25 @@ async def handle_ai_prompt(
         "user": str(message.author),
         "reply": response
     })
+
+    pagination_enabled = config.get("pagination_enabled", True)
+
+    if not is_forum_auto_reply and not pagination_enabled:
+        # Pagination disabled: apply optional total reply character cap and send sequential follow-up messages
+        reply_text = response
+        non_paginated_cap = int(config.get("non_paginated_max_chars", 0) or 0)
+        if non_paginated_cap > 0 and len(reply_text) > non_paginated_cap:
+            reply_text = reply_text[:max(1, non_paginated_cap - 3)].rstrip() + "..."
+
+        chunks = paginate_text(reply_text, 1900)
+        total_chunks = len(chunks)
+        for idx, chunk in enumerate(chunks, 1):
+            if len(chunk) > 2000:
+                chunk = chunk[:1997] + "..."
+            await message.channel.send(chunk)
+            if idx < total_chunks:
+                await asyncio.sleep(0.3)
+        return
 
     max_chars = min(config.get("pagination_max_chars", 1900), 1900)
     pages = paginate_text(response, max_chars)
@@ -811,6 +877,12 @@ async def on_thread_create(thread: discord.Thread):
     """
     await process_forum_auto_reply(thread)
 
+def _is_registered_command(word: str) -> bool:
+    """Returns True if `word` matches any registered prefix command name or alias."""
+    if not word:
+        return False
+    return word.lower() in bot.all_commands
+
 @bot.event
 async def on_message(message: discord.Message):
     if message.author == bot.user:
@@ -832,10 +904,7 @@ async def on_message(message: discord.Message):
         content = message.content.strip()
         if content.startswith(COMMAND_PREFIX):
             first_word = content[len(COMMAND_PREFIX):].split(" ", 1)[0].lower()
-            command_names = [cmd.name for cmd in bot.commands]
-            for cmd in bot.commands:
-                command_names.extend(cmd.aliases)
-            if first_word in command_names:
+            if _is_registered_command(first_word):
                 await bot.process_commands(message)
                 return
 
@@ -864,9 +933,9 @@ async def on_message(message: discord.Message):
     if not permissions.can_reply(message, config):
         return
 
-    # Random prompt probability check
+    # Random prompt probability check (requires random_prompt_enabled to be True)
     prob = config.get("random_prompt_probability", 0)
-    if prob > 0:
+    if config.get("random_prompt_enabled", False) and prob > 0:
         import random
         if random.randint(1, 100) <= prob:
             await handle_ai_prompt(message, config)
@@ -879,10 +948,7 @@ async def on_message(message: discord.Message):
     # Check for command or prefix-based prompt
     if content.startswith(COMMAND_PREFIX):
         first_word = content[len(COMMAND_PREFIX):].split(" ", 1)[0].lower()
-        command_names = [cmd.name for cmd in bot.commands]
-        for cmd in bot.commands:
-            command_names.extend(cmd.aliases)
-        if first_word in command_names:
+        if _is_registered_command(first_word):
             await bot.process_commands(message)
         else:
             prompt_text = content[len(COMMAND_PREFIX):].lstrip()
@@ -895,10 +961,7 @@ async def on_message(message: discord.Message):
         after_mention = content[len(mention_str_1):] if content.startswith(mention_str_1) else content[len(mention_str_2):]
         after_mention = after_mention.lstrip()
         first_word = after_mention.split(" ", 1)[0].lower() if after_mention else ""
-        command_names = [cmd.name for cmd in bot.commands]
-        for cmd in bot.commands:
-            command_names.extend(cmd.aliases)
-        if first_word in command_names:
+        if _is_registered_command(first_word):
             message.content = COMMAND_PREFIX + after_mention
             await bot.process_commands(message)
         elif after_mention:
@@ -1583,6 +1646,8 @@ def restart_bot():
     logger.info("Bot restarted.")
 
 async def _run_bot(shutdown_event: threading.Event, bot_inst: commands.Bot):
+    if bot_inst.is_closed():
+        bot_inst.clear()
     shutdown_asyncio = asyncio.Event()
 
     def check_shutdown():

@@ -12,6 +12,27 @@ class PermissionManager:
             return True
         return bool(getattr(user, "guild_permissions", None) and user.guild_permissions.administrator)
 
+    def _has_guild_permission(self, user, guild, config: dict, roles_key: str, users_key: str, default_roles: list) -> bool:
+        """Shared guild-scoped permission check (admin bypass, user snowflake whitelist, role whitelist)."""
+        # 1. Administrator & Owner Bypass
+        if self._is_admin(user, guild):
+            return True
+
+        # 2. Explicit User Whitelist (O(1) Set Lookup)
+        allowed_users = {str(uid).strip() for uid in config.get(users_key, [])}
+        if str(user.id) in allowed_users:
+            return True
+
+        # 3. Role Whitelist
+        allowed_roles = {str(r).casefold().strip() for r in config.get(roles_key, default_roles)}
+        if "everyone" in allowed_roles or "@everyone" in allowed_roles:
+            return True
+
+        user_roles = getattr(user, "roles", [])
+        user_role_names = {role.name.casefold() for role in user_roles}
+        user_role_ids = {str(role.id) for role in user_roles}
+        return bool((allowed_roles & user_role_names) or (allowed_roles & user_role_ids))
+
     def can_reply(self, message, config) -> bool:
         """
         Determines if the bot should reply to this user/message.
@@ -22,26 +43,9 @@ class PermissionManager:
             app_cfg = load_app_config()
             return bool(app_cfg.get("allow_dms", True))
 
-        author = message.author
-        guild = message.guild
-
-        # 1. Administrator & Owner Bypass
-        if self._is_admin(author, guild):
-            return True
-
-        # 2. Explicit User Whitelist (O(1) Set Lookup)
-        allowed_users = {str(uid).strip() for uid in config.get("reply_users", [])}
-        if str(author.id) in allowed_users:
-            return True
-
-        # 3. Role Whitelist
-        allowed_roles = {str(r).casefold().strip() for r in config.get("reply_roles", ["everyone"])}
-        if "everyone" in allowed_roles or "@everyone" in allowed_roles:
-            return True
-
-        user_role_names = {role.name.casefold() for role in getattr(author, "roles", [])}
-        user_role_ids = {str(role.id) for role in getattr(author, "roles", [])}
-        return bool((allowed_roles & user_role_names) or (allowed_roles & user_role_ids))
+        return self._has_guild_permission(
+            message.author, message.guild, config, "reply_roles", "reply_users", ["everyone"]
+        )
 
     def can_change_model(self, user, guild, config) -> bool:
         """
@@ -50,20 +54,9 @@ class PermissionManager:
         if guild is None:
             return False
 
-        if self._is_admin(user, guild):
-            return True
-
-        allowed_users = {str(uid).strip() for uid in config.get("change_model_users", [])}
-        if str(user.id) in allowed_users:
-            return True
-
-        allowed_roles = {str(r).casefold().strip() for r in config.get("change_model_roles", [])}
-        if "everyone" in allowed_roles or "@everyone" in allowed_roles:
-            return True
-
-        user_role_names = {role.name.casefold() for role in getattr(user, "roles", [])}
-        user_role_ids = {str(role.id) for role in getattr(user, "roles", [])}
-        return bool((allowed_roles & user_role_names) or (allowed_roles & user_role_ids))
+        return self._has_guild_permission(
+            user, guild, config, "change_model_roles", "change_model_users", []
+        )
 
     def can_change_permissions(self, user, guild, config) -> bool:
         """
@@ -72,20 +65,9 @@ class PermissionManager:
         if guild is None:
             return False
 
-        if self._is_admin(user, guild):
-            return True
-
-        allowed_users = {str(uid).strip() for uid in config.get("change_permission_users", [])}
-        if str(user.id) in allowed_users:
-            return True
-
-        allowed_roles = {str(r).casefold().strip() for r in config.get("change_permission_roles", [])}
-        if "everyone" in allowed_roles or "@everyone" in allowed_roles:
-            return True
-
-        user_role_names = {role.name.casefold() for role in getattr(user, "roles", [])}
-        user_role_ids = {str(role.id) for role in getattr(user, "roles", [])}
-        return bool((allowed_roles & user_role_names) or (allowed_roles & user_role_ids))
+        return self._has_guild_permission(
+            user, guild, config, "change_permission_roles", "change_permission_users", []
+        )
 
     def can_search(self, user, guild, config) -> bool:
         """
@@ -94,17 +76,6 @@ class PermissionManager:
         if guild is None:
             return True
 
-        if self._is_admin(user, guild):
-            return True
-
-        allowed_users = {str(uid).strip() for uid in config.get("search_users", [])}
-        if str(user.id) in allowed_users:
-            return True
-
-        allowed_roles = {str(r).casefold().strip() for r in config.get("search_roles", ["everyone"])}
-        if "everyone" in allowed_roles or "@everyone" in allowed_roles:
-            return True
-
-        user_role_names = {role.name.casefold() for role in getattr(user, "roles", [])}
-        user_role_ids = {str(role.id) for role in getattr(user, "roles", [])}
-        return bool((allowed_roles & user_role_names) or (allowed_roles & user_role_ids))
+        return self._has_guild_permission(
+            user, guild, config, "search_roles", "search_users", ["everyone"]
+        )

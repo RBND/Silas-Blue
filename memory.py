@@ -87,6 +87,13 @@ class ConversationMemory:
 
         with self._lock:
             now = time.time()
+            # Periodically sweep stale buffers if buffer count grows large
+            if len(self._buffers) > 100 and self._default_ttl > 0:
+                max_idle = max(self._default_ttl * 2, 86400)
+                expired_keys = [k for k, v in self._buffers.items() if (now - v.get("last_active", 0)) > max_idle]
+                for k in expired_keys:
+                    del self._buffers[k]
+
             if key not in self._buffers:
                 self._buffers[key] = {
                     "last_active": now,

@@ -113,5 +113,23 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(sanitized["forum_auto_reply_tags"], ["help", "question", "urgent"])
         self.assertEqual(sanitized["forum_ignore_tags"], ["resolved", "closed"])
 
+    def test_guild_id_validation_and_non_paginated_max_chars(self):
+        from utils import is_valid_guild_id, validate_and_sanitize_guild_config
+
+        self.assertTrue(is_valid_guild_id("123456789012345678"))
+        self.assertTrue(is_valid_guild_id("test_guild_999"))
+        self.assertFalse(is_valid_guild_id("app_config"))
+        self.assertFalse(is_valid_guild_id("../state/update_status"))
+        self.assertFalse(is_valid_guild_id("..\\state\\update_status"))
+        self.assertFalse(is_valid_guild_id(""))
+        self.assertFalse(is_valid_guild_id(None))
+
+        sanitized_zero = validate_and_sanitize_guild_config({"non_paginated_max_chars": 0})
+        self.assertEqual(sanitized_zero["non_paginated_max_chars"], 0)
+        sanitized_low = validate_and_sanitize_guild_config({"non_paginated_max_chars": 200})
+        self.assertEqual(sanitized_low["non_paginated_max_chars"], 500)
+        sanitized_high = validate_and_sanitize_guild_config({"non_paginated_max_chars": 99999})
+        self.assertEqual(sanitized_high["non_paginated_max_chars"], 20000)
+
 if __name__ == "__main__":
     unittest.main()

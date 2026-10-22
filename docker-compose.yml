@@ -6,6 +6,7 @@ services:
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
+      - ./state:/app/state
     ports:
       # Expose only to localhost if using Caddy or internal LAN;
       # Change to "8080:8080" if accessing directly over LAN without Caddy

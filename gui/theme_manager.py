@@ -540,21 +540,6 @@ class ThemeManager:
 
         window.setStyleSheet(stylesheet)
 
-    def get_checkbox_colors(self):
-        """Return a dict of checkbox colors from the current theme for use in custom widgets."""
-        theme = self.current_theme
-        return {
-            'bg': theme.get('checkbox_bg', '#232a2e'),
-            'border': theme.get('checkbox_border', '#2ec27e'),
-            'checked_bg': theme.get('checkbox_checked_bg', '#8ff0a4'),
-            'checked_border': theme.get('checkbox_checked_border', '#2ec27e'),
-            'checkmark': theme.get('checkbox_checkmark', '#26a269'),
-            'hover': theme.get('checkbox_hover', '#8ff0a4'),
-            'disabled_bg': theme.get('checkbox_disabled_bg', '#273136'),
-            'disabled_border': theme.get('checkbox_disabled_border', '#2d353b'),
-            'checkmark_disabled': theme.get('checkbox_checkmark_disabled', '#4b5a5e'),
-        }
-
     def available_themes(self):
         """
         Returns a list of available theme names (from the themes directory).

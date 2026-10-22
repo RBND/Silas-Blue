@@ -6,7 +6,8 @@ import json
 import base64
 import secrets
 import logging
-from typing import Optional, Dict, Any, List
+import urllib.request
+from typing import Optional, Dict, Any, List, Set
 import aiohttp
 from aiohttp import web
 
@@ -136,9 +137,22 @@ class AuthManager:
         except Exception:
             pass
 
-        # 3. If no admin IDs are configured yet, first login can be set as owner
+        # 3. If no admin IDs are configured yet, try querying Discord's application API using the bot token
         if not admin_ids:
-            logger.info(f"No admin IDs configured. Registering Discord User {discord_user_id} as bot owner.")
+            app_owner_ids = self._fetch_discord_application_owner_ids()
+            if app_owner_ids:
+                if str(discord_user_id) in app_owner_ids:
+                    logger.info(f"Verified Discord Application Owner {discord_user_id} via Discord API. Registering as bot owner.")
+                    self.app_cfg["bot_owner_id"] = str(discord_user_id)
+                    from utils import save_app_config
+                    save_app_config(self.app_cfg)
+                    return True
+                else:
+                    logger.warning(f"Rejected OAuth claim by {discord_user_id}: does not match Discord Application Owner(s) {app_owner_ids}.")
+                    return False
+
+            # Fallback only when no bot token is configured/reachable yet (initial headless setup)
+            logger.warning(f"[SECURITY] No admin IDs or bot token owner found. Claiming initial ownership for Discord User {discord_user_id}.")
             self.app_cfg["bot_owner_id"] = str(discord_user_id)
             from utils import save_app_config
             save_app_config(self.app_cfg)
@@ -146,11 +160,57 @@ class AuthManager:
 
         return False
 
+    @staticmethod
+    def _fetch_discord_application_owner_ids() -> Set[str]:
+        """Queries Discord REST API with the local bot token (if present) to get authoritative application owner/team IDs."""
+        token_path = os.path.join("config", "bot_token.txt")
+        if not os.path.exists(token_path):
+            return set()
+        try:
+            with open(token_path, "r", encoding="utf-8") as f:
+                bot_token = f.read().strip()
+            if not bot_token:
+                return set()
+            req = urllib.request.Request(
+                "https://discord.com/api/v10/oauth2/applications/@me",
+                headers={
+                    "Authorization": f"Bot {bot_token}",
+                    "User-Agent": "SilasBlue-Auth"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    owners: Set[str] = set()
+                    owner_obj = data.get("owner")
+                    if isinstance(owner_obj, dict) and owner_obj.get("id"):
+                        owners.add(str(owner_obj["id"]))
+                    team_obj = data.get("team")
+                    if isinstance(team_obj, dict):
+                        for member in team_obj.get("members", []):
+                            user_obj = member.get("user") if isinstance(member, dict) else None
+                            if isinstance(user_obj, dict) and user_obj.get("id"):
+                                owners.add(str(user_obj["id"]))
+                    return owners
+        except Exception as e:
+            logger.debug(f"Could not query Discord application owner via REST API: {e}")
+        return set()
+
     def is_rate_limited(self, ip: str, max_attempts: int = 5, window_seconds: int = 300) -> bool:
         now = time.time()
+        if len(self.failed_attempts) > 100:
+            stale_ips = [
+                k for k, ts_list in self.failed_attempts.items()
+                if not ts_list or (now - ts_list[-1]) >= window_seconds
+            ]
+            for k in stale_ips:
+                del self.failed_attempts[k]
         attempts = self.failed_attempts.get(ip, [])
         attempts = [t for t in attempts if now - t < window_seconds]
-        self.failed_attempts[ip] = attempts
+        if attempts:
+            self.failed_attempts[ip] = attempts
+        else:
+            self.failed_attempts.pop(ip, None)
         return len(attempts) >= max_attempts
 
     def record_failed_attempt(self, ip: str):

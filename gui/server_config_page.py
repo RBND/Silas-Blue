@@ -146,33 +146,8 @@ class ServerConfigPage(QWidget):
         self.load_config()
 
     # -------------------------------------------------------------------------
-    # COMPATIBILITY & NAVIGATION
+    # NAVIGATION
     # -------------------------------------------------------------------------
-    @property
-    def tabs(self):
-        """Backwards compatibility shim for external references."""
-        class _TabsProxy:
-            def __init__(proxy_self, page):
-                proxy_self.page = page
-            def currentIndex(proxy_self):
-                return proxy_self.page._current_subpage_index
-            def setCurrentIndex(proxy_self, idx):
-                proxy_self.page.switch_subpage(idx)
-        return _TabsProxy(self)
-
-    @property
-    def forum_monitored_channels(self):
-        """Backwards compatibility shim for external references expecting QLineEdit."""
-        class _ChannelsShim:
-            def __init__(proxy_self, card):
-                proxy_self.card = card
-            def text(proxy_self):
-                return ", ".join(proxy_self.card.get_channels())
-            def setText(proxy_self, val):
-                channels = [x.strip() for x in str(val).split(",") if x.strip()]
-                proxy_self.card.set_channels(channels)
-        return _ChannelsShim(self.forum_channel_card)
-
     def switch_subpage(self, index: int):
         """Switches the active modular subpage while keeping server selection unchanged."""
         prev_idx = self._current_subpage_index
@@ -524,6 +499,15 @@ class ServerConfigPage(QWidget):
         self.pagination_max_chars.setValue(1000)
         self.pagination_max_chars.valueChanged.connect(self._on_field_edited)
         pag_row.addWidget(self.pagination_max_chars)
+
+        pag_row.addWidget(QLabel("Max Reply Chars (No Pag.):"))
+        self.non_paginated_max_chars = QSpinBox()
+        self.non_paginated_max_chars.setRange(0, 20000)
+        self.non_paginated_max_chars.setSingleStep(100)
+        self.non_paginated_max_chars.setSpecialValueText("Unlimited")
+        self.non_paginated_max_chars.setValue(0)
+        self.non_paginated_max_chars.valueChanged.connect(self._on_field_edited)
+        pag_row.addWidget(self.non_paginated_max_chars)
         col_left.addLayout(pag_row)
 
         forum_pag_row = QHBoxLayout()
@@ -757,7 +741,7 @@ class ServerConfigPage(QWidget):
         self.guild_select.blockSignals(True)
         self.guild_select.clear()
         try:
-            guilds = getattr(bot, 'guilds', [])
+            guilds = list(getattr(bot, 'guilds', []))
             for g in guilds:
                 self.guild_select.addItem(f"{g.name} ({g.id})", g.id)
 
@@ -777,7 +761,7 @@ class ServerConfigPage(QWidget):
 
         guild = None
         try:
-            guild = next((g for g in getattr(bot, 'guilds', []) if g.id == guild_id), None)
+            guild = next((g for g in list(getattr(bot, 'guilds', [])) if g.id == guild_id), None)
         except Exception as e:
             logger.error(f"Error accessing guild: {e}")
 
@@ -842,6 +826,7 @@ class ServerConfigPage(QWidget):
             "search_users": search_users,
             "pagination_enabled": self.pagination_enabled.isChecked(),
             "pagination_max_chars": max_chars,
+            "non_paginated_max_chars": self.non_paginated_max_chars.value(),
             "random_prompt_enabled": self.random_prompt_enabled.isChecked(),
             "random_prompt_probability": int(self.random_prompt_probability.currentText().replace("%", "")),
             "system_prompt": self.server_system_prompt_input.toPlainText().strip(),
@@ -870,6 +855,7 @@ class ServerConfigPage(QWidget):
 
             self.pagination_enabled.setChecked(config.get("pagination_enabled", True))
             self.pagination_max_chars.setValue(min(config.get("pagination_max_chars", 1000), 1900))
+            self.non_paginated_max_chars.setValue(int(config.get("non_paginated_max_chars", 0)))
             self.random_prompt_enabled.setChecked(config.get("random_prompt_enabled", False))
             self.random_prompt_probability.setCurrentText(f"{config.get('random_prompt_probability', 0)}%")
             self.server_system_prompt_input.setPlainText(config.get("system_prompt", ""))

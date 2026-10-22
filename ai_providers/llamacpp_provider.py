@@ -88,15 +88,7 @@ class LlamaCppProvider(AIProvider):
                         content = ""
                         if choices:
                             content = choices[0].get("message", {}).get("content", "")
-                        if t_tok == 0:
-                            p_tok = max(1, len(prompt) // 4)
-                            c_tok = max(1, len(content) // 4)
-                            t_tok = p_tok + c_tok
-                        self._last_usage = {
-                            "prompt_tokens": p_tok,
-                            "completion_tokens": c_tok,
-                            "total_tokens": t_tok
-                        }
+                        self._record_or_estimate_usage(prompt, content, p_tok, c_tok, t_tok)
                         return content
                     elif resp.status == 404:
                         # Fallback to legacy /completion endpoint
@@ -137,15 +129,7 @@ class LlamaCppProvider(AIProvider):
                                         content = ""
                                         if choices:
                                             content = choices[0].get("message", {}).get("content", "")
-                                        if t_tok == 0:
-                                            p_tok = max(1, len(prompt) // 4)
-                                            c_tok = max(1, len(content) // 4)
-                                            t_tok = p_tok + c_tok
-                                        self._last_usage = {
-                                            "prompt_tokens": p_tok,
-                                            "completion_tokens": c_tok,
-                                            "total_tokens": t_tok
-                                        }
+                                        self._record_or_estimate_usage(prompt, content, p_tok, c_tok, t_tok)
                                         return content
                         logger.error(f"Llama.cpp error {resp.status}: {text}")
                         return f"Llama.cpp Error ({resp.status}): {text}"
@@ -294,21 +278,5 @@ class LlamaCppProvider(AIProvider):
             return True
         return False
 
-    # --- Synchronous compatibility helpers ---
-    def status_sync(self) -> bool:
-        try:
-            return asyncio.run(self.check_status())
-        except Exception:
-            return False
-
-    def list_models_sync(self) -> List[str]:
-        try:
-            return asyncio.run(self.list_models())
-        except Exception:
-            return ["default"]
-
-    def send_prompt_sync(self, prompt: str, model: str) -> str:
-        try:
-            return asyncio.run(self.send_prompt(prompt, model))
-        except Exception as e:
-            return f"Error: {e}"
+    def _fallback_models_sync(self) -> List[str]:
+        return ["default"]

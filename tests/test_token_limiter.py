@@ -252,3 +252,31 @@ def test_strict_partial_overage_disabled(temp_limiter):
     assert res.allowed is True
     assert res.remaining == 200
     assert res.effective_max_tokens == 200  # Clamped strictly to remaining budget
+
+
+def test_rolling_hours_includes_current_second_usage(temp_limiter):
+    guild_id = 555
+    user_id = 666
+    role_member = MagicMock()
+    role_member.name = "Member"
+    role_member.id = 10
+
+    member = MagicMock()
+    member.id = user_id
+    member.guild = MagicMock()
+    member.guild.owner = None
+    member.guild_permissions.administrator = False
+    member.roles = [role_member]
+
+    config = {
+        "token_quotas": {
+            "enabled": True,
+            "role_limits": {"Member": 1000},
+            "reset_frequency": "rolling_hours"
+        }
+    }
+
+    temp_limiter.record_tokens(guild_id, user_id, 450)
+    res = temp_limiter.check_prompt_allowed(guild_id, member, config)
+    assert res.used == 450
+    assert res.remaining == 550

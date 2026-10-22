@@ -5,7 +5,7 @@ a = Analysis(
     ['SilasBlue.py'],
     pathex=[],
     binaries=[],
-    datas=[('themes', 'themes'), ('config', 'config'), ('gui/splash.png', 'gui'), ('.venv/Lib/site-packages/PySide6/plugins/platforms', 'PySide6/plugins/platforms')],
+    datas=[('themes', 'themes'), ('web/static', 'web/static'), ('gui/splash.png', 'gui'), ('.venv/Lib/site-packages/PySide6/plugins/platforms', 'PySide6/plugins/platforms')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

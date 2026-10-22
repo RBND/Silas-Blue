@@ -151,15 +151,7 @@ class RemoteOpenAIProvider(AIProvider):
                         if choices:
                             message = choices[0].get("message", {})
                             content = message.get("content", "")
-                        if t_tok == 0:
-                            p_tok = max(1, len(prompt) // 4)
-                            c_tok = max(1, len(content) // 4)
-                            t_tok = p_tok + c_tok
-                        self._last_usage = {
-                            "prompt_tokens": p_tok,
-                            "completion_tokens": c_tok,
-                            "total_tokens": t_tok
-                        }
+                        self._record_or_estimate_usage(prompt, content, p_tok, c_tok, t_tok)
                         if content:
                             return content
                         return "No response content received from remote model."
@@ -280,30 +272,10 @@ class RemoteOpenAIProvider(AIProvider):
             progress_callback(100, "Remote model is hosted in the cloud and ready to use.")
         return True
 
-    def is_local(self) -> bool:
-        url = self._base_url.lower()
-        return "localhost" in url or "127.0.0.1" in url or "0.0.0.0" in url
-
-    # --- Synchronous compatibility wrappers for PySide6 GUI background threads ---
-    def status_sync(self) -> bool:
-        try:
-            return asyncio.run(self.check_status())
-        except Exception:
-            return False
-
-    def list_models_sync(self) -> List[str]:
-        try:
-            return asyncio.run(self.list_models())
-        except Exception:
-            if self._default_model:
-                return [self._default_model]
-            return ["mimo-v2.6-pro"]
-
-    def send_prompt_sync(self, prompt: str, model: str, system_prompt: Optional[str] = None) -> str:
-        try:
-            return asyncio.run(self.send_prompt(prompt, model, system_prompt))
-        except Exception as e:
-            return f"Error: {e}"
+    def _fallback_models_sync(self) -> List[str]:
+        if self._default_model:
+            return [self._default_model]
+        return ["mimo-v2.6-pro"]
 
     def test_connection_sync(self) -> Tuple[bool, str]:
         try:

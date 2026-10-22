@@ -1,4 +1,8 @@
 import os
+import re
+import hmac
+import secrets
+import ipaddress
 import asyncio
 import logging
 import threading
@@ -9,6 +13,39 @@ from .auth import AuthManager
 from .api import ApiHandler
 
 logger = logging.getLogger("silasblue.web")
+
+_SAFE_HOST_REGEX = re.compile(r"^[a-zA-Z0-9.\-:\[\]]{1,253}$")
+OAUTH_STATE_COOKIE = "sb_oauth_state"
+
+
+def _is_trusted_proxy_peer(ip: str) -> bool:
+    """Returns True if the direct TCP peer is loopback or private LAN/container network (e.g. Caddy)."""
+    try:
+        addr = ipaddress.ip_address(ip)
+        return addr.is_loopback or addr.is_private
+    except ValueError:
+        return False
+
+
+def _get_external_scheme_and_host(request: web.Request) -> tuple[str, str]:
+    """Resolves external scheme and host safely, only trusting X-Forwarded-* from local/private reverse proxies."""
+    peername = request.transport.get_extra_info("peername") if request.transport else None
+    peer_ip = peername[0] if peername else ""
+
+    scheme = request.scheme
+    host = request.host
+
+    if _is_trusted_proxy_peer(peer_ip):
+        fwd_proto = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower()
+        if fwd_proto in ("http", "https"):
+            scheme = fwd_proto
+        fwd_host = request.headers.get("X-Forwarded-Host", "").split(",")[0].strip()
+        if fwd_host and _SAFE_HOST_REGEX.match(fwd_host):
+            host = fwd_host
+
+    if not _SAFE_HOST_REGEX.match(host or ""):
+        host = request.host
+    return scheme, host
 
 # --- Security Headers Middleware ---
 @web.middleware
@@ -82,24 +119,36 @@ def create_web_app(app_cfg: dict) -> web.Application:
         if not client_id:
             return web.Response(text="Discord Bot Client ID is not configured.", status=500)
 
-        # Build redirect URI based on current request host
-        scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
-        host = request.headers.get("X-Forwarded-Host", request.host)
+        # Build redirect URI based on validated request/proxy host
+        scheme, host = _get_external_scheme_and_host(request)
         redirect_uri = f"{scheme}://{host}/auth/discord/callback"
+        oauth_state = secrets.token_urlsafe(24)
 
         params = {
             "client_id": str(client_id),
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": "identify",
-            "prompt": "consent"
+            "prompt": "consent",
+            "state": oauth_state
         }
         oauth_url = f"https://discord.com/api/oauth2/authorize?{urlencode(params)}"
-        raise web.HTTPFound(location=oauth_url)
+        resp = web.HTTPFound(location=oauth_url)
+        resp.set_cookie(
+            OAUTH_STATE_COOKIE,
+            oauth_state,
+            max_age=600,
+            httponly=True,
+            samesite="Lax",
+            secure=(scheme == "https")
+        )
+        raise resp
 
     async def handle_discord_callback(request):
         """Handles OAuth2 callback from Discord."""
         code = request.query.get("code")
+        state = request.query.get("state", "")
+        cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
         peername = request.transport.get_extra_info('peername')
         ip = peername[0] if peername else "unknown"
 
@@ -107,8 +156,12 @@ def create_web_app(app_cfg: dict) -> web.Application:
             auth_manager.record_failed_attempt(ip)
             return web.Response(text="Missing OAuth code from Discord.", status=400)
 
-        scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
-        host = request.headers.get("X-Forwarded-Host", request.host)
+        if not state or not cookie_state or not hmac.compare_digest(state, cookie_state):
+            auth_manager.record_failed_attempt(ip)
+            logger.warning(f"OAuth2 state mismatch from IP {ip}")
+            return web.Response(text="Invalid or expired OAuth2 state. Please try logging in again.", status=400)
+
+        scheme, host = _get_external_scheme_and_host(request)
         redirect_uri = f"{scheme}://{host}/auth/discord/callback"
 
         user_info = await auth_manager.exchange_discord_oauth_code(code, redirect_uri)
@@ -125,6 +178,7 @@ def create_web_app(app_cfg: dict) -> web.Application:
             )
 
         resp = web.HTTPFound(location="/")
+        resp.del_cookie(OAUTH_STATE_COOKIE)
         avatar_url = f"https://cdn.discordapp.com/avatars/{discord_user_id}/{user_info.get('avatar')}.png" if user_info.get("avatar") else ""
         auth_manager.create_session_cookie(
             resp,
@@ -182,6 +236,7 @@ def create_web_app(app_cfg: dict) -> web.Application:
     app.router.add_get("/auth/discord/login", handle_discord_login)
     app.router.add_get("/auth/discord/callback", handle_discord_callback)
     app.router.add_get("/logout", handle_logout)
+    app.router.add_post("/logout", handle_logout)
 
     # Register API Routes (Wrapped in require_auth)
     app.router.add_get("/api/status", api_handler.require_auth(api_handler.get_status))
