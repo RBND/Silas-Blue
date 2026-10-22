@@ -1,4 +1,4 @@
 PySide6>=6.5.0
 discord.py>=2.3.0
-aiohttp>=3.9.0
+aiohttp>=3.14.5
 pywebview>=5.0.0
