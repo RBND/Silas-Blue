@@ -1,6 +1,6 @@
 # Silas Blue — Privacy Policy
 
-**Last Updated:** October 17, 2026
+**Last Updated:** October 22, 2026
 
 Your privacy is important to us. This Privacy Policy outlines how **Silas Blue** ("we", "us", "our", or the "Bot") collects, processes, stores, and protects information when you use the Silas Blue Discord bot or run its software.
 
@@ -33,14 +33,18 @@ Silas Blue only processes data necessary to provide its core features:
 
 ### B. Configuration & Preferences
 - Per-server settings stored locally in JSON files (`config/<guild_id>.json`), including:
-  - Selected AI model
-  - Pagination limits
-  - Permission lists (allowed channels, roles, and users)
+  - Selected AI model and custom system personas
+  - Pagination and non-paginated reply length limits
+  - Permission lists (allowed roles and user Snowflake IDs)
+  - Discord Forum auto-reply monitoring rules (monitored forum channels and tags)
+  - Role-based token quota limits and reset schedules
   - Random response trigger probabilities
-  - Nickname and bot behavior preferences
+  - Conversation memory turn limits and inactivity TTLs
 
-### C. Operational Logs
-- Silas Blue maintains local operational logs (`config/gui_log.txt` and terminal output) containing recent prompt/reply events, connection states, and diagnostic error reports. These are stored locally on the host machine running the bot.
+### C. Operational Logs & Quota Accounting
+- **Operational Logs:** Silas Blue maintains local operational logs (`logs/` and terminal output) containing recent prompt/reply events, connection states, and diagnostic error reports stored locally on the host machine.
+- **Token Quota Records (`state/usage.db`):** When role-based token quotas are enabled on a server, Silas Blue records the Discord server ID, user ID, token counts consumed, model name, and timestamp in a local SQLite database to calculate remaining allowances.
+- **Web Dashboard Session Cookie (`sb_session`):** When an administrator logs into the Web Management Console, an encrypted/signed `HttpOnly` session cookie is stored in the administrator's browser to maintain authentication.
 
 ---
 
@@ -68,22 +72,28 @@ Silas Blue allows server administrators to choose between local and remote AI in
 - **Zero Third-Party Transmission:** No prompt data, user IDs, or text content are transmitted across the internet to any AI cloud provider.
 
 ### B. Cloud / Remote AI Providers (Optional)
-If a server administrator or bot operator chooses to configure an external AI provider (such as OpenAI, OpenRouter, Groq, DeepSeek, xAI, or custom OpenAI-compatible endpoints):
-- Your prompt text (and any optional system prompt) is transmitted via encrypted HTTPS to the selected third-party provider's API to generate a response.
+If a server administrator or bot operator chooses to configure an external AI provider (such as Xiaomi MiMo, OpenAI, OpenRouter, Groq, DeepSeek, xAI, or custom OpenAI-compatible endpoints):
+- Your prompt text (and any active conversation history or system prompt) is transmitted via encrypted HTTPS to the selected third-party provider's API to generate a response.
 - Data sent to external AI providers is governed by their respective privacy policies and data retention agreements:
+  - [Xiaomi MiMo Platform](https://api.xiaomimimo.com)
   - [OpenAI Privacy Policy](https://openai.com/policies/privacy-policy)
   - [Groq Privacy Policy](https://groq.com/privacy-policy/)
   - [OpenRouter Privacy Policy](https://openrouter.ai/privacy)
   - [DeepSeek Privacy Policy](https://www.deepseek.com/privacy)
   - [xAI Privacy Policy](https://x.ai/privacy)
 
+### C. Web Search Grounding (Optional)
+When real-time web search (`!search`, `!links`, or automatic web grounding) is enabled and triggered:
+- Only the formulated search query string (never your Discord User ID or account credentials) is transmitted to the configured search provider (Bing, DuckDuckGo, Tavily, or Brave Search) to retrieve relevant web snippets and citations.
+
 ---
 
 ## 5. Data Storage & Retention
 
-- **Ephemeral Chat Processing:** In-memory message content is processed in real time and discarded from active memory after generating and delivering the response.
+- **Volatile Conversation Memory:** Multi-turn conversation history is held strictly in volatile RAM (never written to disk), isolated per server channel (`guild_<id>_<channel_id>`) or per DM user (`dm_user_<id>`), and automatically purged after the configured inactivity TTL (default 30 minutes) or immediately when a user runs `!clear`.
+- **Token Usage Retention:** Local SQLite token usage records in `state/usage.db` are automatically pruned after 35 days.
 - **Configuration Files:** Server preferences are stored on disk in the `config/` directory until updated by an administrator or deleted.
-- **Local Logs:** Diagnostic logs in `gui_log.txt` are maintained on the host system for troubleshooting and display in the Silas Blue desktop interface.
+- **Local Logs:** Diagnostic logs in the `logs/` directory are maintained on the host system for troubleshooting.
 
 ---
 
@@ -114,4 +124,4 @@ We may update this Privacy Policy periodically to reflect new features, AI integ
 If you have questions, feedback, or data privacy requests, please reach out via:
 
 - **Discord:** [RobotsNeverDie (User ID: 296353246920835074)](https://discord.com/users/296353246920835074)
-- **GitHub Repository:** [https://github.com/RobotsNeverDie/Silas-Blue](https://github.com/RobotsNeverDie/Silas-Blue)
+- **GitHub Repository:** [https://github.com/RBND/Silas-Blue](https://github.com/RBND/Silas-Blue)

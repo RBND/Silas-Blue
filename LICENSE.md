@@ -1,5 +1,5 @@
 # RBND-NC License
-Version 1.2 - Last Updated: October 17, 2026
+Version 1.2 - Last Updated: October 22, 2026
 
 Copyright (c) 2025-2026 RobotsNeverDie. All rights reserved.
 
@@ -22,7 +22,7 @@ The Software may not be used, in whole or in part, for any commercial purposes. 
 ### 2. Attribution and Source Linking
 Any redistribution, fork, or sharing of this Software, modified or unmodified, must include:
 1. Clear and visible attribution to the original author(s) (**RobotsNeverDie**);
-2. A working link to the original source repository: `https://github.com/RobotsNeverDie/Silas-Blue`; and
+2. A working link to the original source repository: `https://github.com/RBND/Silas-Blue`; and
 3. A complete copy of this License.
 
 ### 3. No Sublicensing

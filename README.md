@@ -1,8 +1,8 @@
-# Silas Blue v3.5.8
+# Silas Blue v3.5.10
 
-[![Version](https://img.shields.io/badge/version-3.5.8-blue.svg)](https://github.com/RobotsNeverDie/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.10-blue.svg)](https://github.com/RBND/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
-[![GUI](https://img.shields.io/badge/GUI-PySide6-purple.svg)](https://www.qt.io/qt-for-python)
+[![GUI](https://img.shields.io/badge/GUI-PySide6%20%2B%20PyWebView-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
 [![License](https://img.shields.io/badge/license-RBND--NC--1.2-orange.svg)](LICENSE.md)
 [![Discord](https://img.shields.io/badge/Discord-discord.py-5865F2.svg)](https://discordpy.readthedocs.io/)
@@ -11,7 +11,29 @@
 
 ---
 
-## 🚀 What's New in Version 3.5.8
+## 🚀 What's New in Version 3.5.10 & 3.5.9
+
+* **Updated Documentation, License & Legal Policies (v3.5.10)**:
+  * Standardized `LICENSE.md` casing for GitHub badge resolution and updated all repository references to `https://github.com/RBND/Silas-Blue`.
+  * Refreshed `PRIVACY_POLICY.md` and `TERMS_OF_SERVICE.md` to document optional web search grounding (Bing, DuckDuckGo, Tavily, Brave), Xiaomi MiMo cloud presets, volatile RAM conversation memory with inactivity TTL, and 35-day automated SQLite quota pruning.
+* **Non-Paginated Multi-Message Delivery & Max Reply Length (v3.5.9)**:
+  * **Seamless Follow-Up Chunks**: When interactive embed pagination is disabled (`enable_pagination: false`), responses exceeding Discord's 2,000-character message limit are now automatically split and delivered as sequential follow-up messages instead of failing or truncating mid-sentence.
+  * **Configurable Max Reply Length**: Added `non_paginated_max_chars` (`Max reply chars when not paginated (0=Unlimited)`, `0`–`20000`) to both the Web Management Console and PySide6 Desktop GUI.
+* **Web Console Parity & Non-Destructive Guild Saves (v3.5.9)**:
+  * **Random Reply Mode Controls**: Added **Random Reply Mode** (`off`, `messages`, `minutes`) and **Reply Probability / Interval** (`1–1000`) controls directly to the Web Console's **Prompt & Pagination** sub-tab.
+  * **Non-Destructive Guild Config Merging**: Saving server settings from either UI now merges incoming updates against existing per-server JSON configuration before validation, ensuring partial saves never reset unsubmitted fields.
+* **Security & Authentication Hardening (v3.5.9)**:
+  * **Verified Discord Application Ownership Claiming**: If `bot_owner_id` is unset during first-time OAuth2 login, Silas Blue verifies the authenticating user against the live Discord Bot Application Owner/Team via `/oauth2/applications/@me` before granting ownership.
+  * **CSRF Cookie Binding on OAuth2**: Bound OAuth2 state validation to browser-specific `HttpOnly`, `SameSite=Lax` cookies (`sb_oauth_state`) with `secrets.compare_digest()`.
+  * **Trusted Proxy Validation & Secret Masking**: Restricted `X-Forwarded-Proto` header trust to loopback/private reverse-proxy peers and masked `tavily_api_key` and `brave_api_key` in `/api/config` responses.
+* **Performance & Reliability Improvements (v3.5.9)**:
+  * Eliminated redundant per-message `/api/tags` (`list_models()`) HTTP round-trips during active Discord chat turns.
+  * Added automatic 35-day historical retention pruning in `QuotaStore` (`state/usage.db`).
+  * Enabled simultaneous event and log queue fan-out when running the Desktop GUI alongside the embedded Web Management Server.
+
+---
+
+## 🚀 Prior Features (v3.5.8)
 
 * **Brand Favicon & Web Management Assets**:
   * **Cyberpunk Mascot Vector Favicon**: Introduced scalable vector SVG (`favicon.svg`) modeled after the Silas Blue neon robot mascot with dual magenta antenna orbs, cyan visor, glowing eyes, and dark high-contrast squircle plate.
@@ -243,16 +265,18 @@
 
 | Feature | Description |
 | :--- | :--- |
-| **Flexible AI Backends** | Run locally via **Ollama** or **Llama.cpp** (llama-server), or connect to remote endpoints (Xiaomi MiMo, OpenAI, Groq, OpenRouter, DeepSeek). |
-| **Dual Management UIs** | Desktop application built with PySide6 + responsive Single-Page App (SPA) web dashboard. |
-| **Discord OAuth2 Login** | Access-controlled web management locked to designated Discord User IDs. |
-| **Per-Server Role Permissions** | Define who can prompt the bot, switch AI models, or adjust server settings on a per-guild basis. |
+| **Flexible AI Backends** | Run locally via **Ollama** or **Llama.cpp** (`llama-server`), or connect to remote endpoints (Xiaomi MiMo, OpenAI, Groq, OpenRouter, DeepSeek, xAI). |
+| **Dual Management UIs** | Native desktop framing via **PyWebView** (or legacy **PySide6** with `--legacy-gui`) + responsive Single-Page App (SPA) web dashboard. |
+| **Discord OAuth2 Login** | Access-controlled web management locked to the verified Discord Application Owner (`bot_owner_id`) with CSRF-bound sessions. |
+| **Per-Server Role Permissions** | Four-domain granular access control (`can_reply`, `can_change_model`, `can_change_permissions`, `can_search`) per server. |
+| **Role-Based Token Quotas** | Configurable token allowances per Discord role with Daily, Weekly, Monthly, or Rolling 24-hour resets and `!quota` tracking. |
+| **Discord Forum Auto-Reply** | Proactively monitors Discord `ForumChannel` posts with channel/tag whitelists, specialized forum personas, and sequential multi-part delivery. |
 | **Custom Server Personas** | Set dedicated AI system prompts / personas per Discord server to tailor bot behavior to specific server communities. |
 | **Model Manager & Puller** | Discover installed models, switch active models on the fly, or pull new models from Ollama / HuggingFace. |
-| **Smart Response Pagination** | Intelligently breaks long AI responses into readable, Discord-safe paginated embeds (up to 1900 chars). |
-| **Web Search & Auto-Grounding** | Real-time RAG web search via DuckDuckGo (free, zero-config), Tavily, or Brave with intelligent auto-search intent detection. |
+| **Smart Response Pagination** | Intelligently breaks long AI responses into interactive paginated embeds or sequential follow-up messages with configurable length caps. |
+| **Web Search & Auto-Grounding** | Real-time RAG web search via **Bing** or **DuckDuckGo** (free, zero-config), **Tavily**, or **Brave** with intelligent auto-search intent detection. |
 | **Live WebSocket Logging** | Real-time monitoring of user prompts, AI completions, and gateway status without page refreshing. |
-| **Crash Protection & Auto-Restart** | Automatic recovery counters and optional periodic daemon auto-restarts for continuous uptime. |
+| **Self-Healing Updates & Rollback** | In-app/Discord/CLI updater with pre-update snapshots, boot health verification, and automatic rollback on startup crash. |
 
 ---
 
@@ -274,7 +298,7 @@
 #### Windows Quick Start
 1. Clone or download this repository:
    ```cmd
-   git clone https://github.com/RobotsNeverDie/Silas-Blue.git
+   git clone https://github.com/RBND/Silas-Blue.git
    cd Silas-Blue
    ```
 2. Double-click **`start.bat`** (or run `start.bat` in Command Prompt / PowerShell). 
@@ -283,7 +307,7 @@
 #### Linux & macOS Quick Start
 1. Clone or download this repository:
    ```bash
-   git clone https://github.com/RobotsNeverDie/Silas-Blue.git
+   git clone https://github.com/RBND/Silas-Blue.git
    cd Silas-Blue
    ```
 2. Make `start.sh` executable and run it:
@@ -296,7 +320,7 @@
 #### Manual Installation (All Platforms)
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/RobotsNeverDie/Silas-Blue.git
+   git clone https://github.com/RBND/Silas-Blue.git
    cd Silas-Blue
    ```
 
@@ -414,8 +438,12 @@ Silas Blue responds to mentions or standard prefix commands:
   ```
 * **Switching Models**:
   ```text
-  !model llama3:8b
+  !setmodel llama3:8b
   !models
+  ```
+* **Token Quotas & Usage**:
+  ```text
+  !quota                     - View your current role quota tier, tokens used, and reset countdown (aliases: !tokens, !myquota)
   ```
 * **Custom Server Personas (System Prompts)**:
   ```text
@@ -484,6 +512,7 @@ Silas Blue features a full-featured update management system supporting both nat
 | Option | Description | Default |
 | :--- | :--- | :--- |
 | `--headless`, `--no-gui` | Runs without desktop GUI (auto-detected on display-less Linux). | `False` |
+| `--legacy-gui` | Launches the classic native PySide6 desktop interface instead of the PyWebView wrapper. | `False` |
 | `--web` | Enables the embedded aiohttp web management server. | `True` |
 | `--no-web` | Disables the web management server. | `False` |
 | `--web-host` | Network interface to bind (`127.0.0.1` for local, `0.0.0.0` for LAN/VPS). | `127.0.0.1` |
@@ -533,4 +562,4 @@ python -m unittest discover tests
 ## 💬 Community & Support
 
 * **Discord**: [Contact RobotsNeverDie](https://discord.com/users/296353246920835074)
-* **GitHub Issues**: [github.com/RobotsNeverDie/Silas-Blue/issues](https://github.com/RobotsNeverDie/Silas-Blue/issues)
+* **GitHub Issues**: [github.com/RBND/Silas-Blue/issues](https://github.com/RBND/Silas-Blue/issues)
