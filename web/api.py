@@ -353,20 +353,34 @@ class ApiHandler:
         curr_ver = get_current_version()
         curr_commit = get_current_commit()
 
-        # If cached status indicates an update, but we are already on that version/commit, clear update_available
-        if cached and cached.get("update_available"):
+        # Synchronize cached status with current running version/commit
+        if cached:
+            cached["current_version"] = curr_ver
+            cached["current_commit"] = curr_commit
             cached_ver = cached.get("latest_version", "")
             cached_commit = (cached.get("latest_commit", "") or "")[:7]
             curr_c = (curr_commit or "")[:7]
 
-            if channel == "stable":
-                if cached_ver and parse_semver(curr_ver) >= parse_semver(cached_ver):
-                    cached["update_available"] = False
-                    cached["commits_behind"] = 0
+            if cached.get("update_available"):
+                if channel == "stable":
+                    if cached_ver and parse_semver(curr_ver) >= parse_semver(cached_ver):
+                        cached["update_available"] = False
+                        cached["commits_behind"] = 0
+                        cached["latest_version"] = curr_ver
+                        cached["latest_commit"] = curr_commit
+                else:
+                    if curr_c and cached_commit and curr_c == cached_commit:
+                        cached["update_available"] = False
+                        cached["commits_behind"] = 0
+                        cached["latest_version"] = curr_ver
+                    elif not cached_ver or cached_ver == curr_ver:
+                        remote_ver = await asyncio.to_thread(BotUpdater.get_remote_version, "origin/main")
+                        if remote_ver:
+                            cached["latest_version"] = remote_ver
             else:
-                if curr_c and cached_commit and curr_c == cached_commit:
-                    cached["update_available"] = False
-                    cached["commits_behind"] = 0
+                if not cached_ver or parse_semver(curr_ver) >= parse_semver(cached_ver):
+                    cached["latest_version"] = curr_ver
+                    cached["latest_commit"] = curr_commit
 
         return web.json_response({
             "current_version": curr_ver,

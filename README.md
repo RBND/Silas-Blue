@@ -1,6 +1,6 @@
-# Silas Blue v3.5.10
+# Silas Blue v3.5.11
 
-[![Version](https://img.shields.io/badge/version-3.5.10-blue.svg)](https://github.com/RBND/Silas-Blue)
+[![Version](https://img.shields.io/badge/version-3.5.11-blue.svg)](https://github.com/RBND/Silas-Blue)
 [![Python](https://img.shields.io/badge/python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![GUI](https://img.shields.io/badge/GUI-PySide6%20%2B%20PyWebView-purple.svg)](https://www.qt.io/qt-for-python)
 [![Web](https://img.shields.io/badge/Web-aiohttp-ff69b4.svg)](https://docs.aiohttp.org/)
@@ -11,8 +11,11 @@
 
 ---
 
-## 🚀 What's New in Version 3.5.10 & 3.5.9
+## 🚀 What's New in Version 3.5.11 & 3.5.10
 
+* **Accurate Remote Update Version Resolution (v3.5.11)**:
+  * Fixed a bug where checking for updates detected a newer version on `origin/main` or GitHub but continued displaying the currently installed version as the available update version number.
+  * `BotUpdater` now dynamically extracts `__version__` from remote `SilasBlue.py` (via git ref `origin/main:SilasBlue.py` with GitHub API and raw content fallbacks) across both `latest` and `stable` release channels.
 * **Updated Documentation, License & Legal Policies (v3.5.10)**:
   * Standardized `LICENSE.md` casing for GitHub badge resolution and updated all repository references to `https://github.com/RBND/Silas-Blue`.
   * Refreshed `PRIVACY_POLICY.md` and `TERMS_OF_SERVICE.md` to document optional web search grounding (Bing, DuckDuckGo, Tavily, Brave), Xiaomi MiMo cloud presets, volatile RAM conversation memory with inactivity TTL, and 35-day automated SQLite quota pruning.

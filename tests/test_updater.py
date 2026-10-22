@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 import os
 import json
 import shutil
@@ -6,6 +7,7 @@ import tempfile
 
 from updater import (
     parse_semver,
+    parse_version_from_text,
     get_current_version,
     get_current_commit,
     is_docker,
@@ -101,6 +103,35 @@ class TestUpdater(unittest.TestCase):
         self.assertIn("auto_update_enabled", cfg)
         self.assertIn("auto_update_mode", cfg)
         self.assertIn("auto_update_interval_hours", cfg)
+
+    def test_parse_version_from_text(self):
+        self.assertEqual(parse_version_from_text('__version__ = "3.5.11"\n'), "3.5.11")
+        self.assertEqual(parse_version_from_text("__version__ = 'v3.6.0'"), "3.6.0")
+        self.assertIsNone(parse_version_from_text("version = '1.0.0'"))
+
+    def test_latest_channel_reports_new_remote_version(self):
+        with patch("updater.get_current_version", return_value="3.5.9"), \
+             patch("updater.get_current_commit", return_value="aaaaaaa"), \
+             patch.object(BotUpdater, "_fetch_remote_main", return_value=("bbbbbbb", 2, ["bbbbbbb Bump to 3.5.11"])), \
+             patch.object(BotUpdater, "get_remote_version", return_value="3.5.11"):
+            status = BotUpdater.check_for_updates("latest")
+            self.assertTrue(status["update_available"])
+            self.assertEqual(status["current_version"], "3.5.9")
+            self.assertEqual(status["latest_version"], "3.5.11")
+            self.assertEqual(status["latest_commit"], "bbbbbbb")
+            self.assertEqual(status["commits_behind"], 2)
+
+    def test_stable_channel_reports_new_remote_version_from_main(self):
+        with patch("updater.get_current_version", return_value="3.5.9"), \
+             patch("updater.get_current_commit", return_value="aaaaaaa"), \
+             patch.object(BotUpdater, "query_github_api", return_value=[]), \
+             patch.object(BotUpdater, "_fetch_remote_main", return_value=("bbbbbbb", 1, ["bbbbbbb v3.5.11"])), \
+             patch.object(BotUpdater, "get_remote_version", return_value="3.5.11"):
+            status = BotUpdater.check_for_updates("stable")
+            self.assertTrue(status["update_available"])
+            self.assertEqual(status["current_version"], "3.5.9")
+            self.assertEqual(status["latest_version"], "3.5.11")
+            self.assertEqual(status["latest_commit"], "bbbbbbb")
 
 if __name__ == "__main__":
     unittest.main()

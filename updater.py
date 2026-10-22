@@ -15,6 +15,7 @@ import datetime
 import subprocess
 import urllib.request
 import urllib.error
+import base64
 import re
 from typing import Optional, Dict, Any, Tuple, List
 
@@ -33,19 +34,26 @@ PENDING_UPDATE_FILE = os.path.join(STATE_DIR, "pending_update.json")
 UPDATE_STATUS_FILE = os.path.join(STATE_DIR, "update_status.json")
 DOCKER_SIGNAL_FILE = os.path.join(STATE_DIR, "trigger_docker_update.sig")
 
+def parse_version_from_text(content: str) -> Optional[str]:
+    """Extracts __version__ string from SilasBlue.py source content."""
+    if not content:
+        return None
+    match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]+)[\'"]', content, re.MULTILINE)
+    if match:
+        return match.group(1).strip().lstrip("vV")
+    return None
+
 def get_current_version() -> str:
     """Reads __version__ dynamically from SilasBlue.py."""
     try:
         sb_path = os.path.join(os.path.dirname(__file__), "SilasBlue.py")
         with open(sb_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("__version__"):
-                    parts = line.split("=")
-                    if len(parts) >= 2:
-                        return parts[1].strip().strip('"').strip("'")
+            ver = parse_version_from_text(f.read())
+            if ver:
+                return ver
     except Exception as e:
         logger.debug(f"Could not read __version__ from SilasBlue.py: {e}")
-    return "3.5.10"
+    return "3.5.11"
 
 def parse_semver(v_str: str) -> Tuple[int, ...]:
     """Extracts numeric semver tuple (major, minor, patch) from version string."""
@@ -120,6 +128,80 @@ class BotUpdater:
         return None
 
     @classmethod
+    def get_remote_version(cls, ref: str = "origin/main") -> Optional[str]:
+        """
+        Determines the remote __version__ from SilasBlue.py on the target git ref or GitHub main branch.
+        """
+        if is_git_repo() and ref:
+            for candidate_ref in (ref, "FETCH_HEAD", "origin/main"):
+                rc_show, show_out, _ = run_git(["show", f"{candidate_ref}:SilasBlue.py"])
+                if rc_show == 0 and show_out:
+                    ver = parse_version_from_text(show_out)
+                    if ver:
+                        return ver
+
+        # Fallback 1: GitHub Contents API (uncached)
+        api_ref = ref.replace("origin/", "") if ref else "main"
+        file_data = cls.query_github_api(f"contents/SilasBlue.py?ref={api_ref}")
+        if isinstance(file_data, dict) and file_data.get("content"):
+            try:
+                decoded = base64.b64decode(file_data["content"]).decode("utf-8", errors="ignore")
+                ver = parse_version_from_text(decoded)
+                if ver:
+                    return ver
+            except Exception as e:
+                logger.debug(f"Could not decode remote SilasBlue.py from GitHub API: {e}")
+
+        # Fallback 2: Raw GitHub file
+        raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{api_ref}/SilasBlue.py"
+        try:
+            req = urllib.request.Request(raw_url, headers={"User-Agent": "SilasBlue-Updater"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    ver = parse_version_from_text(resp.read().decode("utf-8", errors="ignore"))
+                    if ver:
+                        return ver
+        except Exception as e:
+            logger.debug(f"Raw GitHub version fetch failed for {raw_url}: {e}")
+
+        return None
+
+    @classmethod
+    def _fetch_remote_main(cls) -> Tuple[Optional[str], int, List[str]]:
+        """
+        Fetches origin/main (or queries GitHub API if not in a git repo) and returns
+        (remote_sha, commits_behind, changelog_lines).
+        """
+        remote_sha: Optional[str] = None
+        behind: int = 0
+        changelog: List[str] = []
+
+        if is_git_repo():
+            rc, _, _ = run_git(["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main", "--force"])
+            if rc != 0:
+                rc, _, _ = run_git(["fetch", "origin", "main", "--force"])
+            if rc == 0:
+                rc_rev, sha_out, _ = run_git(["rev-parse", "--short", "origin/main"])
+                if rc_rev == 0 and sha_out:
+                    remote_sha = sha_out
+                rc_cnt, cnt_str, _ = run_git(["rev-list", "--count", "HEAD..origin/main"])
+                if rc_cnt == 0 and cnt_str.isdigit():
+                    behind = int(cnt_str)
+                    if behind > 0:
+                        rc_log, log_str, _ = run_git(["log", "HEAD..origin/main", "--oneline", "-n", "10"])
+                        if rc_log == 0 and log_str:
+                            changelog = log_str.splitlines()
+        else:
+            branch_data = cls.query_github_api("commits/main")
+            if branch_data and "sha" in branch_data:
+                remote_sha = branch_data["sha"][:7]
+                msg = branch_data.get("commit", {}).get("message", "")
+                if msg:
+                    changelog = [msg.splitlines()[0]]
+
+        return remote_sha, behind, changelog
+
+    @classmethod
     def check_for_updates(cls, channel: Optional[str] = None) -> Dict[str, Any]:
         """
         Checks for available updates on the specified or configured channel.
@@ -148,7 +230,7 @@ class BotUpdater:
 
         try:
             if channel == "stable":
-                # Check GitHub Releases
+                # Check GitHub Releases & Tags, plus main branch version releases
                 candidates = []
                 tag_commits: Dict[str, str] = {}
 
@@ -161,71 +243,76 @@ class BotUpdater:
                         commit_sha = ((t.get("commit") or {}).get("sha") or "")[:7]
                         if tag_name and commit_sha:
                             tag_commits[tag_name] = commit_sha
-                        candidates.append({
-                            "version": remote_ver,
-                            "tag": tag_name,
-                            "commit": commit_sha,
-                            "url": f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
-                            "body": ""
-                        })
+                        if parse_semver(remote_ver) > (0, 0, 0):
+                            candidates.append({
+                                "version": remote_ver,
+                                "tag": tag_name,
+                                "commit": commit_sha,
+                                "url": f"https://github.com/{GITHUB_REPO}/releases/tag/{tag_name}",
+                                "body": ""
+                            })
 
                 rel_data = cls.query_github_api("releases/latest")
                 if rel_data and "tag_name" in rel_data:
                     tag = rel_data["tag_name"]
                     remote_ver = tag.lstrip("vV")
+                    if parse_semver(remote_ver) > (0, 0, 0):
+                        candidates.append({
+                            "version": remote_ver,
+                            "tag": tag,
+                            "commit": tag_commits.get(tag, ""),
+                            "url": rel_data.get("html_url", status["release_url"]),
+                            "body": rel_data.get("body", "")
+                        })
+
+                # Also inspect remote main branch version in case newer versions were released directly to main
+                main_sha, main_behind, main_changelog = cls._fetch_remote_main()
+                main_ver = cls.get_remote_version("origin/main" if is_git_repo() else "main")
+                if main_ver and parse_semver(main_ver) > (0, 0, 0):
                     candidates.append({
-                        "version": remote_ver,
-                        "tag": tag,
-                        "commit": tag_commits.get(tag, ""),
-                        "url": rel_data.get("html_url", status["release_url"]),
-                        "body": rel_data.get("body", "")
+                        "version": main_ver,
+                        "tag": f"v{main_ver}",
+                        "commit": main_sha or current_sha,
+                        "url": f"https://github.com/{GITHUB_REPO}",
+                        "body": "\n".join(main_changelog),
+                        "commits_behind": main_behind
                     })
 
                 if candidates:
                     # Pick candidate with highest parsed semver (preferring entries with release body on ties)
                     candidates.sort(key=lambda c: (parse_semver(c["version"]), bool(c.get("body"))), reverse=True)
                     best = candidates[0]
-                    status["latest_version"] = best["version"]
-                    status["latest_commit"] = best.get("commit") or ""
-                    status["release_url"] = best["url"]
-                    if best["body"]:
-                        status["changelog"] = [line.strip() for line in best["body"].splitlines() if line.strip()][:10]
-
                     if parse_semver(best["version"]) > parse_semver(current_ver):
+                        status["latest_version"] = best["version"]
+                        status["latest_commit"] = best.get("commit") or current_sha
+                        status["release_url"] = best["url"]
+                        status["commits_behind"] = best.get("commits_behind", 0)
                         status["update_available"] = True
+                        if best["body"]:
+                            status["changelog"] = [line.strip() for line in best["body"].splitlines() if line.strip()][:10]
+                    else:
+                        status["latest_version"] = current_ver
+                        status["latest_commit"] = current_sha
 
             else:
-                # Latest channel: checks git origin/main
-                if is_git_repo():
-                    rc, _, _ = run_git(["fetch", "origin", "main", "--force"])
-                    if rc == 0:
-                        # Get remote commit hash
-                        rc_rev, remote_sha, _ = run_git(["rev-parse", "--short", "origin/main"])
-                        if rc_rev == 0:
-                            status["latest_commit"] = remote_sha
-                        
-                        # Count commits behind
-                        rc_cnt, cnt_str, _ = run_git(["rev-list", "--count", "HEAD..origin/main"])
-                        if rc_cnt == 0 and cnt_str.isdigit():
-                            behind = int(cnt_str)
-                            status["commits_behind"] = behind
-                            if behind > 0:
-                                status["update_available"] = True
-                                # Get recent commit messages
-                                rc_log, log_str, _ = run_git(["log", "HEAD..origin/main", "--oneline", "-n", "10"])
-                                if rc_log == 0 and log_str:
-                                    status["changelog"] = log_str.splitlines()
-                else:
-                    # Fallback to GitHub API if not a git repo
-                    branch_data = cls.query_github_api("commits/main")
-                    if branch_data and "sha" in branch_data:
-                        remote_sha = branch_data["sha"][:7]
-                        status["latest_commit"] = remote_sha
-                        msg = branch_data.get("commit", {}).get("message", "")
-                        if msg:
-                            status["changelog"] = [msg.splitlines()[0]]
-                        if remote_sha != current_sha and current_sha != "unknown":
-                            status["update_available"] = True
+                # Latest channel: checks git origin/main (or GitHub API fallback)
+                remote_sha, behind, changelog = cls._fetch_remote_main()
+                if remote_sha:
+                    status["latest_commit"] = remote_sha
+                status["commits_behind"] = behind
+                if changelog:
+                    status["changelog"] = changelog
+
+                remote_ver = cls.get_remote_version("origin/main" if is_git_repo() else "main")
+                if remote_ver:
+                    status["latest_version"] = remote_ver
+
+                if behind > 0:
+                    status["update_available"] = True
+                elif not is_git_repo() and remote_sha and remote_sha != current_sha and current_sha != "unknown":
+                    status["update_available"] = True
+                elif remote_ver and parse_semver(remote_ver) > parse_semver(current_ver):
+                    status["update_available"] = True
 
         except Exception as e:
             logger.error(f"Error checking for updates: {e}")
@@ -343,15 +430,16 @@ class BotUpdater:
                 
                 if tag_found:
                     target_ref = f"tags/{tag_found}"
-                    target_version = latest_tag_name
                     rc_co, _, err_co = run_git(["checkout", target_ref])
                     if rc_co != 0:
                         return False, f"Failed to checkout tag {tag_found}: {err_co}"
+                    target_version = get_current_version() or latest_tag_name
                 else:
                     # Fallback to main if specific tag is not indexed locally
                     target_ref = "origin/main"
                     run_git(["checkout", "main"])
                     run_git(["reset", "--hard", "origin/main"])
+                    target_version = get_current_version() or latest_tag_name
         else:
             # Latest channel: checkout main and reset hard to origin/main
             rc_co, _, err_co = run_git(["checkout", "main"])

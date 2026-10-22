@@ -1123,7 +1123,7 @@ async function loadUpdateStatus() {
         // Update Dashboard Summary
         const dashSummary = document.getElementById('dash-update-summary');
         const dashBtnApply = document.getElementById('btn-dash-update-apply');
-        const currVer = data.current_version || '3.5.10';
+        const currVer = data.current_version || '3.5.11';
         const currSha = (data.current_commit || '').substring(0, 7);
 
         if (dashSummary) {
@@ -1193,14 +1193,24 @@ function renderUpdateResult(res) {
     const statusSub = document.getElementById('update-status-sub');
     const latestVer = document.getElementById('update-latest-version');
     const latestCommit = document.getElementById('update-latest-commit');
+    const updateCurrVer = document.getElementById('update-curr-version');
+    const updateCurrCommit = document.getElementById('update-curr-commit');
+    const updateCurrChan = document.getElementById('update-curr-channel');
     const btnDashApply = document.getElementById('btn-dash-update-apply');
     const btnFullApply = document.getElementById('btn-full-update-apply');
     const changelogContainer = document.getElementById('update-changelog-container');
     const changelogList = document.getElementById('update-changelog-list');
     const actionPrompt = document.getElementById('update-action-prompt');
 
-    if (latestVer) latestVer.textContent = res.latest_version || res.current_version;
-    if (latestCommit) latestCommit.textContent = `#${(res.latest_commit || '').substring(0, 7)}`;
+    if (updateCurrVer && res.current_version) updateCurrVer.textContent = res.current_version;
+    if (updateCurrCommit && res.current_commit) updateCurrCommit.textContent = `#${(res.current_commit || '').substring(0, 7)}`;
+    if (updateCurrChan && res.channel) updateCurrChan.textContent = res.channel.toUpperCase();
+
+    const targetVer = res.latest_version || res.current_version;
+    const targetSha = (res.latest_commit || '').substring(0, 7);
+
+    if (latestVer) latestVer.textContent = targetVer;
+    if (latestCommit) latestCommit.textContent = `#${targetSha}`;
 
     if (res.update_available) {
         if (statusPill) {
@@ -1208,9 +1218,13 @@ function renderUpdateResult(res) {
             statusPill.textContent = 'UPDATE READY';
         }
         if (statusSub) statusSub.textContent = `Newer version available`;
-        if (actionPrompt) actionPrompt.innerHTML = `<b style="color:var(--accent-cyan);">A newer version (${res.latest_version}) is ready to install!</b>`;
+        const verDisplay = targetSha ? `v${escapeHtml(targetVer)} (#${escapeHtml(targetSha)})` : `v${escapeHtml(targetVer)}`;
+        if (actionPrompt) actionPrompt.innerHTML = `<b style="color:var(--accent-cyan);">A newer version (${verDisplay}) is ready to install!</b>`;
         if (btnDashApply) btnDashApply.style.display = 'inline-block';
-        if (btnFullApply) btnFullApply.style.display = 'inline-block';
+        if (btnFullApply) {
+            btnFullApply.style.display = 'inline-block';
+            btnFullApply.textContent = `🚀 Install v${targetVer} & Restart`;
+        }
 
         if (res.changelog && res.changelog.length > 0) {
             if (changelogContainer) changelogContainer.style.display = 'block';
