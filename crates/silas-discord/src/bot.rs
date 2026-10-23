@@ -308,6 +308,12 @@ impl BotController {
                         tracing::warn!("Failed to register global slash commands: {e}");
                     }
 
+                    tracing::info!(
+                        "Connected to Discord Gateway as {} ({}) across {} guilds.",
+                        ready.user.name,
+                        ready.user.id,
+                        ready.guilds.len()
+                    );
                     st.telemetry.emit(TelemetryEvent::System {
                         message: format!(
                             "Connected to Discord Gateway as {} ({}) across {} guilds.",

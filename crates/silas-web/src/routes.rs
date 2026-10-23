@@ -86,7 +86,9 @@ pub fn build_router(state: Arc<WebState>) -> Router {
     Router::new()
         .route("/auth/otp", get(auth_otp_handler))
         .route("/auth/login", get(auth_discord_login))
+        .route("/auth/discord/login", get(auth_discord_login))
         .route("/auth/callback", get(auth_discord_callback))
+        .route("/auth/discord/callback", get(auth_discord_callback))
         .route("/auth/logout", post(auth_logout))
         .route("/api/auth/session", get(api_auth_session))
         .nest("/api", api_router)
@@ -205,12 +207,20 @@ async fn auth_otp_handler(
     resp
 }
 
+fn resolve_effective_client_id(state: &WebState, settings: &silas_core::config::AppSettings) -> String {
+    let cid = settings.discord_oauth_client_id.trim();
+    if !cid.is_empty() {
+        return cid.to_string();
+    }
+    state.bot.bot_identity().id.unwrap_or_default()
+}
+
 async fn auth_discord_login(
     State(state): State<Arc<WebState>>,
     headers: HeaderMap,
 ) -> Response {
     let settings = state.storage.get_app_settings();
-    let client_id = settings.discord_oauth_client_id.trim();
+    let client_id = resolve_effective_client_id(&state, &settings);
     if client_id.is_empty() {
         return Redirect::to("/login.html?error=oauth_not_configured").into_response();
     }
@@ -226,7 +236,7 @@ async fn auth_discord_login(
     };
     auth_url
         .query_pairs_mut()
-        .append_pair("client_id", client_id)
+        .append_pair("client_id", &client_id)
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair("response_type", "code")
         .append_pair("scope", "identify")
@@ -286,11 +296,12 @@ async fn auth_discord_callback(
     };
 
     let settings = state.storage.get_app_settings();
+    let effective_client_id = resolve_effective_client_id(&state, &settings);
     let redirect_uri = resolve_oauth_redirect_uri(&headers);
 
     match state
         .auth
-        .verify_discord_oauth_callback(code, &redirect_uri, &settings)
+        .verify_discord_oauth_callback(code, &redirect_uri, &effective_client_id, &settings)
         .await
     {
         Ok((uid, uname)) => {
@@ -362,10 +373,14 @@ fn resolve_oauth_redirect_uri(headers: &HeaderMap) -> String {
         "http"
     };
     let host = headers
-        .get(header::HOST)
+        .get("x-forwarded-host")
         .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| headers.get(header::HOST).and_then(|v| v.to_str().ok()))
         .unwrap_or("127.0.0.1:8080");
-    format!("{scheme}://{host}/auth/callback")
+    format!("{scheme}://{host}/auth/discord/callback")
 }
 
 // ============================================================================
@@ -889,6 +904,8 @@ async fn serve_embedded_asset(
     let mut path = uri.path().trim_start_matches('/');
     if path.is_empty() {
         path = "index.html";
+    } else if path == "login" {
+        path = "login.html";
     }
 
     // Redirect unauthenticated requests for index.html to login.html

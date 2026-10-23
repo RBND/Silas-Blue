@@ -73,9 +73,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = CliArgs::parse();
 
     let filter = if args.debug {
-        "silas=debug,info"
+        "silas_cli=debug,silas_core=debug,silas_storage=debug,silas_ai=debug,silas_search=debug,silas_discord=debug,silas_web=debug,silas_updater=debug,info"
     } else {
-        "silas=info,warn"
+        "silas_cli=info,silas_core=info,silas_storage=info,silas_ai=info,silas_search=info,silas_discord=info,silas_web=info,silas_updater=info,warn"
     };
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -178,7 +178,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("  Silas Blue v{CURRENT_VERSION} — Rust Administration Console");
         println!("  Web Console URL : {base_url}");
         println!("  One-Time Login  : {otp_url}");
-        println!("  (Valid for 15 minutes, single-use)");
+        println!("  (Valid for 2 hours, single-use)");
         println!("========================================================================");
 
         let web_state = Arc::new(WebState {

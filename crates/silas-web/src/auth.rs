@@ -22,8 +22,30 @@ type HmacSha256 = Hmac<Sha256>;
 pub const SESSION_COOKIE_NAME: &str = "silas_session";
 pub const OAUTH_STATE_COOKIE_NAME: &str = "silas_oauth_state";
 pub const SESSION_TTL_SECS: i64 = 7 * 24 * 3600;
-pub const OTP_TTL: Duration = Duration::from_secs(15 * 60);
+pub const OTP_TTL: Duration = Duration::from_secs(2 * 3600);
 pub const MAX_TRACKED_IPS: usize = 4_096;
+
+/// Returns true if `ip` is loopback, RFC1918 private LAN, link-local, or Tailscale CGNAT (`100.64.0.0/10`).
+pub fn is_local_or_tailscale_ip(ip: IpAddr) -> bool {
+    if ip.is_loopback() {
+        return true;
+    }
+    match ip {
+        IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            v4.is_private()
+                || v4.is_link_local()
+                || (octets[0] == 100 && (octets[1] & 0b1100_0000) == 64) // 100.64.0.0/10 Tailscale CGNAT
+        }
+        IpAddr::V6(v6) => {
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return is_local_or_tailscale_ip(IpAddr::V4(mapped));
+            }
+            let seg0 = v6.segments()[0];
+            (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80 // ULA fc00::/7 (incl. Tailscale fd7a:115c:a1e0::/48) or link-local
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionClaims {
@@ -96,9 +118,9 @@ impl AuthManager {
         candidate_token: &str,
         client_ip: IpAddr,
     ) -> Result<(), &'static str> {
-        if !self.allow_lan_otp && !client_ip.is_loopback() {
+        if !self.allow_lan_otp && !is_local_or_tailscale_ip(client_ip) {
             return Err(
-                "One-Time Login links are restricted to loopback (127.0.0.1 / ::1) unless --allow-lan-otp is set.",
+                "One-Time Login links are restricted to loopback/LAN/Tailscale unless --allow-lan-otp is set.",
             );
         }
 
@@ -247,9 +269,10 @@ impl AuthManager {
         &self,
         code: &str,
         redirect_uri: &str,
+        effective_client_id: &str,
         settings: &AppSettings,
     ) -> Result<(String, String), String> {
-        if settings.discord_oauth_client_id.trim().is_empty()
+        if effective_client_id.trim().is_empty()
             || settings.discord_oauth_client_secret.trim().is_empty()
         {
             return Err("Discord OAuth2 Client ID / Secret are not configured.".to_string());
@@ -257,7 +280,7 @@ impl AuthManager {
 
         // 1. Exchange code for OAuth2 user access token
         let params = [
-            ("client_id", settings.discord_oauth_client_id.trim()),
+            ("client_id", effective_client_id.trim()),
             ("client_secret", settings.discord_oauth_client_secret.trim()),
             ("grant_type", "authorization_code"),
             ("code", code.trim()),
@@ -504,9 +527,17 @@ mod tests {
         let auth = AuthManager::new(false).unwrap();
         let token = auth.generate_otp_token();
 
-        // Non-loopback IP rejected when allow_lan_otp is false
-        let lan_ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 50));
-        assert!(auth.verify_and_consume_otp(&token, lan_ip).is_err());
+        // Public internet IP rejected when allow_lan_otp is false
+        let public_ip = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
+        assert!(auth.verify_and_consume_otp(&token, public_ip).is_err());
+
+        // LAN and Tailscale IPs are recognized
+        assert!(is_local_or_tailscale_ip(IpAddr::V4(Ipv4Addr::new(
+            192, 168, 4, 1
+        ))));
+        assert!(is_local_or_tailscale_ip(IpAddr::V4(Ipv4Addr::new(
+            100, 115, 39, 47
+        ))));
 
         // Loopback IP succeeds once, then second attempt fails (single-use)
         let loopback = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
