@@ -1,54 +1,26 @@
-# IDE & Environments
-/.idea
-/.vscode
-/.venv
-/venv
-/env
+# Rust / Cargo build artifacts
+/target/
+**/*.rs.bk
 
-# Python Bytecode & Caches
-/__pycache__
-/gui/__pycache__
-ai_providers/__pycache__
-tests/__pycache__
-*.py[cod]
-*$py.class
-.pytest_cache/
-*.egg-info/
+# Silas Blue runtime data & backups
+/data/
+/backups/
+/logs/
+*.db
+*.db-wal
+*.db-shm
+*.prev
+*.tmp
 
-# Configuration & Secrets
-.env
-.env.*
-*.env
-*.key
-config/*.key
-config/*.json
-!config/example.json
-config/*.txt
-!config/example.txt
-config/bot_token.txt
-config/gui_log.txt
-config/crash_counter.txt
+# Legacy local artifacts if present
+/config/
+/state/
+/.venv/
+/__pycache__/
 
-# Logs
-*.log
-logs/
-logs/*
-
-# OS generated files
+# OS & Editor files
 .DS_Store
 Thumbs.db
-
-# Build & Archives
-gui/silasblue.png
-/dist
-/build
-*.rar
-*.zip
-*.7z
-*.tar
-# Runtime state & Backups
-state/
-state/*
-backups/
-backups/*
-
+.vscode/
+.idea/
+*.swp

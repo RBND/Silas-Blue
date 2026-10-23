@@ -1,0 +1,23 @@
+[package]
+name = "silas-ai"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+silas-core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+arc-swap.workspace = true
+parking_lot.workspace = true

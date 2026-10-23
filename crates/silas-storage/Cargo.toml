@@ -1,0 +1,25 @@
+[package]
+name = "silas-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+silas-core.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+arc-swap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hmac.workspace = true

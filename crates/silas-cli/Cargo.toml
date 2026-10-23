@@ -1,0 +1,28 @@
+[package]
+name = "silas-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "silas-blue"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+silas-core.workspace = true
+silas-storage.workspace = true
+silas-ai.workspace = true
+silas-search.workspace = true
+silas-discord.workspace = true
+silas-web.workspace = true
+silas-updater.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+open.workspace = true

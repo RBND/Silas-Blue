@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Sign In — Silas Blue v4.0 Console</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <div class="login-brand">
+      <img src="/favicon.svg" alt="Silas Blue Logo" class="brand-icon">
+      <div>
+        <h1>Silas Blue</h1>
+        <p class="subtitle">Rust v4.0 Administration Console</p>
+      </div>
+    </div>
+
+    <div id="login-alert" class="alert-banner hidden" role="alert"></div>
+
+    <section class="login-section">
+      <h2>1. Local One-Time Magic Link</h2>
+      <p>
+        When starting <code>silas-blue</code> in your terminal, a single-use 256-bit login URL
+        (<code>http://127.0.0.1:8080/auth/otp?token=...</code>) is printed to stdout and automatically opened on desktop systems.
+      </p>
+    </section>
+
+    <div class="divider"><span>OR</span></div>
+
+    <section class="login-section">
+      <h2>2. Discord OAuth2 Owner Sign-In</h2>
+      <p>
+        Sign in with the Discord account that owns this bot application or is listed in <code>owner_ids</code>.
+      </p>
+      <a href="/auth/login" id="discord-oauth-btn" class="btn btn-primary btn-block">
+        Sign In with Discord
+      </a>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

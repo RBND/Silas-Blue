@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>Silas Blue v4.0 — Administration Console</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="manifest" href="/site.webmanifest">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
+        <div>
+          <h1 class="brand-title">Silas Blue</h1>
+          <span id="sidebar-version" class="badge badge-neutral">v4.0.0</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Primary Navigation">
+        <button type="button" class="nav-item active" data-view="overview">
+          Overview &amp; Telemetry
+        </button>
+        <button type="button" class="nav-item" data-view="backends">
+          AI &amp; Search Backends
+        </button>
+        <button type="button" class="nav-item" data-view="servers">
+          Server Configuration
+        </button>
+        <button type="button" class="nav-item" data-view="updates">
+          Updates &amp; Snapshots
+        </button>
+        <button type="button" class="nav-item" data-view="invite">
+          Invite &amp; Permissions
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <label for="theme-selector" class="field-label">Color Theme</label>
+        <select id="theme-selector" class="input-select">
+          <option value="system">System Default (Auto)</option>
+          <option value="silas-dark">Silas Blue Dark</option>
+          <option value="midnight-oled">Midnight OLED</option>
+          <option value="nord-frost">Nord Frost</option>
+          <option value="cyber-amber">Cyber Amber</option>
+          <option value="daylight-slate">Daylight Slate (Light)</option>
+        </select>
+
+        <div class="session-bar">
+          <span id="session-username" class="session-user">Authenticated</span>
+          <button type="button" id="logout-btn" class="btn btn-secondary btn-sm">Sign Out</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Surface -->
+    <main class="main-content">
+      <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+      <!-- VIEW 1: Overview & Live Telemetry -->
+      <section id="view-overview" class="view-panel">
+        <header class="view-header">
+          <div>
+            <h2>Overview &amp; Live Telemetry</h2>
+            <p class="subtitle">Gateway lifecycle control, active metrics, and real-time event stream.</p>
+          </div>
+          <div class="header-actions">
+            <span id="bot-status-badge" class="badge badge-offline">Offline</span>
+            <button type="button" id="btn-bot-start" class="btn btn-success">Start Bot</button>
+            <button type="button" id="btn-bot-restart" class="btn btn-primary">Restart</button>
+            <button type="button" id="btn-bot-stop" class="btn btn-danger">Stop</button>
+          </div>
+        </header>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Connected Servers</span>
+            <strong id="stat-guilds" class="stat-value">0</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Active AI Backend</span>
+            <strong id="stat-backend" class="stat-value">ollama</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Active Model</span>
+            <strong id="stat-model" class="stat-value">-</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Active Memory Channels</span>
+            <strong id="stat-memory" class="stat-value">0</strong>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Bot Identity &amp; Global Profile</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bot-global-username">Global Discord Username</label>
+              <input type="text" id="bot-global-username" class="input-text" placeholder="Silas Blue" maxlength="32">
+            </div>
+            <div class="form-group form-actions-inline">
+              <button type="button" id="btn-save-global-name" class="btn btn-secondary">Update Global Username</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Real-Time Telemetry &amp; Inference Stream</h3>
+            <div class="log-controls">
+              <select id="log-filter-level" class="input-select input-sm" aria-label="Filter log level">
+                <option value="ALL">All Events</option>
+                <option value="ACTIVITY">Bot Activity Only</option>
+                <option value="INFO">INFO &amp; Above</option>
+                <option value="WARN">WARN &amp; ERROR</option>
+              </select>
+              <button type="button" id="btn-clear-logs" class="btn btn-secondary btn-sm">Clear Console</button>
+            </div>
+          </div>
+          <div id="telemetry-log-box" class="telemetry-console" role="log" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: AI & Search Backends -->
+      <section id="view-backends" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>AI &amp; Search Backends</h2>
+            <p class="subtitle">Configure Discord credentials, local/remote LLM engines, and autonomous RAG web search.</p>
+          </div>
+          <button type="button" id="btn-save-global-settings" class="btn btn-primary">Save Global Settings</button>
+        </header>
+
+        <div class="card">
+          <h3>Discord Application &amp; Owner Credentials</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="cfg-discord-token">Discord Bot Token <span id="badge-has-token" class="badge badge-neutral">Unset</span></label>
+              <input type="password" id="cfg-discord-token" class="input-text" placeholder="Leave blank to keep existing token" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+              <label for="cfg-owner-ids">Authorized Owner Discord User IDs (comma-separated)</label>
+              <input type="text" id="cfg-owner-ids" class="input-text" placeholder="123456789012345678, 987654321098765432">
+            </div>
+            <div class="form-group">
+              <label for="cfg-client-id">Discord OAuth2 Client ID</label>
+              <input type="text" id="cfg-client-id" class="input-text" placeholder="Application Client ID">
+            </div>
+            <div class="form-group">
+              <label for="cfg-client-secret">Discord OAuth2 Client Secret <span id="badge-has-secret" class="badge badge-neutral">Unset</span></label>
+              <input type="password" id="cfg-client-secret" class="input-text" placeholder="Leave blank to keep existing secret" autocomplete="new-password">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>AI Inference Provider</h3>
+            <button type="button" id="btn-detect-local" class="btn btn-secondary btn-sm">Detect Local Backends</button>
+          </div>
+          <div id="detect-report-box" class="status-note hidden"></div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="cfg-ai-provider">Active Backend Engine</label>
+              <select id="cfg-ai-provider" class="input-select">
+                <option value="ollama">Ollama (Local / LAN)</option>
+                <option value="llamacpp">llama.cpp Server (OpenAI-Compatible Local)</option>
+                <option value="remote">Remote Cloud API (OpenAI / OpenRouter / Groq / DeepSeek / xAI / MiMo)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfg-active-model">Default Local Model</label>
+              <div class="input-with-btn">
+                <select id="cfg-active-model" class="input-select"></select>
+                <button type="button" id="btn-refresh-models" class="btn btn-secondary btn-sm">Refresh</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="cfg-ollama-url">Ollama Base URL</label>
+              <input type="url" id="cfg-ollama-url" class="input-text" placeholder="http://127.0.0.1:11434">
+            </div>
+            <div class="form-group">
+              <label for="cfg-llamacpp-url">llama.cpp Server URL</label>
+              <input type="url" id="cfg-llamacpp-url" class="input-text" placeholder="http://127.0.0.1:8081">
+            </div>
+          </div>
+
+          <div class="subcard">
+            <h4>Pull Ollama Model</h4>
+            <div class="form-row">
+              <input type="text" id="pull-model-input" class="input-text" placeholder="e.g. llama3.2:latest or qwen2.5:7b">
+              <button type="button" id="btn-pull-model" class="btn btn-secondary">Pull Model</button>
+            </div>
+            <div id="pull-progress-status" class="status-note hidden"></div>
+          </div>
+
+          <div class="subcard">
+            <h4>Remote Cloud API Configuration</h4>
+            <p class="help-text">
+              Security Note: Changing the Remote Base URL automatically clears any previously stored API key unless you enter a new API key simultaneously.
+            </p>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="cfg-remote-preset">Remote Provider Preset</label>
+                <select id="cfg-remote-preset" class="input-select">
+                  <option value="openai">OpenAI</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="groq">Groq</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="xai">xAI (Grok)</option>
+                  <option value="xiaomi">Xiaomi MiMo</option>
+                  <option value="custom">Custom Endpoint</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="cfg-remote-base-url">Remote Base URL</label>
+                <input type="url" id="cfg-remote-base-url" class="input-text" placeholder="https://api.openai.com/v1">
+              </div>
+              <div class="form-group">
+                <label for="cfg-remote-model">Remote Model Identifier</label>
+                <input type="text" id="cfg-remote-model" class="input-text" placeholder="gpt-4o-mini">
+              </div>
+              <div class="form-group">
+                <label for="cfg-remote-api-key">Remote API Key <span id="badge-has-remote-key" class="badge badge-neutral">Unset</span></label>
+                <input type="password" id="cfg-remote-api-key" class="input-text" placeholder="Leave blank to keep existing key" autocomplete="new-password">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Autonomous Web Search &amp; RAG Grounding</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="cfg-search-provider">Primary Search Engine</label>
+              <select id="cfg-search-provider" class="input-select">
+                <option value="bing">Bing Scraper (Zero-Key + DuckDuckGo Failover)</option>
+                <option value="duckduckgo">DuckDuckGo HTML (Zero-Key + Bing Failover)</option>
+                <option value="tavily">Tavily AI Search API (With Zero-Key Failover)</option>
+                <option value="brave">Brave Search API (With Zero-Key Failover)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfg-tavily-key">Tavily API Key <span id="badge-has-tavily" class="badge badge-neutral">Unset</span></label>
+              <input type="password" id="cfg-tavily-key" class="input-text" placeholder="tvly-..." autocomplete="new-password">
+            </div>
+            <div class="form-group">
+              <label for="cfg-brave-key">Brave Search API Key <span id="badge-has-brave" class="badge badge-neutral">Unset</span></label>
+              <input type="password" id="cfg-brave-key" class="input-text" placeholder="BSA..." autocomplete="new-password">
+            </div>
+          </div>
+
+          <div class="subcard">
+            <h4>Test Live Web Search</h4>
+            <div class="form-row">
+              <input type="text" id="test-search-query" class="input-text" placeholder="Latest Rust release notes">
+              <button type="button" id="btn-test-search" class="btn btn-secondary">Run Search Test</button>
+            </div>
+            <div id="test-search-results" class="search-results-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 3: Server Configuration (4 Sub-Tabs) -->
+      <section id="view-servers" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>Server Configuration</h2>
+            <p class="subtitle">Per-server permissions, token quotas, custom AI personas, pagination, and Forum auto-reply.</p>
+          </div>
+          <div class="header-actions">
+            <select id="guild-selector" class="input-select" aria-label="Select Discord Server"></select>
+            <button type="button" id="btn-save-guild-config" class="btn btn-primary">Save Server Config</button>
+          </div>
+        </header>
+
+        <div class="subtabs" role="tablist">
+          <button type="button" class="subtab-btn active" data-subtab="subtab-permissions">1. Permissions &amp; Channels</button>
+          <button type="button" class="subtab-btn" data-subtab="subtab-quotas">2. Token Quotas</button>
+          <button type="button" class="subtab-btn" data-subtab="subtab-persona">3. Persona, Memory &amp; Pagination</button>
+          <button type="button" class="subtab-btn" data-subtab="subtab-forum">4. Forum Auto-Reply</button>
+        </div>
+
+        <!-- Sub-Tab 1: Permissions & Channels -->
+        <div id="subtab-permissions" class="subtab-panel card">
+          <h3>Server Identity &amp; Access Permissions</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="gcfg-bot-nickname">Bot Nickname in Server</label>
+              <input type="text" id="gcfg-bot-nickname" class="input-text" placeholder="Default (Silas Blue)" maxlength="32">
+            </div>
+            <div class="form-group">
+              <label for="gcfg-default-model">Server Default Model Override</label>
+              <input type="text" id="gcfg-default-model" class="input-text" placeholder="Leave blank to use global active model">
+            </div>
+            <div class="form-group">
+              <label for="gcfg-allowed-channels">Allowed Channel IDs (comma-separated, empty = all channels)</label>
+              <input type="text" id="gcfg-allowed-channels" class="input-text" placeholder="e.g. 112233445566778899">
+              <div id="chips-text-channels" class="chip-bar"></div>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-prompt-roles">Allowed Prompt Role IDs (empty = @everyone allowed)</label>
+              <input type="text" id="gcfg-prompt-roles" class="input-text" placeholder="Role IDs allowed to chat with bot">
+              <div id="chips-roles" class="chip-bar"></div>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-model-roles">Model Switch Role IDs (empty = Admins only)</label>
+              <input type="text" id="gcfg-model-roles" class="input-text" placeholder="Role IDs allowed to run /setmodel">
+            </div>
+            <div class="form-group">
+              <label for="gcfg-admin-roles">Bot Admin Role IDs (empty = Discord Manage Server/Admin)</label>
+              <input type="text" id="gcfg-admin-roles" class="input-text" placeholder="Role IDs allowed to change server bot settings">
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-Tab 2: Token Quotas -->
+        <div id="subtab-quotas" class="subtab-panel card hidden">
+          <div class="card-header-split">
+            <h3>Token Quotas &amp; Rolling Window Schedules</h3>
+            <button type="button" id="btn-reset-guild-quota" class="btn btn-danger btn-sm">Reset Current Window Usage</button>
+          </div>
+          <div class="form-grid">
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="gcfg-token-enabled">
+                Enable Per-User Token Quotas on this Server
+              </label>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-token-limit">Default Token Limit per Window (`0` = Unlimited)</label>
+              <input type="number" id="gcfg-token-limit" class="input-text" min="0" step="1000" value="50000">
+            </div>
+            <div class="form-group">
+              <label for="gcfg-token-schedule">Reset Window Schedule</label>
+              <select id="gcfg-token-schedule" class="input-select">
+                <option value="hourly">Hourly</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly (Monday 00:00)</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-token-timezone">Schedule Timezone</label>
+              <select id="gcfg-token-timezone" class="input-select">
+                <option value="UTC">UTC</option>
+                <option value="America/New_York">America/New_York</option>
+                <option value="America/Chicago">America/Chicago</option>
+                <option value="America/Denver">America/Denver</option>
+                <option value="America/Los_Angeles">America/Los_Angeles</option>
+                <option value="Europe/London">Europe/London</option>
+                <option value="Europe/Berlin">Europe/Berlin</option>
+                <option value="Asia/Tokyo">Asia/Tokyo</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="subcard">
+            <h4>Current Window Usage Ledger (<span id="quota-window-label">-</span>)</h4>
+            <div id="quota-usage-list" class="usage-list"></div>
+          </div>
+        </div>
+
+        <!-- Sub-Tab 3: Persona, Memory & Pagination -->
+        <div id="subtab-persona" class="subtab-panel card hidden">
+          <div class="card-header-split">
+            <h3>Persona System Prompt, Memory &amp; Pagination</h3>
+            <button type="button" id="btn-clear-guild-memory" class="btn btn-secondary btn-sm">Clear Server Memory</button>
+          </div>
+          <div class="form-group">
+            <label for="gcfg-system-prompt">Server System Prompt (Immutable Safety Guardrails are automatically enforced)</label>
+            <textarea id="gcfg-system-prompt" class="input-textarea" rows="5"></textarea>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="gcfg-web-search">
+                Enable Autonomous RAG Web Search
+              </label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="gcfg-memory-enabled">
+                Enable Volatile Channel Conversation Memory
+              </label>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-memory-max">Max Remembered Messages per Channel (1–100)</label>
+              <input type="number" id="gcfg-memory-max" class="input-text" min="1" max="100" value="20">
+            </div>
+            <div class="form-group">
+              <label for="gcfg-memory-ttl">Memory Expiration TTL in Minutes (`0` = Never)</label>
+              <input type="number" id="gcfg-memory-ttl" class="input-text" min="0" max="1440" value="30">
+            </div>
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="gcfg-pagination-enabled">
+                Enable Interactive Button Pagination (`◀ Previous` / `Next ▶`)
+              </label>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-pagination-chars">Max Characters per Page (500–1900)</label>
+              <input type="number" id="gcfg-pagination-chars" class="input-text" min="500" max="1900" value="1800">
+            </div>
+            <div class="form-group">
+              <label for="gcfg-random-mode">Spontaneous Reply Mode (60s anti-spam cooldown enforced)</label>
+              <select id="gcfg-random-mode" class="input-select">
+                <option value="off">Off (Only reply when mentioned or replied to)</option>
+                <option value="messages">Every N Messages in Channel</option>
+                <option value="minutes">After N Minutes of Activity</option>
+                <option value="probability">Percentage Probability (1–100%)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="gcfg-random-value">Spontaneous Reply Threshold / Value</label>
+              <input type="number" id="gcfg-random-value" class="input-text" min="0" max="1000" value="0">
+            </div>
+          </div>
+        </div>
+
+        <!-- Sub-Tab 4: Forum Auto-Reply -->
+        <div id="subtab-forum" class="subtab-panel card hidden">
+          <h3>Forum Channel Auto-Reply</h3>
+          <p class="help-text">
+            Automatically responds to newly created posts in Discord Forum Channels with optional live RAG web search grounding.
+          </p>
+          <div class="form-grid">
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="gcfg-forum-enabled">
+                Enable Forum Thread Auto-Reply
+              </label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label>
+                <input type="checkbox" id="gcfg-forum-search">
+                Enable Web Search Grounding for Forum Auto-Replies
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="gcfg-forum-channels">Target Forum Channel IDs (comma-separated, empty = all Forum Channels)</label>
+            <input type="text" id="gcfg-forum-channels" class="input-text" placeholder="Leave blank for all forum channels">
+            <div id="chips-forum-channels" class="chip-bar"></div>
+          </div>
+          <div class="form-group">
+            <label for="gcfg-forum-prompt">Forum Auto-Reply System Prompt Override</label>
+            <textarea id="gcfg-forum-prompt" class="input-textarea" rows="4" placeholder="Leave blank to use the server's primary system prompt"></textarea>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 4: Updates & Snapshots -->
+      <section id="view-updates" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>Updates &amp; Snapshots</h2>
+            <p class="subtitle">Ed25519-verified binary self-updater, pre-update snapshots, and redacted SQLite backups.</p>
+          </div>
+          <div class="header-actions">
+            <button type="button" id="btn-check-update" class="btn btn-secondary">Check for Updates</button>
+            <button type="button" id="btn-apply-update" class="btn btn-primary">Verify &amp; Install Update</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <h3>Release Channel &amp; Verification Status</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="update-channel-select">Update Channel</label>
+              <select id="update-channel-select" class="input-select">
+                <option value="stable">Stable Releases</option>
+                <option value="prerelease">Pre-release / Beta</option>
+              </select>
+            </div>
+          </div>
+          <div id="update-status-box" class="status-note">Click "Check for Updates" to query GitHub Releases.</div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Snapshots &amp; Redacted Database Export</h3>
+            <div class="header-actions">
+              <button type="button" id="btn-create-snapshot" class="btn btn-secondary btn-sm">Create Local Snapshot</button>
+              <a href="/api/backup/download" class="btn btn-primary btn-sm" download="silas-blue-redacted-backup.db">Download Redacted DB Backup</a>
+            </div>
+          </div>
+          <p class="help-text">
+            Downloaded database backups are automatically scrubbed of all secret keys (`discord_token`, `remote_api_key`, `web_secret_key`, search keys) via a double-<code>VACUUM</code> pipeline so no credentials ever leave the server.
+          </p>
+          <div id="snapshots-list" class="usage-list"></div>
+        </div>
+      </section>
+
+      <!-- VIEW 5: Invite Generator -->
+      <section id="view-invite" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>Discord Bot Invite &amp; Least-Privilege Permissions</h2>
+            <p class="subtitle">Invite Silas Blue to a Discord server with exact least-privilege permissions.</p>
+          </div>
+        </header>
+
+        <div class="card">
+          <h3>Least-Privilege OAuth2 Invite URL</h3>
+          <p class="help-text">
+            Grants Permissions Integer <code>274878221312</code>: View Channels, Send Messages, Send Messages in Threads, Embed Links, Attach Files, Read Message History, and Add Reactions. Never requests Presence or Guild Members privileged intents.
+          </p>
+          <div class="form-row">
+            <input type="text" id="invite-url-display" class="input-text" readonly value="Configure Discord Client ID to generate invite link">
+            <button type="button" id="btn-copy-invite" class="btn btn-secondary">Copy Link</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,27 +1,41 @@
-# Silas Blue Headless Server & Web Management Dockerfile
-FROM python:3.12-slim
+# ==============================================================================
+# Stage 1: Rust Workspace Builder
+# ==============================================================================
+FROM rust:1.85-bookworm AS builder
 
-# Prevent Python from buffering stdout/stderr
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+WORKDIR /build
+
+# Copy Cargo workspace manifests and source crates
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# Build release binaries (LTO, stripped, single codegen-unit)
+RUN cargo build --release --workspace --bins
+
+# ==============================================================================
+# Stage 2: Minimal Hardened Runtime Image
+# ==============================================================================
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install system dependencies (curl and git)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+# Copy compiled binaries from builder stage
+COPY --from=builder /build/target/release/silas-blue /usr/local/bin/silas-blue
+COPY --from=builder /build/target/release/silas-migrate /usr/local/bin/silas-migrate
 
-# Install python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Create runtime directories with restricted permissions
+RUN mkdir -p /app/data /app/backups && chmod 700 /app/data /app/backups
 
-# Copy application source
-COPY . .
+ENV SILAS_HEADLESS=true \
+    SILAS_WEB_HOST=0.0.0.0 \
+    SILAS_WEB_PORT=8080 \
+    SILAS_DB_PATH=/app/data/silas.db \
+    SILAS_BACKUPS_DIR=/app/backups
 
-# Expose Web Management Port
 EXPOSE 8080
 
-# Run in headless daemon mode binding web server to all interfaces
-CMD ["python", "SilasBlue.py", "--headless", "--web", "--web-host", "0.0.0.0", "--web-port", "8080"]
+CMD ["silas-blue", "--headless", "--web-host", "0.0.0.0", "--web-port", "8080"]

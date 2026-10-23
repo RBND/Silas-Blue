@@ -1,0 +1,24 @@
+[package]
+name = "silas-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+regex.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+indexmap.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
+sha2.workspace = true
+hmac.workspace = true
+hex.workspace = true

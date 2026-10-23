@@ -4,15 +4,17 @@ services:
     container_name: silas-blue
     restart: unless-stopped
     volumes:
-      - ./config:/app/config
-      - ./logs:/app/logs
-      - ./state:/app/state
+      - ./data:/app/data
+      - ./backups:/app/backups
     ports:
-      # Expose only to localhost if using Caddy or internal LAN;
-      # Change to "8080:8080" if accessing directly over LAN without Caddy
+      # Expose to loopback by default; change to "8080:8080" for direct LAN access
       - "127.0.0.1:8080:8080"
     environment:
-      - PYTHONUNBUFFERED=1
+      - SILAS_HEADLESS=true
+      - SILAS_WEB_HOST=0.0.0.0
+      - SILAS_WEB_PORT=8080
+      - SILAS_DB_PATH=/app/data/silas.db
+      - SILAS_BACKUPS_DIR=/app/backups
 
   # Optional automated HTTPS reverse-proxy for public VPS deployments
   caddy:

@@ -1,0 +1,90 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/silas-core",
+    "crates/silas-storage",
+    "crates/silas-ai",
+    "crates/silas-search",
+    "crates/silas-discord",
+    "crates/silas-web",
+    "crates/silas-updater",
+    "crates/silas-cli",
+    "crates/silas-migrate",
+]
+
+[workspace.package]
+version = "4.0.0"
+edition = "2021"
+authors = ["RobotsNeverDie <https://github.com/RBND/Silas-Blue>"]
+license = "LicenseRef-RBND-NC-1.2"
+repository = "https://github.com/RBND/Silas-Blue"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+non_ascii_idents = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+
+[workspace.dependencies]
+tokio = { version = "1.40", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+regex = "1.11"
+dashmap = "6.1"
+parking_lot = "0.12"
+indexmap = "2.6"
+arc-swap = "1.7"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+url = "2.5"
+base64 = "0.22"
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2.6"
+rand = "0.8"
+hex = "0.4"
+zeroize = { version = "1.8", features = ["derive"] }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
+scraper = "0.20"
+html-escape = "0.2"
+async-trait = "0.1"
+futures-util = "0.3"
+poise = "0.6"
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "cache", "chrono"] }
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["limit", "set-header", "trace"] }
+rust-embed = "8.5"
+mime_guess = "2.0"
+cookie = "0.18"
+clap = { version = "4.5", features = ["derive", "env"] }
+open = "5.3"
+self-replace = "1.5"
+
+# Workspace internal crates
+silas-core = { path = "crates/silas-core" }
+silas-storage = { path = "crates/silas-storage" }
+silas-ai = { path = "crates/silas-ai" }
+silas-search = { path = "crates/silas-search" }
+silas-discord = { path = "crates/silas-discord" }
+silas-web = { path = "crates/silas-web" }
+silas-updater = { path = "crates/silas-updater" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
