@@ -475,7 +475,7 @@ impl BotUpdater {
                 continue;
             }
             let size_bytes = dir_size_bytes(&path);
-            let mut version = "4.0.0".to_string();
+            let mut version = env!("CARGO_PKG_VERSION").to_string();
             let mut created_at = String::new();
             let meta_file = path.join("snapshot.json");
             if meta_file.exists() {

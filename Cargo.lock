@@ -2421,7 +2421,7 @@ dependencies = [
 
 [[package]]
 name = "silas-ai"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -2439,7 +2439,7 @@ dependencies = [
 
 [[package]]
 name = "silas-cli"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "chrono",
  "clap",
@@ -2458,7 +2458,7 @@ dependencies = [
 
 [[package]]
 name = "silas-core"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "chrono",
  "dashmap 6.2.1",
@@ -2477,7 +2477,7 @@ dependencies = [
 
 [[package]]
 name = "silas-discord"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "chrono",
  "dashmap 6.2.1",
@@ -2500,7 +2500,7 @@ dependencies = [
 
 [[package]]
 name = "silas-migrate"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "chrono",
  "clap",
@@ -2514,7 +2514,7 @@ dependencies = [
 
 [[package]]
 name = "silas-search"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2535,7 +2535,7 @@ dependencies = [
 
 [[package]]
 name = "silas-storage"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -2555,7 +2555,7 @@ dependencies = [
 
 [[package]]
 name = "silas-updater"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "chrono",
  "ed25519-dalek",
@@ -2575,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "silas-web"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "axum",
  "base64 0.22.1",
