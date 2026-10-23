@@ -38,4 +38,4 @@ ENV SILAS_HEADLESS=true \
 
 EXPOSE 8080
 
-CMD ["silas-blue", "--headless", "--web-host", "0.0.0.0", "--web-port", "8080"]
+CMD ["silas-blue"]
