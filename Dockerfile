@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: Rust Workspace Builder
 # ==============================================================================
-FROM rust:1.85-bookworm AS builder
+FROM rust:bookworm AS builder
 
 WORKDIR /build
 
