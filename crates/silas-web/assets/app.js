@@ -7,6 +7,7 @@
   const CSRF_HEADER = { "X-Requested-With": "SilasBlue-SPA" };
   let remotePresets = [];
   let currentGuildId = null;
+  let currentUserSession = null;
     let telemetryLogs = [];
   let wsConnection = null;
 
@@ -1804,6 +1805,7 @@
   async function checkSessionAndLoadData() {
     try {
       const sess = await apiFetch('/api/auth/session');
+      currentUserSession = sess;
       if (!sess.authenticated) {
         window.location.href = '/login.html';
         return;
