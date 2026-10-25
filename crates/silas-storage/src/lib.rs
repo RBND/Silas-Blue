@@ -25,7 +25,7 @@ use silas_core::config::{
 };
 use silas_core::reddit::{clean_subreddit_name, NewRedditSubscription, RedditSubscription};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 const RETENTION_DAYS: i64 = 35;
 
 #[derive(Debug, Error)]
@@ -63,6 +63,293 @@ pub struct TokenUsageEntry {
     pub completion_tokens: i64,
     pub model: String,
     pub recorded_at: i64,
+}
+
+/// Moderation infraction case record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModCase {
+    pub id: i64,
+    pub guild_id: u64,
+    pub case_number: i64,
+    pub user_id: u64,
+    pub moderator_id: u64,
+    pub action_type: String,
+    pub reason: String,
+    pub duration_seconds: Option<i64>,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+    pub active: bool,
+}
+
+/// Parameters for creating a new moderation case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewModCase {
+    pub guild_id: u64,
+    pub user_id: u64,
+    pub moderator_id: u64,
+    pub action_type: String,
+    pub reason: String,
+    pub duration_seconds: Option<i64>,
+    pub created_at: Option<i64>,
+    pub expires_at: Option<i64>,
+}
+
+/// Moderation strike entry with decay tracking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModStrike {
+    pub id: i64,
+    pub guild_id: u64,
+    pub user_id: u64,
+    pub case_id: Option<i64>,
+    pub strike_count: i64,
+    pub reason: String,
+    pub created_at: i64,
+    pub expires_at: Option<i64>,
+    pub decayed: bool,
+}
+
+/// Parameters for adding a strike to a user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewModStrike {
+    pub guild_id: u64,
+    pub user_id: u64,
+    pub case_id: Option<i64>,
+    pub strike_count: i64,
+    pub reason: String,
+    pub created_at: Option<i64>,
+    pub expires_at: Option<i64>,
+}
+
+/// A single step in an automod punishment ladder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PunishmentStep {
+    pub strikes: i64,
+    pub action: String,
+    pub duration_seconds: Option<i64>,
+}
+
+/// Comprehensive configuration for a server's automod engine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AutomodConfig {
+    pub guild_id: u64,
+    pub enabled: bool,
+    pub anti_spam_enabled: bool,
+    pub anti_spam_max_messages: i64,
+    pub anti_spam_interval_seconds: i64,
+    pub anti_invites_enabled: bool,
+    pub anti_links_enabled: bool,
+    pub anti_caps_enabled: bool,
+    pub anti_caps_min_chars: i64,
+    pub anti_caps_percent: i64,
+    pub anti_mention_max: i64,
+    pub blocked_words: Vec<String>,
+    pub whitelisted_domains: Vec<String>,
+    pub ignored_channels: Vec<u64>,
+    pub ignored_roles: Vec<u64>,
+    pub strike_weights: HashMap<String, i64>,
+    pub strike_decay_hours: i64,
+    pub punishment_ladder: Vec<PunishmentStep>,
+    pub ai_moderation_enabled: bool,
+}
+
+impl AutomodConfig {
+    pub fn default_for_guild(guild_id: u64) -> Self {
+        let mut weights = HashMap::new();
+        let _ = weights.insert("spam".to_string(), 2);
+        let _ = weights.insert("invite".to_string(), 3);
+        let _ = weights.insert("bad_word".to_string(), 2);
+        let _ = weights.insert("caps".to_string(), 1);
+        let _ = weights.insert("mention".to_string(), 3);
+
+        Self {
+            guild_id,
+            enabled: true,
+            anti_spam_enabled: true,
+            anti_spam_max_messages: 5,
+            anti_spam_interval_seconds: 5,
+            anti_invites_enabled: true,
+            anti_links_enabled: false,
+            anti_caps_enabled: false,
+            anti_caps_min_chars: 10,
+            anti_caps_percent: 70,
+            anti_mention_max: 5,
+            blocked_words: Vec::new(),
+            whitelisted_domains: Vec::new(),
+            ignored_channels: Vec::new(),
+            ignored_roles: Vec::new(),
+            strike_weights: weights,
+            strike_decay_hours: 168,
+            punishment_ladder: vec![
+                PunishmentStep {
+                    strikes: 2,
+                    action: "warn".to_string(),
+                    duration_seconds: None,
+                },
+                PunishmentStep {
+                    strikes: 4,
+                    action: "timeout".to_string(),
+                    duration_seconds: Some(3600),
+                },
+                PunishmentStep {
+                    strikes: 8,
+                    action: "kick".to_string(),
+                    duration_seconds: None,
+                },
+                PunishmentStep {
+                    strikes: 10,
+                    action: "ban".to_string(),
+                    duration_seconds: None,
+                },
+            ],
+            ai_moderation_enabled: false,
+        }
+    }
+}
+
+/// Multi-channel event logging routing and filtering configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    pub guild_id: u64,
+    pub unified_channel_id: Option<u64>,
+    pub mod_channel_id: Option<u64>,
+    pub message_channel_id: Option<u64>,
+    pub member_channel_id: Option<u64>,
+    pub server_channel_id: Option<u64>,
+    pub voice_channel_id: Option<u64>,
+    pub ignored_channels: Vec<u64>,
+    pub ignored_roles: Vec<u64>,
+    pub log_bots: bool,
+    pub embed_color: u32,
+}
+
+impl LoggingConfig {
+    pub fn default_for_guild(guild_id: u64) -> Self {
+        Self {
+            guild_id,
+            unified_channel_id: None,
+            mod_channel_id: None,
+            message_channel_id: None,
+            member_channel_id: None,
+            server_channel_id: None,
+            voice_channel_id: None,
+            ignored_channels: Vec::new(),
+            ignored_roles: Vec::new(),
+            log_bots: true,
+            embed_color: 3553599,
+        }
+    }
+}
+
+/// Greetings, farewells, and autorole configuration for a server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GreetingsConfig {
+    pub guild_id: u64,
+    pub welcome_channel_id: Option<u64>,
+    pub welcome_message: String,
+    pub welcome_embed_json: String,
+    pub welcome_dm_enabled: bool,
+    pub welcome_dm_message: String,
+    pub farewell_channel_id: Option<u64>,
+    pub farewell_message: String,
+    pub farewell_embed_json: String,
+    pub member_autorole_ids: Vec<u64>,
+    pub bot_autorole_ids: Vec<u64>,
+    pub autorole_delay_seconds: i64,
+}
+
+impl GreetingsConfig {
+    pub fn default_for_guild(guild_id: u64) -> Self {
+        Self {
+            guild_id,
+            welcome_channel_id: None,
+            welcome_message: String::new(),
+            welcome_embed_json: String::new(),
+            welcome_dm_enabled: false,
+            welcome_dm_message: String::new(),
+            farewell_channel_id: None,
+            farewell_message: String::new(),
+            farewell_embed_json: String::new(),
+            member_autorole_ids: Vec::new(),
+            bot_autorole_ids: Vec::new(),
+            autorole_delay_seconds: 0,
+        }
+    }
+}
+
+/// A reaction role group bound to a specific Discord message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactionRoleGroup {
+    pub id: i64,
+    pub guild_id: u64,
+    pub channel_id: u64,
+    pub message_id: u64,
+    pub group_type: String,
+    pub required_role_id: Option<u64>,
+    pub component_type: String,
+    pub entries: Vec<ReactionRoleEntry>,
+}
+
+/// An emoji or button entry mapped to a role within a reaction role group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactionRoleEntry {
+    pub id: i64,
+    pub group_id: i64,
+    pub emoji_or_custom_id: String,
+    pub role_id: u64,
+    pub button_label: Option<String>,
+    pub button_style: Option<String>,
+}
+
+/// Parameters for creating a new reaction role group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewReactionRoleGroup {
+    pub guild_id: u64,
+    pub channel_id: u64,
+    pub message_id: u64,
+    pub group_type: String,
+    pub required_role_id: Option<u64>,
+    pub component_type: String,
+}
+
+/// Parameters for adding a reaction role entry to an existing group.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewReactionRoleEntry {
+    pub group_id: i64,
+    pub emoji_or_custom_id: String,
+    pub role_id: u64,
+    pub button_label: Option<String>,
+    pub button_style: Option<String>,
+}
+
+/// Custom trigger or tag definition with execution options.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomTrigger {
+    pub id: i64,
+    pub guild_id: u64,
+    pub trigger_name: String,
+    pub match_mode: String,
+    pub response_template: String,
+    pub cooldown_seconds: i64,
+    pub allowed_roles: Vec<u64>,
+    pub ignored_channels: Vec<u64>,
+    pub delete_trigger_message: bool,
+    pub reply_in_dm: bool,
+    pub enabled: bool,
+}
+
+/// Parameters for creating or updating a custom trigger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewCustomTrigger {
+    pub guild_id: u64,
+    pub trigger_name: String,
+    pub match_mode: String,
+    pub response_template: String,
+    pub cooldown_seconds: i64,
+    pub allowed_roles: Vec<u64>,
+    pub ignored_channels: Vec<u64>,
+    pub delete_trigger_message: bool,
+    pub reply_in_dm: bool,
+    pub enabled: bool,
 }
 
 /// High-performance unified SQLite storage manager.
@@ -269,8 +556,7 @@ impl Storage {
         Ok(deleted)
     }
 
-    /// Discord ToS `GUILD_DELETE` compliance: deletes `guild_configs` and `token_usage_ledger`
-    /// rows when Silas Blue is removed from a server.
+    /// Discord ToS `GUILD_DELETE` compliance: deletes guild configs, tokens, cases, strikes, automod, logging, greetings, reaction roles, and triggers.
     pub fn purge_guild_data(&self, guild_id: u64) -> Result<(), StorageError> {
         self.guild_cache.remove(&guild_id);
         let gid_i64 = guild_id as i64;
@@ -280,6 +566,13 @@ impl Storage {
             "DELETE FROM token_usage_ledger WHERE guild_id = ?1",
             params![gid_i64],
         )?;
+        conn.execute("DELETE FROM mod_cases WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM mod_strikes WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM automod_configs WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM logging_configs WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM greetings_configs WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM reaction_role_groups WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM custom_triggers WHERE guild_id = ?1", params![gid_i64])?;
         Ok(())
     }
 
@@ -764,6 +1057,944 @@ impl Storage {
         )?;
         Ok(count)
     }
+
+    // =========================================================================
+    // Moderation Cases & Infractions
+    // =========================================================================
+
+    /// Creates a new moderation case with an auto-incremented per-guild case number.
+    pub fn create_mod_case(&self, new_case: &NewModCase) -> Result<ModCase, StorageError> {
+        let conn = self.writer.lock();
+        let next_case_num: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(case_number), 0) + 1 FROM mod_cases WHERE guild_id = ?1",
+            params![new_case.guild_id as i64],
+            |row| row.get(0),
+        )?;
+        let created_at = new_case.created_at.unwrap_or_else(|| Utc::now().timestamp());
+        conn.execute(
+            "INSERT INTO mod_cases (
+                guild_id, case_number, user_id, moderator_id, action_type,
+                reason, duration_seconds, created_at, expires_at, active
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)",
+            params![
+                new_case.guild_id as i64,
+                next_case_num,
+                new_case.user_id as i64,
+                new_case.moderator_id as i64,
+                new_case.action_type,
+                new_case.reason,
+                new_case.duration_seconds,
+                created_at,
+                new_case.expires_at,
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(ModCase {
+            id,
+            guild_id: new_case.guild_id,
+            case_number: next_case_num,
+            user_id: new_case.user_id,
+            moderator_id: new_case.moderator_id,
+            action_type: new_case.action_type.clone(),
+            reason: new_case.reason.clone(),
+            duration_seconds: new_case.duration_seconds,
+            created_at,
+            expires_at: new_case.expires_at,
+            active: true,
+        })
+    }
+
+    /// Fetches a specific moderation case by guild ID and case number.
+    pub fn get_mod_case(
+        &self,
+        guild_id: u64,
+        case_number: i64,
+    ) -> Result<Option<ModCase>, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT id, guild_id, case_number, user_id, moderator_id, action_type,
+                        reason, duration_seconds, created_at, expires_at, active
+                 FROM mod_cases WHERE guild_id = ?1 AND case_number = ?2",
+                params![guild_id as i64, case_number],
+                |row| {
+                    let gid_i64: i64 = row.get(1)?;
+                    let uid_i64: i64 = row.get(3)?;
+                    let mid_i64: i64 = row.get(4)?;
+                    let active_i64: i64 = row.get(10)?;
+                    Ok(ModCase {
+                        id: row.get(0)?,
+                        guild_id: gid_i64 as u64,
+                        case_number: row.get(2)?,
+                        user_id: uid_i64 as u64,
+                        moderator_id: mid_i64 as u64,
+                        action_type: row.get(5)?,
+                        reason: row.get(6)?,
+                        duration_seconds: row.get(7)?,
+                        created_at: row.get(8)?,
+                        expires_at: row.get(9)?,
+                        active: active_i64 != 0,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(res)
+    }
+
+    /// Returns all moderation cases recorded for a given user in a guild, ordered newest first.
+    pub fn get_mod_cases_for_user(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+    ) -> Result<Vec<ModCase>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, case_number, user_id, moderator_id, action_type,
+                    reason, duration_seconds, created_at, expires_at, active
+             FROM mod_cases WHERE guild_id = ?1 AND user_id = ?2 ORDER BY case_number DESC",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64, user_id as i64], |row| {
+            let gid_i64: i64 = row.get(1)?;
+            let uid_i64: i64 = row.get(3)?;
+            let mid_i64: i64 = row.get(4)?;
+            let active_i64: i64 = row.get(10)?;
+            Ok(ModCase {
+                id: row.get(0)?,
+                guild_id: gid_i64 as u64,
+                case_number: row.get(2)?,
+                user_id: uid_i64 as u64,
+                moderator_id: mid_i64 as u64,
+                action_type: row.get(5)?,
+                reason: row.get(6)?,
+                duration_seconds: row.get(7)?,
+                created_at: row.get(8)?,
+                expires_at: row.get(9)?,
+                active: active_i64 != 0,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Retrieves active timed cases (e.g. tempbans, timeouts) whose expiration timestamp is <= `now_timestamp`.
+    pub fn get_active_expired_cases(
+        &self,
+        now_timestamp: i64,
+    ) -> Result<Vec<ModCase>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, case_number, user_id, moderator_id, action_type,
+                    reason, duration_seconds, created_at, expires_at, active
+             FROM mod_cases WHERE active = 1 AND expires_at IS NOT NULL AND expires_at <= ?1
+             ORDER BY expires_at ASC",
+        )?;
+        let rows = stmt.query_map(params![now_timestamp], |row| {
+            let gid_i64: i64 = row.get(1)?;
+            let uid_i64: i64 = row.get(3)?;
+            let mid_i64: i64 = row.get(4)?;
+            let active_i64: i64 = row.get(10)?;
+            Ok(ModCase {
+                id: row.get(0)?,
+                guild_id: gid_i64 as u64,
+                case_number: row.get(2)?,
+                user_id: uid_i64 as u64,
+                moderator_id: mid_i64 as u64,
+                action_type: row.get(5)?,
+                reason: row.get(6)?,
+                duration_seconds: row.get(7)?,
+                created_at: row.get(8)?,
+                expires_at: row.get(9)?,
+                active: active_i64 != 0,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Sets `active = 0` on a mod case (e.g. when an expired punishment is reversed or lifted).
+    pub fn deactivate_case(&self, case_id: i64) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "UPDATE mod_cases SET active = 0 WHERE id = ?1",
+            params![case_id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Updates the reason of a mod case by guild ID and case number.
+    pub fn update_case_reason(
+        &self,
+        guild_id: u64,
+        case_number: i64,
+        new_reason: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "UPDATE mod_cases SET reason = ?1 WHERE guild_id = ?2 AND case_number = ?3",
+            params![new_reason, guild_id as i64, case_number],
+        )?;
+        Ok(affected > 0)
+    }
+
+    // =========================================================================
+    // Moderation Strikes
+    // =========================================================================
+
+    /// Adds a strike to a user's record.
+    pub fn add_strike(&self, new_strike: &NewModStrike) -> Result<ModStrike, StorageError> {
+        let created_at = new_strike.created_at.unwrap_or_else(|| Utc::now().timestamp());
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO mod_strikes (
+                guild_id, user_id, case_id, strike_count, reason, created_at, expires_at, decayed
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+            params![
+                new_strike.guild_id as i64,
+                new_strike.user_id as i64,
+                new_strike.case_id,
+                new_strike.strike_count,
+                new_strike.reason,
+                created_at,
+                new_strike.expires_at,
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(ModStrike {
+            id,
+            guild_id: new_strike.guild_id,
+            user_id: new_strike.user_id,
+            case_id: new_strike.case_id,
+            strike_count: new_strike.strike_count,
+            reason: new_strike.reason.clone(),
+            created_at,
+            expires_at: new_strike.expires_at,
+            decayed: false,
+        })
+    }
+
+    /// Computes the sum of active (non-decayed) strikes for a user in a guild.
+    pub fn get_active_strikes_count(&self, guild_id: u64, user_id: u64) -> Result<i64, StorageError> {
+        let conn = self.writer.lock();
+        let count: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(strike_count), 0) FROM mod_strikes
+             WHERE guild_id = ?1 AND user_id = ?2 AND decayed = 0",
+            params![guild_id as i64, user_id as i64],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Retrieves all strike records (active and decayed) for a user in a guild.
+    pub fn get_user_strikes(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+    ) -> Result<Vec<ModStrike>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, user_id, case_id, strike_count, reason, created_at, expires_at, decayed
+             FROM mod_strikes WHERE guild_id = ?1 AND user_id = ?2 ORDER BY id DESC",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64, user_id as i64], |row| {
+            let gid_i64: i64 = row.get(1)?;
+            let uid_i64: i64 = row.get(2)?;
+            let decayed_i64: i64 = row.get(8)?;
+            Ok(ModStrike {
+                id: row.get(0)?,
+                guild_id: gid_i64 as u64,
+                user_id: uid_i64 as u64,
+                case_id: row.get(3)?,
+                strike_count: row.get(4)?,
+                reason: row.get(5)?,
+                created_at: row.get(6)?,
+                expires_at: row.get(7)?,
+                decayed: decayed_i64 != 0,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Decays strikes in `guild_id` whose expiration timestamp or creation timestamp is <= `cutoff_epoch`.
+    pub fn decay_strikes(&self, guild_id: u64, cutoff_epoch: i64) -> Result<usize, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "UPDATE mod_strikes SET decayed = 1
+             WHERE guild_id = ?1 AND decayed = 0 AND (expires_at <= ?2 OR (expires_at IS NULL AND created_at <= ?2))",
+            params![guild_id as i64, cutoff_epoch],
+        )?;
+        Ok(affected)
+    }
+
+    // =========================================================================
+    // Automod Configuration
+    // =========================================================================
+
+    /// Fetches the automod configuration for a guild, falling back to sensible defaults.
+    pub fn get_automod_config(&self, guild_id: u64) -> Result<AutomodConfig, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT
+                    guild_id, enabled, anti_spam_enabled, anti_spam_max_messages, anti_spam_interval_seconds,
+                    anti_invites_enabled, anti_links_enabled, anti_caps_enabled, anti_caps_min_chars, anti_caps_percent,
+                    anti_mention_max, blocked_words_json, whitelisted_domains_json, ignored_channels_json, ignored_roles_json,
+                    strike_weights_json, strike_decay_hours, punishment_ladder_json, ai_moderation_enabled
+                 FROM automod_configs WHERE guild_id = ?1",
+                params![guild_id as i64],
+                |row| {
+                    let gid_i64: i64 = row.get(0)?;
+                    let enabled_i64: i64 = row.get(1)?;
+                    let anti_spam_i64: i64 = row.get(2)?;
+                    let anti_inv_i64: i64 = row.get(5)?;
+                    let anti_links_i64: i64 = row.get(6)?;
+                    let anti_caps_i64: i64 = row.get(7)?;
+                    let blocked_json: String = row.get(11)?;
+                    let whitelist_json: String = row.get(12)?;
+                    let ignored_ch_json: String = row.get(13)?;
+                    let ignored_ro_json: String = row.get(14)?;
+                    let weights_json: String = row.get(15)?;
+                    let ladder_json: String = row.get(17)?;
+                    let ai_mod_i64: i64 = row.get(18)?;
+
+                    let blocked_words: Vec<String> =
+                        serde_json::from_str(&blocked_json).unwrap_or_default();
+                    let whitelisted_domains: Vec<String> =
+                        serde_json::from_str(&whitelist_json).unwrap_or_default();
+                    let ignored_channels: Vec<u64> =
+                        serde_json::from_str(&ignored_ch_json).unwrap_or_default();
+                    let ignored_roles: Vec<u64> =
+                        serde_json::from_str(&ignored_ro_json).unwrap_or_default();
+                    let strike_weights: HashMap<String, i64> =
+                        serde_json::from_str(&weights_json).unwrap_or_default();
+                    let punishment_ladder: Vec<PunishmentStep> =
+                        serde_json::from_str(&ladder_json).unwrap_or_default();
+
+                    Ok(AutomodConfig {
+                        guild_id: gid_i64 as u64,
+                        enabled: enabled_i64 != 0,
+                        anti_spam_enabled: anti_spam_i64 != 0,
+                        anti_spam_max_messages: row.get(3)?,
+                        anti_spam_interval_seconds: row.get(4)?,
+                        anti_invites_enabled: anti_inv_i64 != 0,
+                        anti_links_enabled: anti_links_i64 != 0,
+                        anti_caps_enabled: anti_caps_i64 != 0,
+                        anti_caps_min_chars: row.get(8)?,
+                        anti_caps_percent: row.get(9)?,
+                        anti_mention_max: row.get(10)?,
+                        blocked_words,
+                        whitelisted_domains,
+                        ignored_channels,
+                        ignored_roles,
+                        strike_weights,
+                        strike_decay_hours: row.get(16)?,
+                        punishment_ladder,
+                        ai_moderation_enabled: ai_mod_i64 != 0,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(res.unwrap_or_else(|| AutomodConfig::default_for_guild(guild_id)))
+    }
+
+    /// Upserts the automod configuration for a guild.
+    pub fn save_automod_config(&self, config: &AutomodConfig) -> Result<(), StorageError> {
+        let blocked_json = serde_json::to_string(&config.blocked_words)?;
+        let whitelist_json = serde_json::to_string(&config.whitelisted_domains)?;
+        let ignored_ch_json = serde_json::to_string(&config.ignored_channels)?;
+        let ignored_ro_json = serde_json::to_string(&config.ignored_roles)?;
+        let weights_json = serde_json::to_string(&config.strike_weights)?;
+        let ladder_json = serde_json::to_string(&config.punishment_ladder)?;
+
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO automod_configs (
+                guild_id, enabled, anti_spam_enabled, anti_spam_max_messages, anti_spam_interval_seconds,
+                anti_invites_enabled, anti_links_enabled, anti_caps_enabled, anti_caps_min_chars, anti_caps_percent,
+                anti_mention_max, blocked_words_json, whitelisted_domains_json, ignored_channels_json, ignored_roles_json,
+                strike_weights_json, strike_decay_hours, punishment_ladder_json, ai_moderation_enabled
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                anti_spam_enabled = excluded.anti_spam_enabled,
+                anti_spam_max_messages = excluded.anti_spam_max_messages,
+                anti_spam_interval_seconds = excluded.anti_spam_interval_seconds,
+                anti_invites_enabled = excluded.anti_invites_enabled,
+                anti_links_enabled = excluded.anti_links_enabled,
+                anti_caps_enabled = excluded.anti_caps_enabled,
+                anti_caps_min_chars = excluded.anti_caps_min_chars,
+                anti_caps_percent = excluded.anti_caps_percent,
+                anti_mention_max = excluded.anti_mention_max,
+                blocked_words_json = excluded.blocked_words_json,
+                whitelisted_domains_json = excluded.whitelisted_domains_json,
+                ignored_channels_json = excluded.ignored_channels_json,
+                ignored_roles_json = excluded.ignored_roles_json,
+                strike_weights_json = excluded.strike_weights_json,
+                strike_decay_hours = excluded.strike_decay_hours,
+                punishment_ladder_json = excluded.punishment_ladder_json,
+                ai_moderation_enabled = excluded.ai_moderation_enabled",
+            params![
+                config.guild_id as i64,
+                i64::from(config.enabled),
+                i64::from(config.anti_spam_enabled),
+                config.anti_spam_max_messages,
+                config.anti_spam_interval_seconds,
+                i64::from(config.anti_invites_enabled),
+                i64::from(config.anti_links_enabled),
+                i64::from(config.anti_caps_enabled),
+                config.anti_caps_min_chars,
+                config.anti_caps_percent,
+                config.anti_mention_max,
+                blocked_json,
+                whitelist_json,
+                ignored_ch_json,
+                ignored_ro_json,
+                weights_json,
+                config.strike_decay_hours,
+                ladder_json,
+                i64::from(config.ai_moderation_enabled),
+            ],
+        )?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Multi-Channel Event Logging Configuration
+    // =========================================================================
+
+    /// Fetches the logging channel configuration for a guild.
+    pub fn get_logging_config(&self, guild_id: u64) -> Result<LoggingConfig, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT guild_id, unified_channel_id, mod_channel_id, message_channel_id,
+                        member_channel_id, server_channel_id, voice_channel_id,
+                        ignored_channels_json, ignored_roles_json, log_bots, embed_color
+                 FROM logging_configs WHERE guild_id = ?1",
+                params![guild_id as i64],
+                |row| {
+                    let gid_i64: i64 = row.get(0)?;
+                    let uc_i64: Option<i64> = row.get(1)?;
+                    let mc_i64: Option<i64> = row.get(2)?;
+                    let msgc_i64: Option<i64> = row.get(3)?;
+                    let memc_i64: Option<i64> = row.get(4)?;
+                    let sc_i64: Option<i64> = row.get(5)?;
+                    let vc_i64: Option<i64> = row.get(6)?;
+                    let ign_ch_json: String = row.get(7)?;
+                    let ign_ro_json: String = row.get(8)?;
+                    let log_bots_i64: i64 = row.get(9)?;
+                    let embed_color: i64 = row.get(10)?;
+
+                    let ignored_channels: Vec<u64> =
+                        serde_json::from_str(&ign_ch_json).unwrap_or_default();
+                    let ignored_roles: Vec<u64> =
+                        serde_json::from_str(&ign_ro_json).unwrap_or_default();
+
+                    Ok(LoggingConfig {
+                        guild_id: gid_i64 as u64,
+                        unified_channel_id: uc_i64.map(|c| c as u64),
+                        mod_channel_id: mc_i64.map(|c| c as u64),
+                        message_channel_id: msgc_i64.map(|c| c as u64),
+                        member_channel_id: memc_i64.map(|c| c as u64),
+                        server_channel_id: sc_i64.map(|c| c as u64),
+                        voice_channel_id: vc_i64.map(|c| c as u64),
+                        ignored_channels,
+                        ignored_roles,
+                        log_bots: log_bots_i64 != 0,
+                        embed_color: embed_color as u32,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(res.unwrap_or_else(|| LoggingConfig::default_for_guild(guild_id)))
+    }
+
+    /// Upserts the logging channel configuration for a guild.
+    pub fn save_logging_config(&self, config: &LoggingConfig) -> Result<(), StorageError> {
+        let ign_ch_json = serde_json::to_string(&config.ignored_channels)?;
+        let ign_ro_json = serde_json::to_string(&config.ignored_roles)?;
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO logging_configs (
+                guild_id, unified_channel_id, mod_channel_id, message_channel_id,
+                member_channel_id, server_channel_id, voice_channel_id,
+                ignored_channels_json, ignored_roles_json, log_bots, embed_color
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                unified_channel_id = excluded.unified_channel_id,
+                mod_channel_id = excluded.mod_channel_id,
+                message_channel_id = excluded.message_channel_id,
+                member_channel_id = excluded.member_channel_id,
+                server_channel_id = excluded.server_channel_id,
+                voice_channel_id = excluded.voice_channel_id,
+                ignored_channels_json = excluded.ignored_channels_json,
+                ignored_roles_json = excluded.ignored_roles_json,
+                log_bots = excluded.log_bots,
+                embed_color = excluded.embed_color",
+            params![
+                config.guild_id as i64,
+                config.unified_channel_id.map(|c| c as i64),
+                config.mod_channel_id.map(|c| c as i64),
+                config.message_channel_id.map(|c| c as i64),
+                config.member_channel_id.map(|c| c as i64),
+                config.server_channel_id.map(|c| c as i64),
+                config.voice_channel_id.map(|c| c as i64),
+                ign_ch_json,
+                ign_ro_json,
+                i64::from(config.log_bots),
+                config.embed_color as i64,
+            ],
+        )?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Greetings, Farewells & Autoroles
+    // =========================================================================
+
+    /// Fetches the greetings, farewells, and autorole configuration for a guild.
+    pub fn get_greetings_config(&self, guild_id: u64) -> Result<GreetingsConfig, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT guild_id, welcome_channel_id, welcome_message, welcome_embed_json,
+                        welcome_dm_enabled, welcome_dm_message, farewell_channel_id, farewell_message,
+                        farewell_embed_json, member_autorole_ids_json, bot_autorole_ids_json, autorole_delay_seconds
+                 FROM greetings_configs WHERE guild_id = ?1",
+                params![guild_id as i64],
+                |row| {
+                    let gid_i64: i64 = row.get(0)?;
+                    let wc_i64: Option<i64> = row.get(1)?;
+                    let wdm_i64: i64 = row.get(4)?;
+                    let fc_i64: Option<i64> = row.get(6)?;
+                    let mem_roles_json: String = row.get(9)?;
+                    let bot_roles_json: String = row.get(10)?;
+
+                    let member_autorole_ids: Vec<u64> =
+                        serde_json::from_str(&mem_roles_json).unwrap_or_default();
+                    let bot_autorole_ids: Vec<u64> =
+                        serde_json::from_str(&bot_roles_json).unwrap_or_default();
+
+                    Ok(GreetingsConfig {
+                        guild_id: gid_i64 as u64,
+                        welcome_channel_id: wc_i64.map(|c| c as u64),
+                        welcome_message: row.get(2)?,
+                        welcome_embed_json: row.get(3)?,
+                        welcome_dm_enabled: wdm_i64 != 0,
+                        welcome_dm_message: row.get(5)?,
+                        farewell_channel_id: fc_i64.map(|c| c as u64),
+                        farewell_message: row.get(7)?,
+                        farewell_embed_json: row.get(8)?,
+                        member_autorole_ids,
+                        bot_autorole_ids,
+                        autorole_delay_seconds: row.get(11)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(res.unwrap_or_else(|| GreetingsConfig::default_for_guild(guild_id)))
+    }
+
+    /// Upserts the greetings, farewells, and autorole configuration for a guild.
+    pub fn save_greetings_config(&self, config: &GreetingsConfig) -> Result<(), StorageError> {
+        let mem_roles_json = serde_json::to_string(&config.member_autorole_ids)?;
+        let bot_roles_json = serde_json::to_string(&config.bot_autorole_ids)?;
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO greetings_configs (
+                guild_id, welcome_channel_id, welcome_message, welcome_embed_json,
+                welcome_dm_enabled, welcome_dm_message, farewell_channel_id, farewell_message,
+                farewell_embed_json, member_autorole_ids_json, bot_autorole_ids_json, autorole_delay_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                welcome_channel_id = excluded.welcome_channel_id,
+                welcome_message = excluded.welcome_message,
+                welcome_embed_json = excluded.welcome_embed_json,
+                welcome_dm_enabled = excluded.welcome_dm_enabled,
+                welcome_dm_message = excluded.welcome_dm_message,
+                farewell_channel_id = excluded.farewell_channel_id,
+                farewell_message = excluded.farewell_message,
+                farewell_embed_json = excluded.farewell_embed_json,
+                member_autorole_ids_json = excluded.member_autorole_ids_json,
+                bot_autorole_ids_json = excluded.bot_autorole_ids_json,
+                autorole_delay_seconds = excluded.autorole_delay_seconds",
+            params![
+                config.guild_id as i64,
+                config.welcome_channel_id.map(|c| c as i64),
+                config.welcome_message,
+                config.welcome_embed_json,
+                i64::from(config.welcome_dm_enabled),
+                config.welcome_dm_message,
+                config.farewell_channel_id.map(|c| c as i64),
+                config.farewell_message,
+                config.farewell_embed_json,
+                mem_roles_json,
+                bot_roles_json,
+                config.autorole_delay_seconds,
+            ],
+        )?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Reaction Roles & Component Groups
+    // =========================================================================
+
+    /// Creates a reaction role group bound to a channel and message.
+    pub fn create_reaction_role_group(
+        &self,
+        group: &NewReactionRoleGroup,
+    ) -> Result<ReactionRoleGroup, StorageError> {
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO reaction_role_groups (
+                guild_id, channel_id, message_id, group_type, required_role_id, component_type
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                group.guild_id as i64,
+                group.channel_id as i64,
+                group.message_id as i64,
+                group.group_type,
+                group.required_role_id.map(|r| r as i64),
+                group.component_type,
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(ReactionRoleGroup {
+            id,
+            guild_id: group.guild_id,
+            channel_id: group.channel_id,
+            message_id: group.message_id,
+            group_type: group.group_type.clone(),
+            required_role_id: group.required_role_id,
+            component_type: group.component_type.clone(),
+            entries: Vec::new(),
+        })
+    }
+
+    /// Adds an entry (emoji or button mapped to a role) to a reaction role group.
+    pub fn add_reaction_role_entry(
+        &self,
+        entry: &NewReactionRoleEntry,
+    ) -> Result<ReactionRoleEntry, StorageError> {
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO reaction_role_entries (
+                group_id, emoji_or_custom_id, role_id, button_label, button_style
+            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                entry.group_id,
+                entry.emoji_or_custom_id,
+                entry.role_id as i64,
+                entry.button_label,
+                entry.button_style,
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(ReactionRoleEntry {
+            id,
+            group_id: entry.group_id,
+            emoji_or_custom_id: entry.emoji_or_custom_id.clone(),
+            role_id: entry.role_id,
+            button_label: entry.button_label.clone(),
+            button_style: entry.button_style.clone(),
+        })
+    }
+
+    /// Fetches a reaction role group and its mapped entries for a specific message.
+    pub fn get_reaction_roles_for_message(
+        &self,
+        guild_id: u64,
+        message_id: u64,
+    ) -> Result<Option<ReactionRoleGroup>, StorageError> {
+        let conn = self.writer.lock();
+        let group_opt = conn
+            .query_row(
+                "SELECT id, guild_id, channel_id, message_id, group_type, required_role_id, component_type
+                 FROM reaction_role_groups WHERE guild_id = ?1 AND message_id = ?2",
+                params![guild_id as i64, message_id as i64],
+                |row| {
+                    let id: i64 = row.get(0)?;
+                    let gid_i64: i64 = row.get(1)?;
+                    let cid_i64: i64 = row.get(2)?;
+                    let mid_i64: i64 = row.get(3)?;
+                    let req_i64: Option<i64> = row.get(5)?;
+                    Ok(ReactionRoleGroup {
+                        id,
+                        guild_id: gid_i64 as u64,
+                        channel_id: cid_i64 as u64,
+                        message_id: mid_i64 as u64,
+                        group_type: row.get(4)?,
+                        required_role_id: req_i64.map(|r| r as u64),
+                        component_type: row.get(6)?,
+                        entries: Vec::new(),
+                    })
+                },
+            )
+            .optional()?;
+
+        let Some(mut group) = group_opt else {
+            return Ok(None);
+        };
+
+        let mut stmt = conn.prepare(
+            "SELECT id, group_id, emoji_or_custom_id, role_id, button_label, button_style
+             FROM reaction_role_entries WHERE group_id = ?1 ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![group.id], |row| {
+            let eid: i64 = row.get(0)?;
+            let gid: i64 = row.get(1)?;
+            let rid_i64: i64 = row.get(3)?;
+            Ok(ReactionRoleEntry {
+                id: eid,
+                group_id: gid,
+                emoji_or_custom_id: row.get(2)?,
+                role_id: rid_i64 as u64,
+                button_label: row.get(4)?,
+                button_style: row.get(5)?,
+            })
+        })?;
+
+        for r in rows {
+            group.entries.push(r?);
+        }
+
+        Ok(Some(group))
+    }
+
+    /// Fetches all reaction role groups and entries for a guild.
+    pub fn get_guild_reaction_roles(
+        &self,
+        guild_id: u64,
+    ) -> Result<Vec<ReactionRoleGroup>, StorageError> {
+        let conn = self.writer.lock();
+        let mut group_stmt = conn.prepare(
+            "SELECT id, guild_id, channel_id, message_id, group_type, required_role_id, component_type
+             FROM reaction_role_groups WHERE guild_id = ?1 ORDER BY id ASC",
+        )?;
+        let group_rows = group_stmt.query_map(params![guild_id as i64], |row| {
+            let id: i64 = row.get(0)?;
+            let gid_i64: i64 = row.get(1)?;
+            let cid_i64: i64 = row.get(2)?;
+            let mid_i64: i64 = row.get(3)?;
+            let req_i64: Option<i64> = row.get(5)?;
+            Ok(ReactionRoleGroup {
+                id,
+                guild_id: gid_i64 as u64,
+                channel_id: cid_i64 as u64,
+                message_id: mid_i64 as u64,
+                group_type: row.get(4)?,
+                required_role_id: req_i64.map(|r| r as u64),
+                component_type: row.get(6)?,
+                entries: Vec::new(),
+            })
+        })?;
+
+        let mut groups = Vec::new();
+        for gr in group_rows {
+            groups.push(gr?);
+        }
+
+        let mut entry_stmt = conn.prepare(
+            "SELECT id, group_id, emoji_or_custom_id, role_id, button_label, button_style
+             FROM reaction_role_entries WHERE group_id = ?1 ORDER BY id ASC",
+        )?;
+
+        for group in &mut groups {
+            let entry_rows = entry_stmt.query_map(params![group.id], |row| {
+                let eid: i64 = row.get(0)?;
+                let gid: i64 = row.get(1)?;
+                let rid_i64: i64 = row.get(3)?;
+                Ok(ReactionRoleEntry {
+                    id: eid,
+                    group_id: gid,
+                    emoji_or_custom_id: row.get(2)?,
+                    role_id: rid_i64 as u64,
+                    button_label: row.get(4)?,
+                    button_style: row.get(5)?,
+                })
+            })?;
+            for er in entry_rows {
+                group.entries.push(er?);
+            }
+        }
+
+        Ok(groups)
+    }
+
+    /// Deletes a reaction role group (and cascades to its entries).
+    pub fn delete_reaction_role_group(&self, group_id: i64) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "DELETE FROM reaction_role_groups WHERE id = ?1",
+            params![group_id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    // =========================================================================
+    // Custom Triggers / Tags
+    // =========================================================================
+
+    /// Creates or updates a custom trigger in a guild.
+    pub fn create_custom_trigger(
+        &self,
+        trigger: &NewCustomTrigger,
+    ) -> Result<CustomTrigger, StorageError> {
+        let roles_json = serde_json::to_string(&trigger.allowed_roles)?;
+        let channels_json = serde_json::to_string(&trigger.ignored_channels)?;
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO custom_triggers (
+                guild_id, trigger_name, match_mode, response_template, cooldown_seconds,
+                allowed_roles_json, ignored_channels_json, delete_trigger_message, reply_in_dm, enabled
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(guild_id, trigger_name) DO UPDATE SET
+                match_mode = excluded.match_mode,
+                response_template = excluded.response_template,
+                cooldown_seconds = excluded.cooldown_seconds,
+                allowed_roles_json = excluded.allowed_roles_json,
+                ignored_channels_json = excluded.ignored_channels_json,
+                delete_trigger_message = excluded.delete_trigger_message,
+                reply_in_dm = excluded.reply_in_dm,
+                enabled = excluded.enabled",
+            params![
+                trigger.guild_id as i64,
+                trigger.trigger_name,
+                trigger.match_mode,
+                trigger.response_template,
+                trigger.cooldown_seconds,
+                roles_json,
+                channels_json,
+                i64::from(trigger.delete_trigger_message),
+                i64::from(trigger.reply_in_dm),
+                i64::from(trigger.enabled),
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(CustomTrigger {
+            id,
+            guild_id: trigger.guild_id,
+            trigger_name: trigger.trigger_name.clone(),
+            match_mode: trigger.match_mode.clone(),
+            response_template: trigger.response_template.clone(),
+            cooldown_seconds: trigger.cooldown_seconds,
+            allowed_roles: trigger.allowed_roles.clone(),
+            ignored_channels: trigger.ignored_channels.clone(),
+            delete_trigger_message: trigger.delete_trigger_message,
+            reply_in_dm: trigger.reply_in_dm,
+            enabled: trigger.enabled,
+        })
+    }
+
+    /// Fetches a custom trigger by guild ID and trigger name.
+    pub fn get_custom_trigger(
+        &self,
+        guild_id: u64,
+        trigger_name: &str,
+    ) -> Result<Option<CustomTrigger>, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT id, guild_id, trigger_name, match_mode, response_template, cooldown_seconds,
+                        allowed_roles_json, ignored_channels_json, delete_trigger_message, reply_in_dm, enabled
+                 FROM custom_triggers WHERE guild_id = ?1 AND trigger_name = ?2",
+                params![guild_id as i64, trigger_name],
+                |row| {
+                    let id: i64 = row.get(0)?;
+                    let gid_i64: i64 = row.get(1)?;
+                    let roles_json: String = row.get(6)?;
+                    let channels_json: String = row.get(7)?;
+                    let del_i64: i64 = row.get(8)?;
+                    let dm_i64: i64 = row.get(9)?;
+                    let en_i64: i64 = row.get(10)?;
+                    let allowed_roles: Vec<u64> =
+                        serde_json::from_str(&roles_json).unwrap_or_default();
+                    let ignored_channels: Vec<u64> =
+                        serde_json::from_str(&channels_json).unwrap_or_default();
+                    Ok(CustomTrigger {
+                        id,
+                        guild_id: gid_i64 as u64,
+                        trigger_name: row.get(2)?,
+                        match_mode: row.get(3)?,
+                        response_template: row.get(4)?,
+                        cooldown_seconds: row.get(5)?,
+                        allowed_roles,
+                        ignored_channels,
+                        delete_trigger_message: del_i64 != 0,
+                        reply_in_dm: dm_i64 != 0,
+                        enabled: en_i64 != 0,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(res)
+    }
+
+    /// Lists all custom triggers registered for a guild.
+    pub fn list_custom_triggers(&self, guild_id: u64) -> Result<Vec<CustomTrigger>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, trigger_name, match_mode, response_template, cooldown_seconds,
+                    allowed_roles_json, ignored_channels_json, delete_trigger_message, reply_in_dm, enabled
+             FROM custom_triggers WHERE guild_id = ?1 ORDER BY trigger_name ASC",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64], |row| {
+            let id: i64 = row.get(0)?;
+            let gid_i64: i64 = row.get(1)?;
+            let roles_json: String = row.get(6)?;
+            let channels_json: String = row.get(7)?;
+            let del_i64: i64 = row.get(8)?;
+            let dm_i64: i64 = row.get(9)?;
+            let en_i64: i64 = row.get(10)?;
+            let allowed_roles: Vec<u64> =
+                serde_json::from_str(&roles_json).unwrap_or_default();
+            let ignored_channels: Vec<u64> =
+                serde_json::from_str(&channels_json).unwrap_or_default();
+            Ok(CustomTrigger {
+                id,
+                guild_id: gid_i64 as u64,
+                trigger_name: row.get(2)?,
+                match_mode: row.get(3)?,
+                response_template: row.get(4)?,
+                cooldown_seconds: row.get(5)?,
+                allowed_roles,
+                ignored_channels,
+                delete_trigger_message: del_i64 != 0,
+                reply_in_dm: dm_i64 != 0,
+                enabled: en_i64 != 0,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Deletes a custom trigger by guild ID and trigger name.
+    pub fn delete_custom_trigger(
+        &self,
+        guild_id: u64,
+        trigger_name: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "DELETE FROM custom_triggers WHERE guild_id = ?1 AND trigger_name = ?2",
+            params![guild_id as i64, trigger_name],
+        )?;
+        Ok(affected > 0)
+    }
 }
 
 fn query_usage_sum(
@@ -832,6 +2063,132 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             );
             conn.execute(
                 "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (2, ?1)",
+                params![now],
+            )?;
+        }
+        if v < 3 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS mod_cases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    case_number INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    moderator_id INTEGER NOT NULL,
+                    action_type TEXT NOT NULL,
+                    reason TEXT NOT NULL DEFAULT 'No reason provided',
+                    duration_seconds INTEGER,
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    UNIQUE(guild_id, case_number)
+                ) STRICT;
+                CREATE INDEX IF NOT EXISTS idx_mod_cases_user ON mod_cases(guild_id, user_id);
+                CREATE INDEX IF NOT EXISTS idx_mod_cases_expires ON mod_cases(expires_at) WHERE active = 1 AND expires_at IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS mod_strikes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    case_id INTEGER,
+                    strike_count INTEGER NOT NULL DEFAULT 1,
+                    reason TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    expires_at INTEGER,
+                    decayed INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(case_id) REFERENCES mod_cases(id) ON DELETE SET NULL
+                ) STRICT;
+                CREATE INDEX IF NOT EXISTS idx_mod_strikes_user ON mod_strikes(guild_id, user_id) WHERE decayed = 0;
+
+                CREATE TABLE IF NOT EXISTS automod_configs (
+                    guild_id INTEGER PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    anti_spam_enabled INTEGER NOT NULL DEFAULT 1,
+                    anti_spam_max_messages INTEGER NOT NULL DEFAULT 5,
+                    anti_spam_interval_seconds INTEGER NOT NULL DEFAULT 5,
+                    anti_invites_enabled INTEGER NOT NULL DEFAULT 1,
+                    anti_links_enabled INTEGER NOT NULL DEFAULT 0,
+                    anti_caps_enabled INTEGER NOT NULL DEFAULT 0,
+                    anti_caps_min_chars INTEGER NOT NULL DEFAULT 10,
+                    anti_caps_percent INTEGER NOT NULL DEFAULT 70,
+                    anti_mention_max INTEGER NOT NULL DEFAULT 5,
+                    blocked_words_json TEXT NOT NULL DEFAULT '[]',
+                    whitelisted_domains_json TEXT NOT NULL DEFAULT '[]',
+                    ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+                    ignored_roles_json TEXT NOT NULL DEFAULT '[]',
+                    strike_weights_json TEXT NOT NULL DEFAULT '{\"spam\":2,\"invite\":3,\"bad_word\":2,\"caps\":1,\"mention\":3}',
+                    strike_decay_hours INTEGER NOT NULL DEFAULT 168,
+                    punishment_ladder_json TEXT NOT NULL DEFAULT '[{\"strikes\":2,\"action\":\"warn\"},{\"strikes\":4,\"action\":\"timeout\",\"duration_seconds\":3600},{\"strikes\":8,\"action\":\"kick\"},{\"strikes\":10,\"action\":\"ban\"}]',
+                    ai_moderation_enabled INTEGER NOT NULL DEFAULT 0
+                ) STRICT;
+
+                CREATE TABLE IF NOT EXISTS logging_configs (
+                    guild_id INTEGER PRIMARY KEY,
+                    unified_channel_id INTEGER,
+                    mod_channel_id INTEGER,
+                    message_channel_id INTEGER,
+                    member_channel_id INTEGER,
+                    server_channel_id INTEGER,
+                    voice_channel_id INTEGER,
+                    ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+                    ignored_roles_json TEXT NOT NULL DEFAULT '[]',
+                    log_bots INTEGER NOT NULL DEFAULT 1,
+                    embed_color INTEGER NOT NULL DEFAULT 3553599
+                ) STRICT;
+
+                CREATE TABLE IF NOT EXISTS greetings_configs (
+                    guild_id INTEGER PRIMARY KEY,
+                    welcome_channel_id INTEGER,
+                    welcome_message TEXT NOT NULL DEFAULT '',
+                    welcome_embed_json TEXT NOT NULL DEFAULT '',
+                    welcome_dm_enabled INTEGER NOT NULL DEFAULT 0,
+                    welcome_dm_message TEXT NOT NULL DEFAULT '',
+                    farewell_channel_id INTEGER,
+                    farewell_message TEXT NOT NULL DEFAULT '',
+                    farewell_embed_json TEXT NOT NULL DEFAULT '',
+                    member_autorole_ids_json TEXT NOT NULL DEFAULT '[]',
+                    bot_autorole_ids_json TEXT NOT NULL DEFAULT '[]',
+                    autorole_delay_seconds INTEGER NOT NULL DEFAULT 0
+                ) STRICT;
+
+                CREATE TABLE IF NOT EXISTS reaction_role_groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    group_type TEXT NOT NULL DEFAULT 'normal',
+                    required_role_id INTEGER,
+                    component_type TEXT NOT NULL DEFAULT 'reaction',
+                    UNIQUE(guild_id, channel_id, message_id)
+                ) STRICT;
+
+                CREATE TABLE IF NOT EXISTS reaction_role_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id INTEGER NOT NULL,
+                    emoji_or_custom_id TEXT NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    button_label TEXT,
+                    button_style TEXT,
+                    FOREIGN KEY(group_id) REFERENCES reaction_role_groups(id) ON DELETE CASCADE
+                ) STRICT;
+                CREATE INDEX IF NOT EXISTS idx_rr_lookup ON reaction_role_groups(guild_id, message_id);
+
+                CREATE TABLE IF NOT EXISTS custom_triggers (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    trigger_name TEXT NOT NULL,
+                    match_mode TEXT NOT NULL DEFAULT 'prefix',
+                    response_template TEXT NOT NULL,
+                    cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+                    allowed_roles_json TEXT NOT NULL DEFAULT '[]',
+                    ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+                    delete_trigger_message INTEGER NOT NULL DEFAULT 0,
+                    reply_in_dm INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    UNIQUE(guild_id, trigger_name)
+                ) STRICT;",
+            )?;
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (3, ?1)",
                 params![now],
             )?;
         }
@@ -990,7 +2347,126 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
         ) STRICT;
 
         CREATE INDEX IF NOT EXISTS idx_reddit_posted_items_posted_at
-        ON reddit_posted_items (posted_at);",
+        ON reddit_posted_items (posted_at);
+
+        CREATE TABLE IF NOT EXISTS mod_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            case_number INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            moderator_id INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT 'No reason provided',
+            duration_seconds INTEGER,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER,
+            active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(guild_id, case_number)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_mod_cases_user ON mod_cases(guild_id, user_id);
+        CREATE INDEX IF NOT EXISTS idx_mod_cases_expires ON mod_cases(expires_at) WHERE active = 1 AND expires_at IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS mod_strikes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            case_id INTEGER,
+            strike_count INTEGER NOT NULL DEFAULT 1,
+            reason TEXT NOT NULL DEFAULT '',
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER,
+            decayed INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(case_id) REFERENCES mod_cases(id) ON DELETE SET NULL
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_mod_strikes_user ON mod_strikes(guild_id, user_id) WHERE decayed = 0;
+
+        CREATE TABLE IF NOT EXISTS automod_configs (
+            guild_id INTEGER PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            anti_spam_enabled INTEGER NOT NULL DEFAULT 1,
+            anti_spam_max_messages INTEGER NOT NULL DEFAULT 5,
+            anti_spam_interval_seconds INTEGER NOT NULL DEFAULT 5,
+            anti_invites_enabled INTEGER NOT NULL DEFAULT 1,
+            anti_links_enabled INTEGER NOT NULL DEFAULT 0,
+            anti_caps_enabled INTEGER NOT NULL DEFAULT 0,
+            anti_caps_min_chars INTEGER NOT NULL DEFAULT 10,
+            anti_caps_percent INTEGER NOT NULL DEFAULT 70,
+            anti_mention_max INTEGER NOT NULL DEFAULT 5,
+            blocked_words_json TEXT NOT NULL DEFAULT '[]',
+            whitelisted_domains_json TEXT NOT NULL DEFAULT '[]',
+            ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+            ignored_roles_json TEXT NOT NULL DEFAULT '[]',
+            strike_weights_json TEXT NOT NULL DEFAULT '{\"spam\":2,\"invite\":3,\"bad_word\":2,\"caps\":1,\"mention\":3}',
+            strike_decay_hours INTEGER NOT NULL DEFAULT 168,
+            punishment_ladder_json TEXT NOT NULL DEFAULT '[{\"strikes\":2,\"action\":\"warn\"},{\"strikes\":4,\"action\":\"timeout\",\"duration_seconds\":3600},{\"strikes\":8,\"action\":\"kick\"},{\"strikes\":10,\"action\":\"ban\"}]',
+            ai_moderation_enabled INTEGER NOT NULL DEFAULT 0
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS logging_configs (
+            guild_id INTEGER PRIMARY KEY,
+            unified_channel_id INTEGER,
+            mod_channel_id INTEGER,
+            message_channel_id INTEGER,
+            member_channel_id INTEGER,
+            server_channel_id INTEGER,
+            voice_channel_id INTEGER,
+            ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+            ignored_roles_json TEXT NOT NULL DEFAULT '[]',
+            log_bots INTEGER NOT NULL DEFAULT 1,
+            embed_color INTEGER NOT NULL DEFAULT 3553599
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS greetings_configs (
+            guild_id INTEGER PRIMARY KEY,
+            welcome_channel_id INTEGER,
+            welcome_message TEXT NOT NULL DEFAULT '',
+            welcome_embed_json TEXT NOT NULL DEFAULT '',
+            welcome_dm_enabled INTEGER NOT NULL DEFAULT 0,
+            welcome_dm_message TEXT NOT NULL DEFAULT '',
+            farewell_channel_id INTEGER,
+            farewell_message TEXT NOT NULL DEFAULT '',
+            farewell_embed_json TEXT NOT NULL DEFAULT '',
+            member_autorole_ids_json TEXT NOT NULL DEFAULT '[]',
+            bot_autorole_ids_json TEXT NOT NULL DEFAULT '[]',
+            autorole_delay_seconds INTEGER NOT NULL DEFAULT 0
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS reaction_role_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            message_id INTEGER NOT NULL,
+            group_type TEXT NOT NULL DEFAULT 'normal',
+            required_role_id INTEGER,
+            component_type TEXT NOT NULL DEFAULT 'reaction',
+            UNIQUE(guild_id, channel_id, message_id)
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS reaction_role_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id INTEGER NOT NULL,
+            emoji_or_custom_id TEXT NOT NULL,
+            role_id INTEGER NOT NULL,
+            button_label TEXT,
+            button_style TEXT,
+            FOREIGN KEY(group_id) REFERENCES reaction_role_groups(id) ON DELETE CASCADE
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_rr_lookup ON reaction_role_groups(guild_id, message_id);
+
+        CREATE TABLE IF NOT EXISTS custom_triggers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            trigger_name TEXT NOT NULL,
+            match_mode TEXT NOT NULL DEFAULT 'prefix',
+            response_template TEXT NOT NULL,
+            cooldown_seconds INTEGER NOT NULL DEFAULT 0,
+            allowed_roles_json TEXT NOT NULL DEFAULT '[]',
+            ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+            delete_trigger_message INTEGER NOT NULL DEFAULT 0,
+            reply_in_dm INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(guild_id, trigger_name)
+        ) STRICT;",
     )?;
 
     let now = Utc::now().timestamp();
@@ -1554,5 +3030,221 @@ mod tests {
 
         drop(storage);
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_v3_schema_migration_and_operations() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join(format!("silas_test_v3_{}", rand::random::<u64>()));
+        fs::create_dir_all(&temp_dir)?;
+        let db_path = temp_dir.join("silas.db");
+
+        // 1. Setup a v2 database by opening initially, then simulating a v2 state
+        {
+            let storage = Storage::open(&db_path)?;
+            let conn = storage.writer.lock();
+            conn.execute_batch(
+                "UPDATE schema_migrations SET version = 2;
+                 DROP TABLE IF EXISTS mod_cases;
+                 DROP TABLE IF EXISTS mod_strikes;
+                 DROP TABLE IF EXISTS automod_configs;
+                 DROP TABLE IF EXISTS logging_configs;
+                 DROP TABLE IF EXISTS greetings_configs;
+                 DROP TABLE IF EXISTS reaction_role_entries;
+                 DROP TABLE IF EXISTS reaction_role_groups;
+                 DROP TABLE IF EXISTS custom_triggers;",
+            )?;
+        }
+
+        // 2. Open via Storage to trigger v3 migration
+        let storage = Storage::open(&db_path)?;
+
+        // Verify schema version is now 3
+        {
+            let conn = storage.writer.lock();
+            let current_v: u32 = conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))?;
+            assert_eq!(current_v, 3);
+        }
+
+        let guild_id = 999_888_777u64;
+        let user_id = 111_222_333u64;
+        let mod_id = 444_555_666u64;
+
+        // 3. Test Mod Cases
+        let new_case = NewModCase {
+            guild_id,
+            user_id,
+            moderator_id: mod_id,
+            action_type: "tempban".to_string(),
+            reason: "Excessive spam".to_string(),
+            duration_seconds: Some(3600),
+            created_at: Some(1_700_000_000),
+            expires_at: Some(1_700_003_600),
+        };
+        let created_case = storage.create_mod_case(&new_case)?;
+        assert_eq!(created_case.case_number, 1);
+        assert_eq!(created_case.guild_id, guild_id);
+        assert!(created_case.active);
+
+        let fetched_case = storage.get_mod_case(guild_id, 1)?;
+        assert!(fetched_case.is_some());
+        if let Some(c) = fetched_case {
+            assert_eq!(c.reason, "Excessive spam");
+            assert_eq!(c.action_type, "tempban");
+        }
+
+        let user_cases = storage.get_mod_cases_for_user(guild_id, user_id)?;
+        assert_eq!(user_cases.len(), 1);
+
+        let expired_cases = storage.get_active_expired_cases(1_700_005_000)?;
+        assert_eq!(expired_cases.len(), 1);
+
+        let reason_updated = storage.update_case_reason(guild_id, 1, "Updated reason")?;
+        assert!(reason_updated);
+
+        let deactivated = storage.deactivate_case(created_case.id)?;
+        assert!(deactivated);
+        let expired_after_deact = storage.get_active_expired_cases(1_700_005_000)?;
+        assert!(expired_after_deact.is_empty());
+
+        // 4. Test Strikes
+        let new_strike = NewModStrike {
+            guild_id,
+            user_id,
+            case_id: Some(created_case.id),
+            strike_count: 2,
+            reason: "First strike warning".to_string(),
+            created_at: Some(1_700_000_000),
+            expires_at: Some(1_700_010_000),
+        };
+        let created_strike = storage.add_strike(&new_strike)?;
+        assert_eq!(created_strike.strike_count, 2);
+        assert!(!created_strike.decayed);
+
+        let active_count = storage.get_active_strikes_count(guild_id, user_id)?;
+        assert_eq!(active_count, 2);
+
+        let user_strikes = storage.get_user_strikes(guild_id, user_id)?;
+        assert_eq!(user_strikes.len(), 1);
+
+        let decayed = storage.decay_strikes(guild_id, 1_700_020_000)?;
+        assert_eq!(decayed, 1);
+        let count_after_decay = storage.get_active_strikes_count(guild_id, user_id)?;
+        assert_eq!(count_after_decay, 0);
+
+        // 5. Test Automod Config
+        let default_am = storage.get_automod_config(guild_id)?;
+        assert!(default_am.enabled);
+        assert!(default_am.anti_spam_enabled);
+
+        let mut custom_am = default_am;
+        custom_am.anti_spam_max_messages = 8;
+        custom_am.blocked_words.push("badterm".to_string());
+        storage.save_automod_config(&custom_am)?;
+
+        let reloaded_am = storage.get_automod_config(guild_id)?;
+        assert_eq!(reloaded_am.anti_spam_max_messages, 8);
+        assert_eq!(reloaded_am.blocked_words, vec!["badterm".to_string()]);
+
+        // 6. Test Logging Config
+        let default_log = storage.get_logging_config(guild_id)?;
+        assert!(default_log.log_bots);
+
+        let mut custom_log = default_log;
+        custom_log.mod_channel_id = Some(12345);
+        custom_log.ignored_channels.push(9999);
+        storage.save_logging_config(&custom_log)?;
+
+        let reloaded_log = storage.get_logging_config(guild_id)?;
+        assert_eq!(reloaded_log.mod_channel_id, Some(12345));
+        assert_eq!(reloaded_log.ignored_channels, vec![9999]);
+
+        // 7. Test Greetings Config
+        let default_greet = storage.get_greetings_config(guild_id)?;
+        assert!(!default_greet.welcome_dm_enabled);
+
+        let mut custom_greet = default_greet;
+        custom_greet.welcome_channel_id = Some(55555);
+        custom_greet.welcome_message = "Welcome {user.name}!".to_string();
+        custom_greet.member_autorole_ids.push(77777);
+        storage.save_greetings_config(&custom_greet)?;
+
+        let reloaded_greet = storage.get_greetings_config(guild_id)?;
+        assert_eq!(reloaded_greet.welcome_channel_id, Some(55555));
+        assert_eq!(reloaded_greet.welcome_message, "Welcome {user.name}!");
+        assert_eq!(reloaded_greet.member_autorole_ids, vec![77777]);
+
+        // 8. Test Reaction Roles
+        let new_rr_group = NewReactionRoleGroup {
+            guild_id,
+            channel_id: 11111,
+            message_id: 22222,
+            group_type: "unique".to_string(),
+            required_role_id: None,
+            component_type: "button".to_string(),
+        };
+        let created_group = storage.create_reaction_role_group(&new_rr_group)?;
+        assert_eq!(created_group.group_type, "unique");
+
+        let entry = NewReactionRoleEntry {
+            group_id: created_group.id,
+            emoji_or_custom_id: "color_red".to_string(),
+            role_id: 88888,
+            button_label: Some("Red Team".to_string()),
+            button_style: Some("danger".to_string()),
+        };
+        let created_entry = storage.add_reaction_role_entry(&entry)?;
+        assert_eq!(created_entry.emoji_or_custom_id, "color_red");
+
+        let fetched_rr = storage.get_reaction_roles_for_message(guild_id, 22222)?;
+        assert!(fetched_rr.is_some());
+        if let Some(g) = fetched_rr {
+            assert_eq!(g.entries.len(), 1);
+            if let Some(first_entry) = g.entries.first() {
+                assert_eq!(first_entry.role_id, 88888);
+            }
+        }
+
+        let all_guild_rr = storage.get_guild_reaction_roles(guild_id)?;
+        assert_eq!(all_guild_rr.len(), 1);
+
+        // 9. Test Custom Triggers
+        let new_trigger = NewCustomTrigger {
+            guild_id,
+            trigger_name: "!ping".to_string(),
+            match_mode: "prefix".to_string(),
+            response_template: "Pong! {user.mention}".to_string(),
+            cooldown_seconds: 5,
+            allowed_roles: vec![101010],
+            ignored_channels: vec![],
+            delete_trigger_message: true,
+            reply_in_dm: false,
+            enabled: true,
+        };
+        let created_trigger = storage.create_custom_trigger(&new_trigger)?;
+        assert_eq!(created_trigger.trigger_name, "!ping");
+
+        let fetched_trigger = storage.get_custom_trigger(guild_id, "!ping")?;
+        assert!(fetched_trigger.is_some());
+        if let Some(t) = fetched_trigger {
+            assert_eq!(t.response_template, "Pong! {user.mention}");
+            assert!(t.delete_trigger_message);
+        }
+
+        let trigger_list = storage.list_custom_triggers(guild_id)?;
+        assert_eq!(trigger_list.len(), 1);
+
+        let trigger_deleted = storage.delete_custom_trigger(guild_id, "!ping")?;
+        assert!(trigger_deleted);
+        assert!(storage.get_custom_trigger(guild_id, "!ping")?.is_none());
+
+        // 10. Test Guild Purge deletes all module data
+        storage.purge_guild_data(guild_id)?;
+        assert!(storage.get_mod_cases_for_user(guild_id, user_id)?.is_empty());
+        assert_eq!(storage.get_active_strikes_count(guild_id, user_id)?, 0);
+        assert!(storage.get_guild_reaction_roles(guild_id)?.is_empty());
+
+        drop(storage);
+        let _ = fs::remove_dir_all(&temp_dir);
+        Ok(())
     }
 }

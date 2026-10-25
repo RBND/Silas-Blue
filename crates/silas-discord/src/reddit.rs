@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
-const USER_AGENT_STRING: &str = "SilasBlue/4.0.5 (by /u/silas-blue; Discord bot)";
+const USER_AGENT_STRING: &str = "SilasBlue/4.0.6 (by /u/silas-blue; Discord bot)";
 
 #[derive(Clone)]
 struct CachedOAuthToken {
