@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Silas Blue v4.0 — Administration Console</title>
+  <title>Silas Blue v6.0.0 — Administration Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
   <link rel="stylesheet" href="/app.css">
@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v5.0.2</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.0</span>
         </div>
       </div>
 
@@ -30,6 +30,9 @@
         </button>
         <button type="button" class="nav-item" data-view="servers">
           Server Configuration
+        </button>
+        <button type="button" class="nav-item" data-view="reddit">
+          🤖 Reddit &amp; Devvit
         </button>
         <button type="button" class="nav-item" data-view="updates">
           Updates &amp; Snapshots
@@ -45,7 +48,7 @@
           🤖 Automod &amp; Strikes
         </button>
         <button type="button" class="nav-item" data-view="logging">
-          📜 Audit Logging
+          📜 Channel Logging
         </button>
         <button type="button" class="nav-item" data-view="greetings">
           👋 Greetings &amp; Autorole
@@ -55,6 +58,13 @@
         </button>
         <button type="button" class="nav-item" data-view="triggers">
           ⚡ Custom Triggers
+        </button>
+        <div class="sidebar-nav-divider" role="separator"><span>SECURITY &amp; GOVERNANCE</span></div>
+        <button type="button" class="nav-item" data-view="grants">
+          👥 Access &amp; Roles
+        </button>
+        <button type="button" class="nav-item" data-view="audit-log">
+          📋 Audit Trail
         </button>
       </nav>
 
@@ -129,7 +139,13 @@
 
         <div class="card">
           <div class="card-header-split">
-            <h3>Real-Time Telemetry &amp; Inference Stream</h3>
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <h3>Real-Time Telemetry &amp; Inference Stream</h3>
+              <div class="telemetry-status-indicator" id="telemetry-status">
+                <span class="status-dot status-dot-disconnected" id="telemetry-dot" aria-hidden="true"></span>
+                <span class="status-text" id="telemetry-text">Disconnected</span>
+              </div>
+            </div>
             <div class="log-controls">
               <select id="log-filter-level" class="input-select input-sm" aria-label="Filter log level">
                 <option value="ALL">All Events</option>
@@ -185,11 +201,18 @@
 
           <div class="form-grid">
             <div class="form-group">
-              <label for="cfg-ai-provider">Active Backend Engine</label>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <label for="cfg-ai-provider">Active Backend Engine</label>
+                <span id="active-provider-badge" class="badge badge-success">Local: Ollama</span>
+              </div>
               <select id="cfg-ai-provider" class="input-select">
-                <option value="ollama">Ollama (Local / LAN)</option>
-                <option value="llamacpp">llama.cpp Server (OpenAI-Compatible Local)</option>
-                <option value="remote">Remote Cloud API (OpenAI / OpenRouter / Groq / DeepSeek / xAI / MiMo)</option>
+                <optgroup label="Local Inference (Self-Hosted / Private)">
+                  <option value="ollama">Ollama (Local / LAN)</option>
+                  <option value="llamacpp">llama.cpp Server (OpenAI-Compatible Local)</option>
+                </optgroup>
+                <optgroup label="Remote Cloud API">
+                  <option value="remote">Remote Cloud API (OpenAI / OpenRouter / Groq / DeepSeek / xAI / MiMo)</option>
+                </optgroup>
               </select>
             </div>
             <div class="form-group">
@@ -578,13 +601,16 @@
         </header>
 
         <div class="card">
-          <h3>Release Channel &amp; Verification Status</h3>
+          <div class="card-header-split">
+            <h3>Release Channel &amp; Verification Status</h3>
+            <span id="channel-status-badge" class="badge badge-success">Active: Stable</span>
+          </div>
           <div class="form-row">
             <div class="form-group">
-              <label for="update-channel-select">Update Channel</label>
+              <label for="update-channel-select">Update Channel (Autosaves on change)</label>
               <select id="update-channel-select" class="input-select">
-                <option value="stable">Stable Releases</option>
-                <option value="prerelease">Pre-release / Beta</option>
+                <option value="stable">Stable Releases (Recommended for production)</option>
+                <option value="prerelease">Pre-release / Beta (Bleeding edge features)</option>
               </select>
             </div>
           </div>
@@ -703,44 +729,141 @@
         </header>
 
         <div class="card">
-          <h3>Core Automated Threat Rules</h3>
-          <div class="form-grid">
-            <div class="form-group checkbox-group">
-              <label><input type="checkbox" id="am-enabled" checked> Enable Automod Engine for Server</label>
-            </div>
-            <div class="form-group checkbox-group">
-              <label><input type="checkbox" id="am-ai-mod"> Enable AI-Assisted Moderation Classifier</label>
-            </div>
-            <div class="form-group checkbox-group">
-              <label><input type="checkbox" id="am-anti-spam" checked> Anti-Spam Burst Limiter</label>
-            </div>
-            <div class="form-group">
-              <label for="am-spam-max">Spam Message Threshold / Interval</label>
-              <div class="form-row">
-                <input type="number" id="am-spam-max" class="input-text" min="2" max="20" value="5" placeholder="Max msgs">
-                <input type="number" id="am-spam-interval" class="input-text" min="1" max="60" value="5" placeholder="Interval (sec)">
-              </div>
-            </div>
-            <div class="form-group checkbox-group">
-              <label><input type="checkbox" id="am-anti-invites" checked> Anti-Discord Invites (Block unauthorized invite links)</label>
-            </div>
-            <div class="form-group checkbox-group">
-              <label><input type="checkbox" id="am-anti-links"> Anti-Links (Block all external hyperlinks unless whitelisted)</label>
-            </div>
-            <div class="form-group checkbox-group">
-              <label><input type="checkbox" id="am-anti-caps"> Anti-Excessive Caps Lock</label>
-            </div>
-            <div class="form-group">
-              <label for="am-caps-min">Caps Detection (Min Chars / Min Percent)</label>
-              <div class="form-row">
-                <input type="number" id="am-caps-min" class="input-text" min="5" max="100" value="10" placeholder="Min chars">
-                <input type="number" id="am-caps-pct" class="input-text" min="50" max="100" value="70" placeholder="Caps %">
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="am-mention-max">Mass Mentions Limit (Max User/Role tags per msg)</label>
-              <input type="number" id="am-mention-max" class="input-text" min="1" max="50" value="5">
-            </div>
+          <div class="card-header-split">
+            <h3>Core Automated Threat Rules</h3>
+            <span class="badge badge-neutral">Real-Time Threat Detection</span>
+          </div>
+          <div class="table-container">
+            <table class="automod-rules-table">
+              <thead>
+                <tr>
+                  <th style="width: 45%;">Rule &amp; Description</th>
+                  <th style="width: 15%;">Active Status</th>
+                  <th style="width: 40%;">Detection Thresholds / Parameters</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="rule-title">Automod Engine Master Switch</div>
+                    <div class="rule-desc">Master enable/disable switch for all automated rule evaluations in this server.</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-enabled" checked> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="text-secondary" style="font-size: 0.85rem;">Global server state</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="rule-title">Anti-Spam Burst Limiter</div>
+                    <div class="rule-desc">Rate-limits rapid message flooding within a short sliding time window.</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-anti-spam" checked> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="form-row" style="gap: 0.5rem;">
+                      <div class="form-group">
+                        <label for="am-spam-max">Max Messages</label>
+                        <input type="number" id="am-spam-max" class="input-text" min="2" max="20" value="5">
+                      </div>
+                      <div class="form-group">
+                        <label for="am-spam-interval">Window (sec)</label>
+                        <input type="number" id="am-spam-interval" class="input-text" min="1" max="60" value="5">
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="rule-title">Anti-Discord Invites</div>
+                    <div class="rule-desc">Intercepts and deletes unauthorized Discord server invite hyperlinks (discord.gg / discord.com/invite).</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-anti-invites" checked> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="text-secondary" style="font-size: 0.85rem;">Regex pattern match: <code>discord\.gg|discord\.com\/invite</code></span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="rule-title">Anti-External Links</div>
+                    <div class="rule-desc">Deletes external web hyperlinks unless explicitly listed in Whitelisted Web Domains.</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-anti-links"> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="text-secondary" style="font-size: 0.85rem;">Validates against Whitelisted Web Domains below</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="rule-title">Anti-Excessive Caps Lock</div>
+                    <div class="rule-desc">Catches loud screaming messages with excessive uppercase letter ratios.</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-anti-caps"> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="form-row" style="gap: 0.5rem;">
+                      <div class="form-group">
+                        <label for="am-caps-min">Min Length</label>
+                        <input type="number" id="am-caps-min" class="input-text" min="5" max="100" value="10">
+                      </div>
+                      <div class="form-group">
+                        <label for="am-caps-pct">Caps %</label>
+                        <input type="number" id="am-caps-pct" class="input-text" min="50" max="100" value="70">
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="rule-title">Mass Mentions Limiter</div>
+                    <div class="rule-desc">Prevents raid pings by capping the number of user or role mentions allowed per message.</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-mention-enabled" checked> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="form-group">
+                      <label for="am-mention-max">Max Mentions Allowed</label>
+                      <input type="number" id="am-mention-max" class="input-text" min="1" max="50" value="5">
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <div class="rule-title">AI-Assisted Moderation Classifier</div>
+                    <div class="rule-desc">Uses active LLM inference engine to evaluate messages against toxic/harassing intent.</div>
+                  </td>
+                  <td>
+                    <div class="checkbox-group" style="padding: 0;">
+                      <label><input type="checkbox" id="am-ai-mod"> Enabled</label>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="text-secondary" style="font-size: 0.85rem;">Uses active LLM model with zero-shot safety prompt</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -808,8 +931,8 @@
                 <tr>
                   <th>Strikes Required</th>
                   <th>Action</th>
-                  <th>Duration (Seconds)</th>
-                  <th>Remove</th>
+                  <th>Duration</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody id="am-ladder-table-body">
@@ -835,8 +958,9 @@
                 </select>
               </div>
               <div class="form-group">
-                <label for="am-new-step-duration">Duration Sec (Timeout only)</label>
-                <input type="number" id="am-new-step-duration" class="input-text" min="0" placeholder="e.g. 3600 for 1h">
+                <label for="am-new-step-duration">Duration (e.g. 1hr, 2h 30m, 1d, permanent)</label>
+                <input type="text" id="am-new-step-duration" class="input-text" placeholder="e.g. 1hr, 1d, or permanent">
+                <div id="am-new-step-duration-preview" class="duration-preview-text">Preview: Permanent</div>
               </div>
               <div class="form-group form-actions-inline">
                 <button type="button" id="btn-add-ladder-step" class="btn btn-secondary">+ Add Step</button>
@@ -1136,6 +1260,232 @@
         </div>
       </section>
 
+      <!-- VIEW 12: Reddit & Devvit Companion -->
+      <section id="view-reddit" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>🤖 Reddit &amp; Devvit Companion</h2>
+            <p class="subtitle">Subreddit feed syndication, live webhook relays, and Devvit companion bridge.</p>
+          </div>
+          <div class="header-actions">
+            <select id="reddit-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-refresh-reddit" class="btn btn-secondary">Refresh</button>
+          </div>
+        </header>
+
+        <!-- Global Companion Webhook Credentials (Owner-Only) -->
+        <div class="card" id="reddit-global-card">
+          <div class="card-header-split">
+            <h3>Global Companion Webhook &amp; App Credentials</h3>
+            <span class="badge badge-warning">Owner Only</span>
+          </div>
+          <p class="help-text">
+            These credentials configure the global Devvit webhook signature verification. The Devvit app installed on Reddit sends events to Silas Blue at <code>https://&lt;your-domain&gt;/api/reddit/webhook</code>.
+          </p>
+          <div class="form-grid" style="margin-top: 0.75rem;">
+            <div class="form-group">
+              <label for="reddit-global-client-id">Reddit App Client ID</label>
+              <input type="text" id="reddit-global-client-id" class="input-text" placeholder="e.g. 14-char app id">
+            </div>
+            <div class="form-group">
+              <label for="reddit-global-client-secret">Reddit App Client Secret</label>
+              <input type="password" id="reddit-global-client-secret" class="input-text" placeholder="Reddit OAuth2 Secret">
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="reddit-global-webhook-secret">Companion Webhook Shared Secret</label>
+              <div class="input-with-btn">
+                <input type="password" id="reddit-global-webhook-secret" class="input-text" placeholder="Shared signing secret for Devvit webhook">
+                <button type="button" id="btn-gen-reddit-secret" class="btn btn-secondary btn-sm">Generate Secret</button>
+              </div>
+            </div>
+          </div>
+          <div class="form-actions" style="margin-top: 1rem;">
+            <button type="button" id="btn-save-reddit-global" class="btn btn-primary">Save Global Reddit Settings</button>
+          </div>
+        </div>
+
+        <!-- Active Server Subreddit Subscriptions -->
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Active Subreddit Feeds for Selected Server</h3>
+            <span id="reddit-subs-count-badge" class="badge badge-neutral">0 feeds</span>
+          </div>
+          <p class="help-text">
+            When new posts arrive from Reddit matching subscribed subreddits, Silas Blue automatically posts rich embeds to the designated Discord channel.
+          </p>
+          <div class="table-container" style="margin-top: 0.75rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Subreddit</th>
+                  <th>Target Channel</th>
+                  <th>Post Filter</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="reddit-subs-table-body">
+                <tr><td colspan="4" class="muted text-center">Loading subreddit subscriptions...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="subcard" style="margin-top: 1rem;">
+            <h4>Add Subreddit Feed</h4>
+            <div class="form-grid" style="margin-top: 0.5rem;">
+              <div class="form-group">
+                <label for="reddit-new-sub-name">Subreddit Name (e.g. rust or r/rust)</label>
+                <input type="text" id="reddit-new-sub-name" class="input-text" placeholder="rust">
+              </div>
+              <div class="form-group">
+                <label for="cb-reddit-channel">Destination Discord Channel</label>
+                <div id="cb-reddit-channel" class="combobox-container"></div>
+              </div>
+              <div class="form-group">
+                <label for="reddit-new-sub-filter">Post Filter</label>
+                <select id="reddit-new-sub-filter" class="input-select">
+                  <option value="new">All New Posts</option>
+                  <option value="hot">Hot Posts Only</option>
+                  <option value="top">Top Posts Only</option>
+                </select>
+              </div>
+              <div class="form-group form-actions-inline" style="align-self: flex-end;">
+                <button type="button" id="btn-add-reddit-sub" class="btn btn-secondary">+ Add Feed</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 13: Governance & Delegated Access (Feature F1) -->
+      <section id="view-grants" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>👥 Access &amp; Roles Governance</h2>
+            <p class="subtitle">Delegated role and user permissions, domain boundaries, and multi-user administration.</p>
+          </div>
+          <div class="header-actions">
+            <select id="grants-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-refresh-grants" class="btn btn-secondary">Refresh</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Active Delegated Console Access Grants</h3>
+            <span id="grants-count-badge" class="badge badge-neutral">0 grants</span>
+          </div>
+          <p class="help-text">
+            Server Owners and Bot Owners always maintain unconditional administrative bypass. Grants below delegate scoped access to specific Discord roles or guild members.
+          </p>
+          <div class="table-container" style="margin-top: 0.75rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Principal (Role / Member)</th>
+                  <th>Domain</th>
+                  <th>Access Level</th>
+                  <th>Granted At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="grants-table-body">
+                <tr><td colspan="6" class="muted text-center">Loading access grants...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="subcard" style="margin-top: 1rem;">
+            <h4>Create Console Access Grant</h4>
+            <div class="form-grid" style="margin-top: 0.5rem;">
+              <div class="form-group">
+                <label for="grant-principal-type">Principal Type</label>
+                <select id="grant-principal-type" class="input-select">
+                  <option value="role">Discord Role</option>
+                  <option value="user">Discord User / Member</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="cb-grant-principal">Select Role or Member</label>
+                <div id="cb-grant-principal" class="combobox-container"></div>
+              </div>
+              <div class="form-group">
+                <label for="grant-domain">Permission Domain</label>
+                <select id="grant-domain" class="input-select">
+                  <option value="*">All Domains (*)</option>
+                  <option value="moderation">Moderation (Cases &amp; Infractions)</option>
+                  <option value="automod">Automod &amp; Strikes</option>
+                  <option value="logging">Channel Logging</option>
+                  <option value="settings">Server Settings &amp; Customization</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="grant-level">Access Level</label>
+                <select id="grant-level" class="input-select">
+                  <option value="admin">Admin (Full Control)</option>
+                  <option value="write">Write (Manage &amp; Edit)</option>
+                  <option value="read">Read (View Only)</option>
+                </select>
+              </div>
+              <div class="form-group form-actions-inline" style="grid-column: 1 / -1; align-self: flex-start;">
+                <button type="button" id="btn-create-grant" class="btn btn-primary">+ Grant Access</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 14: Configuration Audit Log (Feature F2) -->
+      <section id="view-audit-log" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>📋 Configuration Audit Trail</h2>
+            <p class="subtitle">Tamper-evident audit trail of all web console configuration and administrative mutations.</p>
+          </div>
+          <div class="header-actions">
+            <select id="audit-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-refresh-audit" class="btn btn-secondary">Refresh</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Audit Events</h3>
+            <div class="log-controls">
+              <select id="audit-filter-domain" class="input-select input-sm" aria-label="Filter by domain">
+                <option value="">All Domains</option>
+                <option value="auth">Auth &amp; Access</option>
+                <option value="settings">Server Settings</option>
+                <option value="moderation">Moderation Cases</option>
+                <option value="automod">Automod &amp; Strikes</option>
+                <option value="logging">Logging Routing</option>
+              </select>
+              <button type="button" id="btn-audit-prev" class="btn btn-secondary btn-sm" disabled>&larr; Prev</button>
+              <span id="audit-page-indicator" class="badge badge-neutral">Page 1</span>
+              <button type="button" id="btn-audit-next" class="btn btn-secondary btn-sm">Next &rarr;</button>
+            </div>
+          </div>
+          <div class="table-container" style="margin-top: 0.75rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Actor</th>
+                  <th>Domain</th>
+                  <th>Action</th>
+                  <th>Status</th>
+                  <th>IP Address</th>
+                  <th>Diff / Payload</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table-body">
+                <tr><td colspan="7" class="muted text-center">Loading audit log entries...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ================================================================ -->
       <!-- MODALS & DIALOGS -->
       <!-- ================================================================ -->
@@ -1209,9 +1559,15 @@
           </div>
           <div class="modal-body">
             <div class="form-grid">
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="rr-input-message-link">Discord Message Link (Paste link to auto-extract Channel &amp; Message ID)</label>
+                <input type="url" id="rr-input-message-link" class="input-text" placeholder="https://discord.com/channels/123.../456.../789...">
+                <div id="rr-link-status" class="duration-preview-text hidden"></div>
+              </div>
               <div class="form-group">
-                <label for="rr-input-channel">Discord Channel ID *</label>
-                <input type="text" id="rr-input-channel" class="input-text" placeholder="Channel where message resides" required>
+                <label for="cb-rr-channel">Discord Channel *</label>
+                <div id="cb-rr-channel" class="combobox-container"></div>
+                <input type="hidden" id="rr-input-channel">
               </div>
               <div class="form-group">
                 <label for="rr-input-message">Discord Message ID *</label>
@@ -1309,6 +1665,67 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-modal="modal-create-trigger">Cancel</button>
             <button type="button" id="btn-submit-save-trigger" class="btn btn-primary">Save Trigger</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Audit Log Entry Diff (Feature F2) -->
+      <div id="modal-audit-diff" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-audit-diff-title">
+        <div class="modal-dialog" style="max-width: 780px;">
+          <div class="modal-header">
+            <h3 id="modal-audit-diff-title">Audit Log Payload Diff</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-audit-diff" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div id="audit-diff-meta" style="margin-bottom: 0.75rem; font-size: 0.88rem; color: var(--text-secondary);"></div>
+            <div class="audit-diff-container">
+              <div>
+                <strong style="font-size: 0.82rem; color: var(--danger);">Before Mutation (Previous State)</strong>
+                <pre id="audit-diff-before" class="audit-diff-box">None</pre>
+              </div>
+              <div>
+                <strong style="font-size: 0.82rem; color: var(--success);">After Mutation (New State)</strong>
+                <pre id="audit-diff-after" class="audit-diff-box">None</pre>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-audit-diff">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Edit Ladder Step -->
+      <div id="modal-edit-ladder-step" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-edit-ladder-title">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <h3 id="modal-edit-ladder-title">Edit Punishment Step</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-edit-ladder-step" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="edit-ladder-index">
+            <div class="form-group">
+              <label for="edit-ladder-strikes">Strikes Required</label>
+              <input type="number" id="edit-ladder-strikes" class="input-text" min="1" max="50">
+            </div>
+            <div class="form-group">
+              <label for="edit-ladder-action">Action</label>
+              <select id="edit-ladder-action" class="input-select">
+                <option value="warn">Warn</option>
+                <option value="timeout">Timeout</option>
+                <option value="kick">Kick</option>
+                <option value="ban">Ban</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="edit-ladder-duration">Duration (e.g. 1hr, 2h 30m, 1d, permanent)</label>
+              <input type="text" id="edit-ladder-duration" class="input-text" placeholder="e.g. 1hr, 1d, or permanent">
+              <div id="edit-ladder-duration-preview" class="duration-preview-text">Preview: Permanent</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-edit-ladder-step">Cancel</button>
+            <button type="button" id="btn-submit-edit-ladder" class="btn btn-primary">Save Step</button>
           </div>
         </div>
       </div>

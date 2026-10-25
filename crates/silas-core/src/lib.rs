@@ -2,6 +2,7 @@
 
 pub mod cache;
 pub mod config;
+pub mod duration;
 pub mod events;
 pub mod memory;
 pub mod pagination;

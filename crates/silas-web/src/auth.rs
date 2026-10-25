@@ -21,6 +21,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 pub const SESSION_COOKIE_NAME: &str = "silas_session";
 pub const OAUTH_STATE_COOKIE_NAME: &str = "silas_oauth_state";
+pub const OAUTH_PKCE_COOKIE_NAME: &str = "silas_pkce";
 pub const SESSION_TTL_SECS: i64 = 7 * 24 * 3600;
 pub const OTP_TTL: Duration = Duration::from_secs(2 * 3600);
 pub const MAX_TRACKED_IPS: usize = 4_096;
@@ -53,6 +54,8 @@ pub struct SessionClaims {
     pub username: String,
     pub exp: i64,
     pub epoch: i64,
+    #[serde(default)]
+    pub is_owner: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -209,6 +212,7 @@ impl AuthManager {
         &self,
         user_id: &str,
         username: &str,
+        is_owner: bool,
         settings: &AppSettings,
     ) -> Result<String, String> {
         let claims = SessionClaims {
@@ -216,6 +220,7 @@ impl AuthManager {
             username: username.to_string(),
             exp: Utc::now().timestamp().saturating_add(SESSION_TTL_SECS),
             epoch: settings.session_epoch,
+            is_owner,
         };
         let json_bytes = serde_json::to_vec(&claims).map_err(|e| e.to_string())?;
         let payload_b64 = URL_SAFE_NO_PAD.encode(&json_bytes);
@@ -263,29 +268,47 @@ impl AuthManager {
         self.verify_session_token(&token, settings)
     }
 
-    /// Exchange a Discord OAuth2 authorization code and verify that the user is an authorized Bot Owner
-    /// or Application Team Owner/Admin (`membership_state == 2` and `role in ("owner", "admin")`).
+    /// Check if a user ID is the configured bot owner or local console admin.
+    pub fn is_bot_owner(&self, user_id: &str, settings: &AppSettings) -> bool {
+        if user_id == "local-console" {
+            return true;
+        }
+        let owner_id = settings.bot_owner_id.trim();
+        if !owner_id.is_empty() && owner_id == user_id.trim() {
+            return true;
+        }
+        false
+    }
+
+    /// Exchange a Discord OAuth2 authorization code with PKCE verification and authenticate the user.
+    /// Returns `(user_id_str, username, is_bot_owner)`.
     pub async fn verify_discord_oauth_callback(
         &self,
         code: &str,
+        code_verifier: Option<&str>,
         redirect_uri: &str,
         effective_client_id: &str,
         settings: &AppSettings,
-    ) -> Result<(String, String), String> {
+    ) -> Result<(String, String, bool), String> {
         if effective_client_id.trim().is_empty()
             || settings.discord_oauth_client_secret.trim().is_empty()
         {
             return Err("Discord OAuth2 Client ID / Secret are not configured.".to_string());
         }
 
-        // 1. Exchange code for OAuth2 user access token
-        let params = [
+        // 1. Exchange code for OAuth2 user access token (with optional PKCE code_verifier)
+        let mut params = vec![
             ("client_id", effective_client_id.trim()),
             ("client_secret", settings.discord_oauth_client_secret.trim()),
             ("grant_type", "authorization_code"),
             ("code", code.trim()),
             ("redirect_uri", redirect_uri),
         ];
+        if let Some(cv) = code_verifier {
+            if !cv.trim().is_empty() {
+                params.push(("code_verifier", cv.trim()));
+            }
+        }
 
         let token_resp = self
             .http
@@ -336,47 +359,35 @@ impl AuthManager {
         let username = user_json
             .get("username")
             .and_then(|v| v.as_str())
-            .unwrap_or("admin")
+            .unwrap_or("user")
             .to_string();
 
-        // 3. Check if explicitly listed in `settings.bot_owner_id`
+        // 3. Check if user is Bot Owner (either directly via bot_owner_id or application team owner/admin)
+        let mut is_owner = false;
         if !settings.bot_owner_id.trim().is_empty() && settings.bot_owner_id.trim() == user_id_str {
-            return Ok((user_id_str, username));
+            is_owner = true;
+        } else if !settings.discord_token.trim().is_empty() {
+            if let Ok(app_resp) = self
+                .http
+                .get("https://discord.com/api/v10/oauth2/applications/@me")
+                .header(
+                    "Authorization",
+                    format!("Bot {}", settings.discord_token.trim()),
+                )
+                .send()
+                .await
+            {
+                if app_resp.status().is_success() {
+                    if let Ok(app_json) = app_resp.json::<serde_json::Value>().await {
+                        if is_authorized_application_owner_or_admin(&app_json, &user_id_str) {
+                            is_owner = true;
+                        }
+                    }
+                }
+            }
         }
 
-        // 4. Otherwise verify via `/oauth2/applications/@me` using the Bot Token
-        if settings.discord_token.trim().is_empty() {
-            return Err(
-                "User does not match bot_owner_id and no Discord Bot Token is configured to verify application ownership."
-                    .to_string(),
-            );
-        }
-
-        let app_resp = self
-            .http
-            .get("https://discord.com/api/v10/oauth2/applications/@me")
-            .header(
-                "Authorization",
-                format!("Bot {}", settings.discord_token.trim()),
-            )
-            .send()
-            .await
-            .map_err(|e| format!("Failed to query Discord application metadata: {e}"))?;
-
-        if !app_resp.status().is_success() {
-            return Err("Access denied: user does not match bot_owner_id.".to_string());
-        }
-
-        let app_json: serde_json::Value = app_resp
-            .json()
-            .await
-            .map_err(|e| format!("Invalid application JSON: {e}"))?;
-
-        if is_authorized_application_owner_or_admin(&app_json, &user_id_str) {
-            return Ok((user_id_str, username));
-        }
-
-        Err("Access denied: your Discord account is not an Owner or Admin of this bot application.".to_string())
+        Ok((user_id_str, username, is_owner))
     }
 }
 
@@ -432,6 +443,18 @@ pub fn build_session_cookie(token: &str, is_https: bool) -> String {
         .http_only(true)
         .same_site(SameSite::Lax)
         .max_age(cookie::time::Duration::seconds(SESSION_TTL_SECS));
+    if is_https {
+        cookie = cookie.secure(true);
+    }
+    cookie.build().to_string()
+}
+
+pub fn build_oauth_cookie(name: &str, value: &str, is_https: bool) -> String {
+    let mut cookie = Cookie::build((name.to_string(), value.to_string()))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(cookie::time::Duration::minutes(10));
     if is_https {
         cookie = cookie.secure(true);
     }
@@ -553,10 +576,11 @@ mod tests {
         settings.session_epoch = 1;
 
         let token = auth
-            .create_session_token("12345", "local-admin", &settings)
+            .create_session_token("12345", "local-admin", true, &settings)
             .unwrap();
         let claims = auth.verify_session_token(&token, &settings).unwrap();
         assert_eq!(claims.user_id, "12345");
+        assert!(claims.is_owner);
         assert_eq!(claims.epoch, 1);
 
         // Incrementing session_epoch immediately invalidates existing cookie

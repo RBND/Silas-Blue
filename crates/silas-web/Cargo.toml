@@ -15,6 +15,7 @@ silas-ai.workspace = true
 silas-search.workspace = true
 silas-discord.workspace = true
 silas-updater.workspace = true
+serenity.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

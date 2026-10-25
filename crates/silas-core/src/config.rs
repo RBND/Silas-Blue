@@ -209,6 +209,10 @@ pub struct AppSettings {
     pub reddit_webhook_secret: String,
     #[serde(default = "default_reddit_poll_interval")]
     pub reddit_poll_interval_minutes: u32,
+
+    // Audit Log Retention (0 = forever, -1 = disabled, >0 = days)
+    #[serde(default = "default_audit_log_retention_days")]
+    pub audit_log_retention_days: i32,
 }
 
 impl Drop for AppSettings {
@@ -227,6 +231,10 @@ impl Drop for AppSettings {
 
 fn default_reddit_poll_interval() -> u32 {
     2
+}
+
+fn default_audit_log_retention_days() -> i32 {
+    180
 }
 
 fn default_session_epoch() -> i64 {
@@ -327,6 +335,7 @@ impl Default for AppSettings {
             reddit_client_secret: String::new(),
             reddit_webhook_secret: String::new(),
             reddit_poll_interval_minutes: default_reddit_poll_interval(),
+            audit_log_retention_days: default_audit_log_retention_days(),
         }
     }
 }
@@ -367,6 +376,7 @@ impl AppSettings {
             "reddit_client_secret": mask_opt(&self.reddit_client_secret),
             "reddit_webhook_secret": mask_opt(&self.reddit_webhook_secret),
             "reddit_poll_interval_minutes": self.reddit_poll_interval_minutes,
+            "audit_log_retention_days": self.audit_log_retention_days,
             "theme": self.theme,
             "debug": self.debug,
             "update_channel": self.update_channel,
@@ -441,6 +451,7 @@ pub struct AppSettingsPatch {
     pub reddit_client_secret: Option<String>,
     pub reddit_webhook_secret: Option<String>,
     pub reddit_poll_interval_minutes: Option<u32>,
+    pub audit_log_retention_days: Option<i32>,
 }
 
 const SECRET_MASK: &str = "●●●●●●●●";
@@ -646,6 +657,9 @@ impl AppSettings {
         }
         if let Some(mins) = patch.reddit_poll_interval_minutes {
             self.reddit_poll_interval_minutes = mins.clamp(1, 1440);
+        }
+        if let Some(days) = patch.audit_log_retention_days {
+            self.audit_log_retention_days = days;
         }
         Ok(())
     }

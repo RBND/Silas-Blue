@@ -144,6 +144,7 @@ pub struct BotController {
     bot_identity: Arc<RwLock<BotUserIdentity>>,
     gateway_ready: Arc<AtomicBool>,
     http: Arc<RwLock<Option<Arc<Http>>>>,
+    cache: Arc<RwLock<Option<Arc<serenity::cache::Cache>>>>,
 }
 
 impl BotController {
@@ -157,6 +158,7 @@ impl BotController {
         telemetry: TelemetryBus,
     ) -> Self {
         let http = Arc::new(RwLock::new(None));
+        let cache = Arc::new(RwLock::new(None));
         let message_cache = Arc::new(MessageRingBuffer::default());
 
         // Spawn background Reddit feed polling worker
@@ -183,11 +185,16 @@ impl BotController {
             bot_identity: Arc::new(RwLock::new(BotUserIdentity::default())),
             gateway_ready: Arc::new(AtomicBool::new(false)),
             http: Arc::clone(&http),
+            cache: Arc::clone(&cache),
         }
     }
 
     pub fn http(&self) -> Option<Arc<Http>> {
         self.http.read().clone()
+    }
+
+    pub fn cache(&self) -> Option<Arc<serenity::cache::Cache>> {
+        self.cache.read().clone()
     }
 
     pub fn memory(&self) -> &Arc<ConversationMemory> {
@@ -295,7 +302,8 @@ impl BotController {
             | GatewayIntents::GUILD_MEMBERS
             | GatewayIntents::GUILD_MESSAGE_REACTIONS
             | GatewayIntents::GUILD_MODERATION
-            | GatewayIntents::GUILD_VOICE_STATES;
+            | GatewayIntents::GUILD_VOICE_STATES
+            | GatewayIntents::GUILD_EMOJIS_AND_STICKERS;
 
         let allowed_mentions = CreateAllowedMentions::new()
             .everyone(false)
@@ -373,11 +381,14 @@ impl BotController {
 
         let shard_manager = Arc::clone(&client.shard_manager);
         let http = Arc::clone(&client.http);
+        let cache = Arc::clone(&client.cache);
         *self.http.write() = Some(Arc::clone(&http));
+        *self.cache.write() = Some(Arc::clone(&cache));
 
         let gateway_ready = Arc::clone(&self.gateway_ready);
         let telemetry = self.telemetry.clone();
         let http_on_exit = Arc::clone(&self.http);
+        let cache_on_exit = Arc::clone(&self.cache);
 
         let join_handle = tokio::spawn(async move {
             if let Err(e) = client.start().await {
@@ -386,6 +397,7 @@ impl BotController {
                 });
             }
             *http_on_exit.write() = None;
+            *cache_on_exit.write() = None;
             gateway_ready.store(false, Ordering::Release);
         });
 
@@ -407,6 +419,7 @@ impl BotController {
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), running.join_handle)
                 .await;
             *self.http.write() = None;
+            *self.cache.write() = None;
             self.gateway_ready.store(false, Ordering::Release);
             self.connected_guilds.clear();
             self.telemetry.emit(TelemetryEvent::System {

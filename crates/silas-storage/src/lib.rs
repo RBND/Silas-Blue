@@ -25,7 +25,7 @@ use silas_core::config::{
 };
 use silas_core::reddit::{clean_subreddit_name, NewRedditSubscription, RedditSubscription};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 const RETENTION_DAYS: i64 = 35;
 
 #[derive(Debug, Error)]
@@ -352,6 +352,50 @@ pub struct NewCustomTrigger {
     pub enabled: bool,
 }
 
+/// Delegated console access grant record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAccessGrant {
+    pub id: i64,
+    pub guild_id: u64,
+    pub target_type: String, // "role" or "user"
+    pub target_id: u64,
+    pub target_name: String,
+    pub domain: String,
+    pub access_level: String, // "none", "view", "edit"
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Configuration change audit log entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebAuditLog {
+    pub id: i64,
+    pub guild_id: Option<u64>,
+    pub user_id: u64,
+    pub user_name: String,
+    pub domain: String,
+    pub action: String,
+    pub before_json: Option<String>,
+    pub after_json: Option<String>,
+    pub ip_address: String,
+    pub status: String,
+    pub created_at: i64,
+}
+
+/// Parameters for recording a web configuration change audit entry.
+#[derive(Debug, Clone)]
+pub struct NewWebAuditLog<'a> {
+    pub guild_id: Option<u64>,
+    pub user_id: u64,
+    pub user_name: &'a str,
+    pub domain: &'a str,
+    pub action: &'a str,
+    pub before_json: Option<&'a str>,
+    pub after_json: Option<&'a str>,
+    pub ip_address: &'a str,
+    pub status: &'a str,
+}
+
 /// High-performance unified SQLite storage manager.
 /// - Hot reads (`get_app_settings`, `get_guild_config`) hit lock-free RAM (`ArcSwap` / `DashMap`).
 /// - All writes are serialized through a single persistent WAL writer connection (`writer`).
@@ -573,6 +617,8 @@ impl Storage {
         conn.execute("DELETE FROM greetings_configs WHERE guild_id = ?1", params![gid_i64])?;
         conn.execute("DELETE FROM reaction_role_groups WHERE guild_id = ?1", params![gid_i64])?;
         conn.execute("DELETE FROM custom_triggers WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM web_access_grants WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM web_audit_logs WHERE guild_id = ?1", params![gid_i64])?;
         Ok(())
     }
 
@@ -2083,6 +2129,200 @@ impl Storage {
         )?;
         Ok(affected > 0)
     }
+
+    // ==========================================
+    // Web Access Grants (Feature F1)
+    // ==========================================
+
+    /// Retrieves all delegated web access grants for a guild.
+    pub fn get_web_access_grants(&self, guild_id: u64) -> Result<Vec<WebAccessGrant>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, target_type, target_id, target_name, domain, access_level, created_at, updated_at
+             FROM web_access_grants
+             WHERE guild_id = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64], |row| {
+            let gid_i64: i64 = row.get(1)?;
+            let tid_i64: i64 = row.get(3)?;
+            Ok(WebAccessGrant {
+                id: row.get(0)?,
+                guild_id: gid_i64 as u64,
+                target_type: row.get(2)?,
+                target_id: tid_i64 as u64,
+                target_name: row.get(4)?,
+                domain: row.get(5)?,
+                access_level: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Upserts a web access grant for a specific role or user in a guild.
+    pub fn create_or_update_web_access_grant(
+        &self,
+        guild_id: u64,
+        target_type: &str,
+        target_id: u64,
+        target_name: &str,
+        domain: &str,
+        access_level: &str,
+    ) -> Result<WebAccessGrant, StorageError> {
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO web_access_grants
+             (guild_id, target_type, target_id, target_name, domain, access_level, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT(guild_id, target_type, target_id, domain) DO UPDATE SET
+                target_name = excluded.target_name,
+                access_level = excluded.access_level,
+                updated_at = excluded.updated_at",
+            params![
+                guild_id as i64,
+                target_type,
+                target_id as i64,
+                target_name,
+                domain,
+                access_level,
+                now,
+            ],
+        )?;
+
+        let id: i64 = conn.query_row(
+            "SELECT id FROM web_access_grants
+             WHERE guild_id = ?1 AND target_type = ?2 AND target_id = ?3 AND domain = ?4",
+            params![guild_id as i64, target_type, target_id as i64, domain],
+            |r| r.get(0),
+        )?;
+
+        Ok(WebAccessGrant {
+            id,
+            guild_id,
+            target_type: target_type.to_string(),
+            target_id,
+            target_name: target_name.to_string(),
+            domain: domain.to_string(),
+            access_level: access_level.to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    /// Deletes a web access grant by guild ID and grant ID.
+    pub fn delete_web_access_grant(&self, guild_id: u64, grant_id: i64) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "DELETE FROM web_access_grants WHERE guild_id = ?1 AND id = ?2",
+            params![guild_id as i64, grant_id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    // ==========================================
+    // Configuration Audit Log (Feature F2)
+    // ==========================================
+
+    /// Appends a new configuration change audit log entry.
+    pub fn insert_web_audit_log(&self, entry: &NewWebAuditLog<'_>) -> Result<i64, StorageError> {
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+        conn.execute(
+            "INSERT INTO web_audit_logs
+             (guild_id, user_id, user_name, domain, action, before_json, after_json, ip_address, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                entry.guild_id.map(|g| g as i64),
+                entry.user_id as i64,
+                entry.user_name,
+                entry.domain,
+                entry.action,
+                entry.before_json,
+                entry.after_json,
+                entry.ip_address,
+                entry.status,
+                now,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Lists web audit log entries with optional filters and pagination.
+    pub fn list_web_audit_logs(
+        &self,
+        guild_id: Option<u64>,
+        user_id: Option<u64>,
+        domain: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<WebAuditLog>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, user_id, user_name, domain, action, before_json, after_json, ip_address, status, created_at
+             FROM web_audit_logs
+             WHERE (?1 IS NULL OR guild_id = ?1)
+               AND (?2 IS NULL OR user_id = ?2)
+               AND (?3 IS NULL OR domain = ?3)
+             ORDER BY created_at DESC
+             LIMIT ?4 OFFSET ?5",
+        )?;
+
+        let rows = stmt.query_map(
+            params![
+                guild_id.map(|g| g as i64),
+                user_id.map(|u| u as i64),
+                domain,
+                limit.clamp(1, 100) as i64,
+                offset as i64,
+            ],
+            |row| {
+                let gid_opt: Option<i64> = row.get(1)?;
+                let uid_i64: i64 = row.get(2)?;
+                Ok(WebAuditLog {
+                    id: row.get(0)?,
+                    guild_id: gid_opt.map(|g| g as u64),
+                    user_id: uid_i64 as u64,
+                    user_name: row.get(3)?,
+                    domain: row.get(4)?,
+                    action: row.get(5)?,
+                    before_json: row.get(6)?,
+                    after_json: row.get(7)?,
+                    ip_address: row.get(8)?,
+                    status: row.get(9)?,
+                    created_at: row.get(10)?,
+                })
+            },
+        )?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Prunes web audit logs older than `retention_days`.
+    /// 0 = retain forever; <= 0 returns Ok(0).
+    pub fn prune_web_audit_logs(&self, retention_days: i32) -> Result<usize, StorageError> {
+        if retention_days <= 0 {
+            return Ok(0);
+        }
+        let cutoff = Utc::now().timestamp() - (retention_days as i64 * 86400);
+        let conn = self.writer.lock();
+        let deleted = conn.execute(
+            "DELETE FROM web_audit_logs WHERE created_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(deleted)
+    }
 }
 
 fn query_usage_sum(
@@ -2280,6 +2520,46 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
                 params![now],
             )?;
         }
+        if v < 4 {
+            let _ = conn.execute_batch(
+                "ALTER TABLE app_settings ADD COLUMN audit_log_retention_days INTEGER NOT NULL DEFAULT 180;
+
+                 CREATE TABLE IF NOT EXISTS web_access_grants (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     guild_id INTEGER NOT NULL,
+                     target_type TEXT NOT NULL CHECK(target_type IN ('role', 'user')),
+                     target_id INTEGER NOT NULL,
+                     target_name TEXT NOT NULL,
+                     domain TEXT NOT NULL,
+                     access_level TEXT NOT NULL CHECK(access_level IN ('none', 'view', 'edit')),
+                     created_at INTEGER NOT NULL,
+                     updated_at INTEGER NOT NULL,
+                     UNIQUE(guild_id, target_type, target_id, domain)
+                 ) STRICT;
+                 CREATE INDEX IF NOT EXISTS idx_web_access_lookup ON web_access_grants(guild_id, target_id);
+
+                 CREATE TABLE IF NOT EXISTS web_audit_logs (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     guild_id INTEGER,
+                     user_id INTEGER NOT NULL,
+                     user_name TEXT NOT NULL,
+                     domain TEXT NOT NULL,
+                     action TEXT NOT NULL,
+                     before_json TEXT,
+                     after_json TEXT,
+                     ip_address TEXT NOT NULL,
+                     status TEXT NOT NULL DEFAULT 'success',
+                     created_at INTEGER NOT NULL
+                 ) STRICT;
+                 CREATE INDEX IF NOT EXISTS idx_web_audit_guild_time ON web_audit_logs(guild_id, created_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_web_audit_user ON web_audit_logs(user_id, created_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_web_audit_created_at ON web_audit_logs(created_at DESC);",
+            );
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (4, ?1)",
+                params![now],
+            )?;
+        }
     }
 
     conn.execute_batch(
@@ -2320,6 +2600,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             reddit_client_secret TEXT NOT NULL DEFAULT '',
             reddit_webhook_secret TEXT NOT NULL DEFAULT '',
             reddit_poll_interval_minutes INTEGER NOT NULL DEFAULT 2,
+            audit_log_retention_days INTEGER NOT NULL DEFAULT 180,
 
             theme TEXT NOT NULL DEFAULT 'retrowave',
             debug_enabled INTEGER NOT NULL DEFAULT 0,
@@ -2554,7 +2835,38 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             reply_in_dm INTEGER NOT NULL DEFAULT 0,
             enabled INTEGER NOT NULL DEFAULT 1,
             UNIQUE(guild_id, trigger_name)
-        ) STRICT;",
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS web_access_grants (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL CHECK(target_type IN ('role', 'user')),
+            target_id INTEGER NOT NULL,
+            target_name TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            access_level TEXT NOT NULL CHECK(access_level IN ('none', 'view', 'edit')),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(guild_id, target_type, target_id, domain)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_web_access_lookup ON web_access_grants(guild_id, target_id);
+
+        CREATE TABLE IF NOT EXISTS web_audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER NOT NULL,
+            user_name TEXT NOT NULL,
+            domain TEXT NOT NULL,
+            action TEXT NOT NULL,
+            before_json TEXT,
+            after_json TEXT,
+            ip_address TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'success',
+            created_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_web_audit_guild_time ON web_audit_logs(guild_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_web_audit_user ON web_audit_logs(user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_web_audit_created_at ON web_audit_logs(created_at DESC);",
     )?;
 
     let now = Utc::now().timestamp();
@@ -2595,7 +2907,7 @@ fn load_app_settings_from_conn(conn: &Connection) -> Result<AppSettings, Storage
             auto_update_interval_hours, auto_update_check_on_startup,
             update_notify_owner_dm, update_notify_channel_id,
             reddit_client_id, reddit_client_secret, reddit_webhook_secret,
-            reddit_poll_interval_minutes
+            reddit_poll_interval_minutes, audit_log_retention_days
          FROM app_settings WHERE id = 1",
         [],
         |row| {
@@ -2640,6 +2952,7 @@ fn load_app_settings_from_conn(conn: &Connection) -> Result<AppSettings, Storage
                 reddit_client_secret: row.get(37)?,
                 reddit_webhook_secret: row.get(38)?,
                 reddit_poll_interval_minutes: row.get::<_, i64>(39)?.clamp(1, 1440) as u32,
+                audit_log_retention_days: row.get::<_, i64>(40)? as i32,
             })
         },
     )
@@ -2688,7 +3001,8 @@ fn save_app_settings_to_conn(conn: &Connection, s: &AppSettings) -> Result<(), S
             reddit_client_id = ?37,
             reddit_client_secret = ?38,
             reddit_webhook_secret = ?39,
-            reddit_poll_interval_minutes = ?40
+            reddit_poll_interval_minutes = ?40,
+            audit_log_retention_days = ?41
          WHERE id = 1",
         params![
             s.discord_token,
@@ -2731,6 +3045,7 @@ fn save_app_settings_to_conn(conn: &Connection, s: &AppSettings) -> Result<(), S
             s.reddit_client_secret,
             s.reddit_webhook_secret,
             i64::from(s.reddit_poll_interval_minutes),
+            i64::from(s.audit_log_retention_days),
         ],
     )?;
     Ok(())
@@ -3146,11 +3461,11 @@ mod tests {
         // 2. Open via Storage to trigger v3 migration
         let storage = Storage::open(&db_path)?;
 
-        // Verify schema version is now 3
+        // Verify schema version is at least 3
         {
             let conn = storage.writer.lock();
             let current_v: u32 = conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))?;
-            assert_eq!(current_v, 3);
+            assert!(current_v >= 3);
         }
 
         let guild_id = 999_888_777u64;
@@ -3330,6 +3645,134 @@ mod tests {
         assert!(storage.get_mod_cases_for_user(guild_id, user_id)?.is_empty());
         assert_eq!(storage.get_active_strikes_count(guild_id, user_id)?, 0);
         assert!(storage.get_guild_reaction_roles(guild_id)?.is_empty());
+
+        drop(storage);
+        let _ = fs::remove_dir_all(&temp_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_v4_schema_migration_and_operations() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join(format!("silas_test_v4_{}", rand::random::<u64>()));
+        fs::create_dir_all(&temp_dir)?;
+        let db_path = temp_dir.join("silas_v4.db");
+
+        let guild_id = 999_888_777u64;
+        let user_id = 111_222_333u64;
+
+        // 1. Pre-populate a v3 database
+        {
+            let conn = Connection::open(&db_path)?;
+            apply_connection_pragmas(&conn)?;
+            initialize_schema(&conn)?;
+            // Manually rollback version in migration table to 3 to verify v4 migration triggers
+            conn.execute_batch(
+                "UPDATE schema_migrations SET version = 3;
+                 CREATE TABLE IF NOT EXISTS test_marker (id INTEGER PRIMARY KEY);",
+            )?;
+        }
+
+        // 2. Open via Storage to trigger v4 migration
+        let storage = Storage::open(&db_path)?;
+        {
+            let conn = storage.writer.lock();
+            let current_v: u32 = conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))?;
+            assert_eq!(current_v, 4);
+        }
+
+        // 3. Verify AppSettings audit_log_retention_days default and update
+        let settings = storage.get_app_settings();
+        assert_eq!(settings.audit_log_retention_days, 180);
+
+        storage.update_app_settings(AppSettingsPatch {
+            audit_log_retention_days: Some(90),
+            ..Default::default()
+        })?;
+        assert_eq!(storage.get_app_settings().audit_log_retention_days, 90);
+
+        // 4. Test Web Access Grants
+        let grant = storage.create_or_update_web_access_grant(
+            guild_id,
+            "role",
+            123456789,
+            "Moderator",
+            "moderation",
+            "edit",
+        )?;
+        assert_eq!(grant.target_name, "Moderator");
+        assert_eq!(grant.access_level, "edit");
+
+        let grants = storage.get_web_access_grants(guild_id)?;
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].target_id, 123456789);
+
+        // Update grant
+        let updated_grant = storage.create_or_update_web_access_grant(
+            guild_id,
+            "role",
+            123456789,
+            "Moderator",
+            "moderation",
+            "view",
+        )?;
+        assert_eq!(updated_grant.access_level, "view");
+
+        // 5. Test Web Audit Logs
+        let audit_id = storage.insert_web_audit_log(&NewWebAuditLog {
+            guild_id: Some(guild_id),
+            user_id,
+            user_name: "AdminUser",
+            domain: "automod",
+            action: "update_threat_rules",
+            before_json: Some("{\"spam\": false}"),
+            after_json: Some("{\"spam\": true}"),
+            ip_address: "127.0.0.1",
+            status: "success",
+        })?;
+        assert!(audit_id > 0);
+
+        let logs = storage.list_web_audit_logs(Some(guild_id), None, None, 10, 0)?;
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].action, "update_threat_rules");
+        assert_eq!(logs[0].user_name, "AdminUser");
+
+        // Filter by domain
+        let logs_filtered = storage.list_web_audit_logs(Some(guild_id), None, Some("greetings"), 10, 0)?;
+        assert!(logs_filtered.is_empty());
+
+        // 6. Test Retention Pruning
+        // Insert an old log entry
+        {
+            let conn = storage.writer.lock();
+            let old_ts = Utc::now().timestamp() - (100 * 86400); // 100 days old
+            conn.execute(
+                "INSERT INTO web_audit_logs (guild_id, user_id, user_name, domain, action, ip_address, status, created_at)
+                 VALUES (?1, ?2, 'OldUser', 'settings', 'update', '127.0.0.1', 'success', ?3)",
+                params![guild_id as i64, user_id as i64, old_ts],
+            )?;
+        }
+        let pruned = storage.prune_web_audit_logs(90)?; // Prune older than 90 days
+        assert_eq!(pruned, 1);
+
+        // 7. Delete Access Grant
+        let deleted = storage.delete_web_access_grant(guild_id, grant.id)?;
+        assert!(deleted);
+        assert!(storage.get_web_access_grants(guild_id)?.is_empty());
+
+        // 8. Test Purge Guild Data cleans up grants and audit logs
+        let _ = storage.insert_web_audit_log(&NewWebAuditLog {
+            guild_id: Some(guild_id),
+            user_id,
+            user_name: "AdminUser",
+            domain: "automod",
+            action: "test",
+            before_json: None,
+            after_json: None,
+            ip_address: "127.0.0.1",
+            status: "success",
+        })?;
+        storage.purge_guild_data(guild_id)?;
+        assert!(storage.list_web_audit_logs(Some(guild_id), None, None, 10, 0)?.is_empty());
 
         drop(storage);
         let _ = fs::remove_dir_all(&temp_dir);

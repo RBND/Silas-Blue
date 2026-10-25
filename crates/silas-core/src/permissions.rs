@@ -1,6 +1,95 @@
 //! Four-domain granular access control evaluator (`< 50ns` zero-allocation hot path).
 
 use crate::config::{CompiledPermissionDomain, GuildConfig};
+use serde::{Deserialize, Serialize};
+
+/// Granular domain areas for web console delegated access and configuration audit logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsoleDomain {
+    All,
+    Settings,
+    Moderation,
+    Automod,
+    Logging,
+    Greetings,
+    ReactionRoles,
+    Triggers,
+    Ai,
+    Permissions,
+    AuditLog,
+}
+
+impl ConsoleDomain {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Settings => "settings",
+            Self::Moderation => "moderation",
+            Self::Automod => "automod",
+            Self::Logging => "logging",
+            Self::Greetings => "greetings",
+            Self::ReactionRoles => "reaction_roles",
+            Self::Triggers => "triggers",
+            Self::Ai => "ai",
+            Self::Permissions => "permissions",
+            Self::AuditLog => "audit_log",
+        }
+    }
+
+    pub fn from_str_relaxed(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "all" => Some(Self::All),
+            "settings" | "config" => Some(Self::Settings),
+            "moderation" | "mod" => Some(Self::Moderation),
+            "automod" => Some(Self::Automod),
+            "logging" | "logs" => Some(Self::Logging),
+            "greetings" => Some(Self::Greetings),
+            "reaction_roles" | "reactionroles" | "rr" => Some(Self::ReactionRoles),
+            "triggers" => Some(Self::Triggers),
+            "ai" => Some(Self::Ai),
+            "permissions" | "access" => Some(Self::Permissions),
+            "audit_log" | "audit" | "auditlog" => Some(Self::AuditLog),
+            _ => None,
+        }
+    }
+}
+
+/// Access levels for delegated web console access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessLevel {
+    None = 0,
+    View = 1,
+    Edit = 2,
+}
+
+impl AccessLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::View => "view",
+            Self::Edit => "edit",
+        }
+    }
+
+    pub fn from_str_relaxed(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "view" => Some(Self::View),
+            "edit" => Some(Self::Edit),
+            _ => None,
+        }
+    }
+
+    pub fn can_view(&self) -> bool {
+        *self >= Self::View
+    }
+
+    pub fn can_edit(&self) -> bool {
+        *self >= Self::Edit
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionDomain {

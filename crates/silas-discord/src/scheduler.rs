@@ -53,10 +53,14 @@ pub fn spawn_scheduler_worker(
                 }
             }
 
-            // 2. Periodically process strike decay and memory cleanup every 5 minutes
+            // 2. Periodically process strike decay, audit log pruning, and memory cleanup every 5 minutes
             if tick_counter.is_multiple_of(STRIKE_DECAY_CYCLE_TICKS) {
                 process_strike_decay(&storage, now);
                 crate::triggers::prune_stale_cooldowns(Duration::from_secs(3600));
+                let retention = storage.get_app_settings().audit_log_retention_days;
+                if let Err(e) = storage.prune_web_audit_logs(retention) {
+                    warn!("Failed to prune web audit logs: {e}");
+                }
             }
         }
     });

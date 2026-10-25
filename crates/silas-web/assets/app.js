@@ -104,6 +104,442 @@
   }
 
   // ==========================================================================
+  // Discord Guild Cache & Data Providers
+  // ==========================================================================
+  const discordGuildData = {
+    roles: new Map(),
+    channels: new Map(),
+    emojis: new Map(),
+  };
+
+  async function getGuildRoles(guildId) {
+    if (!guildId || guildId === "0") return [];
+    if (discordGuildData.roles.has(guildId)) {
+      return discordGuildData.roles.get(guildId);
+    }
+    try {
+      const res = await apiFetch(`/api/guilds/${guildId}/roles`);
+      const roles = res.roles || [];
+      discordGuildData.roles.set(guildId, roles);
+      return roles;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function getGuildChannels(guildId) {
+    if (!guildId || guildId === "0") return [];
+    if (discordGuildData.channels.has(guildId)) {
+      return discordGuildData.channels.get(guildId);
+    }
+    try {
+      const res = await apiFetch(`/api/guilds/${guildId}/channels`);
+      const channels = res.channels || [];
+      discordGuildData.channels.set(guildId, channels);
+      return channels;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function getGuildEmojis(guildId) {
+    if (!guildId || guildId === "0") return [];
+    if (discordGuildData.emojis.has(guildId)) {
+      return discordGuildData.emojis.get(guildId);
+    }
+    try {
+      const res = await apiFetch(`/api/guilds/${guildId}/emojis`);
+      const emojis = res.emojis || [];
+      discordGuildData.emojis.set(guildId, emojis);
+      return emojis;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function searchGuildMembers(guildId, query) {
+    if (!guildId || guildId === "0" || !query || query.trim().length < 2) return [];
+    try {
+      const res = await apiFetch(`/api/guilds/${guildId}/members?q=${encodeURIComponent(query.trim())}`);
+      return res.members || [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function formatChannelKind(kind) {
+    switch ((kind || "").toLowerCase()) {
+      case "text": return "(Text)";
+      case "voice": return "(Voice)";
+      case "category": return "(Category)";
+      case "announcement": return "(Announcement)";
+      case "stage": return "(Stage)";
+      case "forum": return "(Forum)";
+      case "thread": return "(Thread)";
+      default: return "(Channel)";
+    }
+  }
+
+  // ==========================================================================
+  // Reusable Combobox Component
+  // ==========================================================================
+  function createCombobox({
+    container,
+    placeholder = "Search...",
+    multiSelect = false,
+    getItems,
+    initialValue = null,
+    onChange,
+    resolveLabel,
+  }) {
+    if (!container) return null;
+    container.replaceChildren();
+
+    let selectedIds = multiSelect
+      ? new Set(Array.isArray(initialValue) ? initialValue.map(String) : [])
+      : (initialValue ? String(initialValue) : null);
+
+    let highlightedIndex = -1;
+    let currentResults = [];
+    let debounceTimer = null;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "combobox-input-wrapper";
+
+    const chipsContainer = document.createElement("div");
+    chipsContainer.className = "combobox-chips";
+    if (!multiSelect) chipsContainer.style.display = "none";
+    wrapper.appendChild(chipsContainer);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "combobox-input";
+    input.placeholder = placeholder;
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-haspopup", "listbox");
+    wrapper.appendChild(input);
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "combobox-dropdown hidden";
+    dropdown.setAttribute("role", "listbox");
+
+    container.appendChild(wrapper);
+    container.appendChild(dropdown);
+
+    function updateChips() {
+      if (!multiSelect) return;
+      chipsContainer.replaceChildren();
+      selectedIds.forEach((id) => {
+        const chip = document.createElement("span");
+        chip.className = "combobox-chip";
+
+        const textSpan = document.createElement("span");
+        const display = resolveLabel ? resolveLabel(id) : `ID: ${id}`;
+        textSpan.textContent = display || `ID: ${id}`;
+        chip.appendChild(textSpan);
+
+        const btnRemove = document.createElement("button");
+        btnRemove.type = "button";
+        btnRemove.className = "combobox-chip-remove";
+        btnRemove.setAttribute("aria-label", `Remove ${textSpan.textContent}`);
+        btnRemove.textContent = "×";
+        btnRemove.addEventListener("click", (e) => {
+          e.stopPropagation();
+          selectedIds.delete(id);
+          updateChips();
+          if (onChange) onChange(Array.from(selectedIds));
+        });
+        chip.appendChild(btnRemove);
+
+        chipsContainer.appendChild(chip);
+      });
+    }
+
+    function updateSingleDisplay() {
+      if (multiSelect) return;
+      if (selectedIds) {
+        const display = resolveLabel ? resolveLabel(selectedIds) : `ID: ${selectedIds}`;
+        input.value = display || `ID: ${selectedIds}`;
+      } else {
+        input.value = "";
+      }
+    }
+
+    function openDropdown() {
+      dropdown.classList.remove("hidden");
+      input.setAttribute("aria-expanded", "true");
+    }
+
+    function closeDropdown() {
+      dropdown.classList.add("hidden");
+      input.setAttribute("aria-expanded", "false");
+      highlightedIndex = -1;
+    }
+
+    function renderOptions(items) {
+      currentResults = items.slice(0, 25);
+      dropdown.replaceChildren();
+      highlightedIndex = -1;
+
+      if (currentResults.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "combobox-empty";
+        empty.textContent = "No matches found.";
+        dropdown.appendChild(empty);
+        openDropdown();
+        return;
+      }
+
+      currentResults.forEach((item) => {
+        const opt = document.createElement("div");
+        opt.className = "combobox-option";
+        opt.setAttribute("role", "option");
+        opt.setAttribute("data-id", String(item.id));
+
+        const isSelected = multiSelect
+          ? selectedIds.has(String(item.id))
+          : selectedIds === String(item.id);
+
+        if (isSelected) {
+          opt.classList.add("combobox-option-selected");
+          opt.setAttribute("aria-selected", "true");
+        } else {
+          opt.setAttribute("aria-selected", "false");
+        }
+
+        const left = document.createElement("div");
+        left.style.display = "flex";
+        left.style.alignItems = "center";
+        left.style.gap = "0.5rem";
+
+        if (item.icon) {
+          const img = document.createElement("img");
+          img.src = item.icon;
+          img.alt = "";
+          img.style.width = "18px";
+          img.style.height = "18px";
+          img.style.borderRadius = "3px";
+          left.appendChild(img);
+        }
+
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = item.label;
+        left.appendChild(nameSpan);
+
+        opt.appendChild(left);
+
+        if (item.sublabel) {
+          const sub = document.createElement("span");
+          sub.className = "combobox-option-sublabel";
+          sub.textContent = item.sublabel;
+          opt.appendChild(sub);
+        }
+
+        opt.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          selectItem(item);
+        });
+
+        dropdown.appendChild(opt);
+      });
+
+      openDropdown();
+    }
+
+    function selectItem(item) {
+      const idStr = String(item.id);
+      if (multiSelect) {
+        if (selectedIds.has(idStr)) {
+          selectedIds.delete(idStr);
+        } else {
+          selectedIds.add(idStr);
+        }
+        updateChips();
+        input.value = "";
+        closeDropdown();
+        if (onChange) onChange(Array.from(selectedIds));
+      } else {
+        selectedIds = idStr;
+        updateSingleDisplay();
+        closeDropdown();
+        if (onChange) onChange(selectedIds);
+      }
+    }
+
+    input.addEventListener("focus", async () => {
+      const items = await getItems(input.value);
+      renderOptions(items);
+    });
+
+    input.addEventListener("input", () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        const items = await getItems(input.value);
+        renderOptions(items);
+      }, 250);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (dropdown.classList.contains("hidden")) {
+          openDropdown();
+          return;
+        }
+        highlightedIndex = Math.min(highlightedIndex + 1, currentResults.length - 1);
+        updateHighlight();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        highlightedIndex = Math.max(highlightedIndex - 1, 0);
+        updateHighlight();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (highlightedIndex >= 0 && highlightedIndex < currentResults.length) {
+          selectItem(currentResults[highlightedIndex]);
+        }
+      } else if (e.key === "Escape") {
+        closeDropdown();
+      } else if (e.key === "Backspace" && multiSelect && input.value === "" && selectedIds.size > 0) {
+        const arr = Array.from(selectedIds);
+        const lastId = arr[arr.length - 1];
+        selectedIds.delete(lastId);
+        updateChips();
+        if (onChange) onChange(Array.from(selectedIds));
+      }
+    });
+
+    function updateHighlight() {
+      const opts = dropdown.querySelectorAll(".combobox-option");
+      opts.forEach((o, i) => {
+        if (i === highlightedIndex) {
+          o.classList.add("highlighted");
+          o.scrollIntoView({ block: "nearest" });
+        } else {
+          o.classList.remove("highlighted");
+        }
+      });
+    }
+
+    document.addEventListener("click", (e) => {
+      if (!container.contains(e.target)) {
+        closeDropdown();
+      }
+    });
+
+    if (multiSelect) {
+      updateChips();
+    } else {
+      updateSingleDisplay();
+    }
+
+    return {
+      getValue: () => (multiSelect ? Array.from(selectedIds) : selectedIds),
+      setValue: (val) => {
+        if (multiSelect) {
+          selectedIds = new Set(Array.isArray(val) ? val.map(String) : []);
+          updateChips();
+        } else {
+          selectedIds = val ? String(val) : null;
+          updateSingleDisplay();
+        }
+      },
+      refresh: () => {
+        if (multiSelect) updateChips();
+        else updateSingleDisplay();
+      },
+    };
+  }
+
+  // ==========================================================================
+  // Duration Parsing & Formatting
+  // ==========================================================================
+  function parseDurationJs(str) {
+    if (!str || !str.trim()) {
+      return { valid: true, seconds: null, formatted: "Permanent" };
+    }
+    const s = str.trim().toLowerCase();
+    if (s === "permanent" || s === "perm" || s === "0") {
+      return { valid: true, seconds: null, formatted: "Permanent" };
+    }
+
+    const clean = s.replace(/,/g, " ").replace(/\s+/g, " ");
+    const tokens = clean.split(" ");
+    let totalSecs = 0;
+    let found = 0;
+
+    for (const tok of tokens) {
+      if (!tok) continue;
+      const m = tok.match(/^(\d+)(s(?:ecs?)?|m(?:in(?:ute)?s?)?|h(?:(?:ou)?rs?)?|d(?:ays?)?|w(?:eeks?)?)?$/);
+      if (!m) {
+        return { valid: false, error: `Invalid duration format: "${tok}"` };
+      }
+      const val = parseInt(m[1], 10);
+      const unit = m[2] || "s";
+      let multiplier = 1;
+      if (unit.startsWith("m") && !unit.startsWith("mo")) {
+        multiplier = 60;
+      } else if (unit.startsWith("h")) {
+        multiplier = 3600;
+      } else if (unit.startsWith("d")) {
+        multiplier = 86400;
+      } else if (unit.startsWith("w")) {
+        multiplier = 604800;
+      } else if (unit.startsWith("s")) {
+        multiplier = 1;
+      }
+      totalSecs += val * multiplier;
+      found++;
+    }
+
+    if (found === 0) {
+      return { valid: false, error: "Empty duration." };
+    }
+
+    return { valid: true, seconds: totalSecs, formatted: formatDurationHuman(totalSecs) };
+  }
+
+  function formatDurationHuman(secs) {
+    if (secs === null || secs === undefined || secs === 0) return "Permanent";
+    let rem = secs;
+    const weeks = Math.floor(rem / 604800);
+    rem %= 604800;
+    const days = Math.floor(rem / 86400);
+    rem %= 86400;
+    const hours = Math.floor(rem / 3600);
+    rem %= 3600;
+    const mins = Math.floor(rem / 60);
+    const seconds = rem % 60;
+
+    const parts = [];
+    if (weeks > 0) parts.push(`${weeks} ${weeks === 1 ? "week" : "weeks"}`);
+    if (days > 0) parts.push(`${days} ${days === 1 ? "day" : "days"}`);
+    if (hours > 0) parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
+    if (mins > 0) parts.push(`${mins} ${mins === 1 ? "minute" : "minutes"}`);
+    if (seconds > 0 && parts.length === 0) parts.push(`${seconds} ${seconds === 1 ? "second" : "seconds"}`);
+
+    return parts.length > 0 ? parts.join(", ") : "0 seconds";
+  }
+
+  function bindDurationPreview(inputId, previewId) {
+    const input = document.getElementById(inputId);
+    const preview = document.getElementById(previewId);
+    if (!input || !preview) return;
+
+    input.addEventListener("input", () => {
+      const res = parseDurationJs(input.value);
+      if (res.valid) {
+        preview.className = "duration-preview-text";
+        preview.textContent = `Preview: ${res.formatted}`;
+      } else {
+        preview.className = "duration-preview-text duration-preview-error";
+        preview.textContent = `Error: ${res.error}`;
+      }
+    });
+  }
+
+  // ==========================================================================
   // Login Page Handling
   // ==========================================================================
   function initLoginPage() {
@@ -214,6 +650,24 @@
     el.className = isConfigured ? "badge badge-online" : "badge badge-neutral";
   }
 
+  function updateActiveProviderDisplay() {
+    const providerSel = document.getElementById("cfg-ai-provider");
+    const badge = document.getElementById("active-provider-badge");
+    if (!providerSel || !badge) return;
+
+    const val = providerSel.value;
+    if (val === "ollama") {
+      badge.className = "badge badge-success";
+      badge.textContent = "Local: Ollama";
+    } else if (val === "llamacpp") {
+      badge.className = "badge badge-cyan";
+      badge.textContent = "Local: llama.cpp";
+    } else {
+      badge.className = "badge badge-purple";
+      badge.textContent = "Remote Cloud API";
+    }
+  }
+
   // ==========================================================================
   // Global Settings & AI Backends
   // ==========================================================================
@@ -240,6 +694,7 @@
       setValue("cfg-reddit-client-id", s.reddit_client_id || "");
       setValue("cfg-reddit-poll-interval", s.reddit_poll_interval_minutes || 2);
       setValue("cfg-ai-provider", s.backend_type || "ollama");
+      updateActiveProviderDisplay();
       setValue("cfg-ollama-url", s.ollama_url || "http://127.0.0.1:11434");
       setValue("cfg-llamacpp-url", s.llamacpp_url || "http://127.0.0.1:8081");
       setValue("cfg-remote-preset", s.remote_preset || "Xiaomi MiMo");
@@ -411,6 +866,15 @@
         break;
       case "triggers":
         await loadCustomTriggers();
+        break;
+      case "reddit":
+        await loadRedditModule();
+        break;
+      case "grants":
+        await loadGrantsModule();
+        break;
+      case "audit-log":
+        await loadAuditLogModule();
         break;
     }
   }
@@ -715,17 +1179,57 @@
   // ==========================================================================
   // WebSocket Live Telemetry Console
   // ==========================================================================
+  let telemetryReconnectAttempts = 0;
+  let telemetryReconnectTimer = null;
+
+  function updateTelemetryStatus(connected) {
+    const dot = document.getElementById("telemetry-dot");
+    const txt = document.getElementById("telemetry-text");
+    if (!dot || !txt) return;
+
+    if (connected) {
+      dot.className = "status-dot status-dot-connected";
+      txt.textContent = "Connected";
+    } else {
+      dot.className = "status-dot status-dot-disconnected";
+      txt.textContent = "Disconnected";
+    }
+  }
+
   function connectTelemetryWebSocket() {
     const logBox = document.getElementById("telemetry-log-box");
     if (!logBox) return;
 
+    if (telemetryReconnectTimer) {
+      clearTimeout(telemetryReconnectTimer);
+      telemetryReconnectTimer = null;
+    }
+
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     const wsUrl = `${proto}//${window.location.host}/api/ws/logs`;
-    wsConnection = new WebSocket(wsUrl);
+
+    try {
+      wsConnection = new WebSocket(wsUrl);
+    } catch (_) {
+      scheduleTelemetryReconnect();
+      return;
+    }
+
+    wsConnection.addEventListener("open", () => {
+      telemetryReconnectAttempts = 0;
+      updateTelemetryStatus(true);
+    });
 
     wsConnection.addEventListener("message", (evt) => {
       try {
         const payload = JSON.parse(evt.data);
+        if (
+          payload.type === "system" &&
+          payload.formatted &&
+          payload.formatted.includes("Connected to Silas Blue live telemetry")
+        ) {
+          return;
+        }
         telemetryLogs.push(payload);
         if (telemetryLogs.length > 400) {
           telemetryLogs.shift();
@@ -735,8 +1239,19 @@
     });
 
     wsConnection.addEventListener("close", () => {
-      setTimeout(connectTelemetryWebSocket, 4000);
+      updateTelemetryStatus(false);
+      scheduleTelemetryReconnect();
     });
+
+    wsConnection.addEventListener("error", () => {
+      updateTelemetryStatus(false);
+    });
+  }
+
+  function scheduleTelemetryReconnect() {
+    telemetryReconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(2, telemetryReconnectAttempts - 1), 30000);
+    telemetryReconnectTimer = setTimeout(connectTelemetryWebSocket, delay);
   }
 
   function renderTelemetryConsole() {
@@ -1146,6 +1661,46 @@
           showToast("Copied invite URL to clipboard.");
         }
       });
+
+      wireUpdateChannelAutosave();
+      bindDurationPreview("am-new-step-duration", "am-new-step-duration-preview");
+      bindDurationPreview("edit-ladder-duration", "edit-ladder-duration-preview");
+      bindDurationPreview("mcase-duration", "mcase-duration-preview");
+      wireReactionRoleMessageLink();
+
+      const pSel = document.getElementById("cfg-ai-provider");
+      if (pSel) pSel.addEventListener("change", updateActiveProviderDisplay);
+
+      bindClick("btn-submit-edit-ladder", submitEditLadderStep);
+
+      // Reddit & Devvit
+      bindClick("btn-refresh-reddit", loadRedditModule);
+      bindClick("btn-save-reddit-global", saveRedditGlobalSettings);
+      bindClick("btn-add-reddit-sub", addRedditSubscription);
+
+      // Grants
+      bindClick("btn-refresh-grants", loadGrantsModule);
+      bindClick("btn-create-grant", createGrant);
+
+      // Audit Log
+      bindClick("btn-refresh-audit", loadAuditLogModule);
+      const auditDomainSel = document.getElementById("audit-filter-domain");
+      if (auditDomainSel) {
+        auditDomainSel.addEventListener("change", () => {
+          auditCurrentOffset = 0;
+          loadAuditLogModule();
+        });
+      }
+      bindClick("btn-audit-prev", () => {
+        if (auditCurrentOffset >= AUDIT_PAGE_SIZE) {
+          auditCurrentOffset -= AUDIT_PAGE_SIZE;
+          loadAuditLogModule();
+        }
+      });
+      bindClick("btn-audit-next", () => {
+        auditCurrentOffset += AUDIT_PAGE_SIZE;
+        loadAuditLogModule();
+      });
   }
 
   async function checkSessionAndLoadData() {
@@ -1387,7 +1942,15 @@
     const actionType = getValue("mcase-action-type") || "warn";
     const reason = getValue("mcase-reason") || "Manual action";
     const rawDuration = getValue("mcase-duration");
-    const durationSeconds = rawDuration ? parseInt(rawDuration, 10) : null;
+    let durationSeconds = null;
+    if (rawDuration && rawDuration.trim()) {
+      const parsed = parseDurationJs(rawDuration);
+      if (!parsed.valid) {
+        showToast(`Invalid duration: ${parsed.error}`);
+        return;
+      }
+      durationSeconds = parsed.seconds;
+    }
 
     try {
       await apiFetch(`/api/guilds/${currentGuildId}/cases`, {
@@ -1404,6 +1967,11 @@
       setValue("mcase-user-id", "");
       setValue("mcase-reason", "Manual disciplinary action");
       setValue("mcase-duration", "");
+      const preview = document.getElementById("mcase-duration-preview");
+      if (preview) {
+        preview.className = "duration-preview-text";
+        preview.textContent = "Preview: Permanent";
+      }
       const fUser = getValue("mod-filter-user");
       await loadModCases(fUser || null);
     } catch (err) {
@@ -1465,7 +2033,8 @@
       setChecked("am-anti-links", Boolean(currentAutomodConfig.anti_links_enabled));
       setChecked("am-anti-caps", Boolean(currentAutomodConfig.anti_caps_enabled));
       setValue("am-caps-min", String(currentAutomodConfig.anti_caps_min_chars ?? 10));
-      setValue("am-caps-pct", String(currentAutomodConfig.anti_caps_percent ?? 70));
+      setChecked("am-caps-pct", String(currentAutomodConfig.anti_caps_percent ?? 70));
+      setChecked("am-mention-enabled", Boolean((currentAutomodConfig.anti_mention_max ?? 0) > 0));
       setValue("am-mention-max", String(currentAutomodConfig.anti_mention_max ?? 5));
 
       setValue("am-blocked-words", (currentAutomodConfig.blocked_words || []).join(", "));
@@ -1520,16 +2089,35 @@
       let bClass = "badge-neutral";
       if (act === "ban" || act === "kick") bClass = "badge-danger";
       else if (act === "timeout") bClass = "badge-warning";
+      else if (act === "warn") bClass = "badge-purple";
       badgeA.className = `badge ${bClass}`;
       badgeA.textContent = step.action.toUpperCase();
       tdAction.appendChild(badgeA);
       tr.appendChild(tdAction);
 
       const tdDur = document.createElement("td");
-      tdDur.textContent = step.duration_seconds ? `${step.duration_seconds}s` : "Permanent / N/A";
+      if (act === "warn" || act === "kick") {
+        tdDur.textContent = "N/A";
+      } else if (!step.duration_seconds || step.duration_seconds === 0) {
+        tdDur.textContent = "Permanent";
+      } else {
+        tdDur.textContent = formatDurationHuman(step.duration_seconds);
+      }
       tr.appendChild(tdDur);
 
-      const tdDel = document.createElement("td");
+      const tdActions = document.createElement("td");
+      tdActions.style.display = "flex";
+      tdActions.style.gap = "0.4rem";
+
+      const btnEdit = document.createElement("button");
+      btnEdit.type = "button";
+      btnEdit.className = "btn btn-secondary btn-sm";
+      btnEdit.textContent = "Edit";
+      btnEdit.addEventListener("click", () => {
+        openEditLadderModal(idx, step);
+      });
+      tdActions.appendChild(btnEdit);
+
       const btnDel = document.createElement("button");
       btnDel.type = "button";
       btnDel.className = "btn btn-danger btn-sm";
@@ -1538,11 +2126,52 @@
         currentAutomodConfig.punishment_ladder.splice(idx, 1);
         renderLadderTable();
       });
-      tdDel.appendChild(btnDel);
-      tr.appendChild(tdDel);
+      tdActions.appendChild(btnDel);
+      tr.appendChild(tdActions);
 
       tbody.appendChild(tr);
     });
+  }
+
+  function openEditLadderModal(idx, step) {
+    setValue("edit-ladder-index", String(idx));
+    setValue("edit-ladder-strikes", String(step.strikes));
+    setValue("edit-ladder-action", (step.action || "warn").toLowerCase());
+    const durStr = step.duration_seconds ? formatDurationHuman(step.duration_seconds) : "";
+    setValue("edit-ladder-duration", durStr);
+    const prev = document.getElementById("edit-ladder-duration-preview");
+    if (prev) {
+      prev.className = "duration-preview-text";
+      prev.textContent = `Preview: ${step.duration_seconds ? durStr : "Permanent"}`;
+    }
+    openModal("modal-edit-ladder-step");
+  }
+
+  function submitEditLadderStep() {
+    if (!currentAutomodConfig) return;
+    const idx = parseInt(getValue("edit-ladder-index"), 10);
+    if (isNaN(idx) || idx < 0 || idx >= (currentAutomodConfig.punishment_ladder || []).length) {
+      closeModal("modal-edit-ladder-step");
+      return;
+    }
+    const strikes = parseInt(getValue("edit-ladder-strikes"), 10) || 1;
+    const action = getValue("edit-ladder-action") || "warn";
+    const durRaw = getValue("edit-ladder-duration");
+    const durParsed = parseDurationJs(durRaw);
+    if (!durParsed.valid) {
+      showToast(`Invalid duration: ${durParsed.error}`);
+      return;
+    }
+
+    currentAutomodConfig.punishment_ladder[idx] = {
+      strikes,
+      action,
+      duration_seconds: durParsed.seconds,
+    };
+    currentAutomodConfig.punishment_ladder.sort((a, b) => a.strikes - b.strikes);
+    renderLadderTable();
+    closeModal("modal-edit-ladder-step");
+    showToast("Updated punishment ladder step.");
   }
 
   function addLadderStep() {
@@ -1550,7 +2179,11 @@
     const strikes = parseInt(getValue("am-new-step-strikes"), 10) || 1;
     const action = getValue("am-new-step-action") || "warn";
     const durRaw = getValue("am-new-step-duration");
-    const duration_seconds = durRaw ? parseInt(durRaw, 10) : null;
+    const durParsed = parseDurationJs(durRaw);
+    if (!durParsed.valid) {
+      showToast(`Invalid duration: ${durParsed.error}`);
+      return;
+    }
 
     if (!currentAutomodConfig.punishment_ladder) {
       currentAutomodConfig.punishment_ladder = [];
@@ -1558,11 +2191,16 @@
     currentAutomodConfig.punishment_ladder.push({
       strikes,
       action,
-      duration_seconds,
+      duration_seconds: durParsed.seconds,
     });
     currentAutomodConfig.punishment_ladder.sort((a, b) => a.strikes - b.strikes);
     renderLadderTable();
     setValue("am-new-step-duration", "");
+    const preview = document.getElementById("am-new-step-duration-preview");
+    if (preview) {
+      preview.className = "duration-preview-text";
+      preview.textContent = "Preview: Permanent";
+    }
   }
 
   async function saveAutomodConfig() {
@@ -2332,6 +2970,565 @@
     } catch (err) {
       if (outBody) outBody.textContent = `Evaluation failed: ${err.message}`;
     }
+  }
+
+  // ==========================================================================
+  // Release Channel Autosave
+  // ==========================================================================
+  function wireUpdateChannelAutosave() {
+    const sel = document.getElementById("update-channel-select");
+    const badge = document.getElementById("channel-status-badge");
+    if (!sel) return;
+
+    let previousVal = sel.value;
+
+    function updateBadge(val) {
+      if (!badge) return;
+      if (val === "prerelease") {
+        badge.className = "badge badge-warning";
+        badge.textContent = "Active: Pre-release";
+      } else {
+        badge.className = "badge badge-success";
+        badge.textContent = "Active: Stable";
+      }
+    }
+
+    updateBadge(sel.value);
+
+    sel.addEventListener("change", async () => {
+      const newVal = sel.value;
+      updateBadge(newVal);
+      try {
+        await apiFetch("/api/settings", {
+          method: "PUT",
+          body: JSON.stringify({ update_channel: newVal }),
+        });
+        previousVal = newVal;
+        showToast(`Release channel updated to: ${newVal === "prerelease" ? "Pre-release" : "Stable"}`);
+      } catch (err) {
+        sel.value = previousVal;
+        updateBadge(previousVal);
+        showToast(`Failed to update release channel: ${err.message}`);
+      }
+    });
+  }
+
+  // ==========================================================================
+  // Reaction Roles Message Link Parser
+  // ==========================================================================
+  function wireReactionRoleMessageLink() {
+    const linkInput = document.getElementById("rr-input-message-link");
+    const statusEl = document.getElementById("rr-link-status");
+    const channelInput = document.getElementById("rr-input-channel");
+    const messageInput = document.getElementById("rr-input-message");
+    if (!linkInput) return;
+
+    linkInput.addEventListener("input", () => {
+      const url = linkInput.value.trim();
+      const match = url.match(/discord(?:app)?\.com\/channels\/(\d+)\/(\d+)\/(\d+)/);
+      if (match) {
+        const [, , channelId, messageId] = match;
+        if (messageInput) messageInput.value = messageId;
+        if (channelInput) {
+          channelInput.value = channelId;
+          if (channelInput._comboboxSet) {
+            channelInput._comboboxSet(channelId);
+          }
+        }
+        if (statusEl) {
+          statusEl.classList.remove("hidden");
+          statusEl.className = "duration-preview-text";
+          statusEl.textContent = `Extracted: Channel ${channelId}, Message ${messageId}`;
+        }
+      } else if (url.length > 0 && statusEl) {
+        statusEl.classList.remove("hidden");
+        statusEl.className = "duration-preview-text duration-preview-error";
+        statusEl.textContent = "Invalid message link format.";
+      } else if (statusEl) {
+        statusEl.classList.add("hidden");
+      }
+    });
+  }
+
+  // ==========================================================================
+  // Reddit & Devvit Companion Module
+  // ==========================================================================
+  async function loadRedditModule() {
+    if (!currentGuildId) return;
+
+    const globalCard = document.getElementById("reddit-global-card");
+    if (globalCard) {
+      if (currentUserSession && currentUserSession.is_owner) {
+        globalCard.classList.remove("hidden");
+        try {
+          const s = await apiFetch("/api/settings");
+          const setVal = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.value = val;
+          };
+          setVal("reddit-global-client-id", s.reddit_client_id || "");
+          setVal("reddit-global-client-secret", s.reddit_client_secret || "");
+          setVal("reddit-global-webhook-secret", s.reddit_webhook_secret || "");
+        } catch (_) {}
+      } else {
+        globalCard.classList.add("hidden");
+      }
+    }
+
+    const tbody = document.getElementById("reddit-subs-table-body");
+    const countBadge = document.getElementById("reddit-subs-count-badge");
+    if (!tbody) return;
+
+    tbody.replaceChildren();
+
+    const cbChannelContainer = document.getElementById("cb-reddit-channel");
+    if (cbChannelContainer && !cbChannelContainer._combobox) {
+      cbChannelContainer._combobox = createCombobox({
+        container: cbChannelContainer,
+        placeholder: "Search text channel...",
+        multiSelect: false,
+        getItems: async (q) => {
+          const channels = await getGuildChannels(currentGuildId);
+          return channels
+            .filter((c) => c.kind === "text" || c.kind === "announcement")
+            .filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()))
+            .map((c) => ({
+              id: c.id,
+              label: `#${c.name} ${formatChannelKind(c.kind)}`,
+              sublabel: c.category_name ? `in ${c.category_name}` : undefined,
+            }));
+        },
+        resolveLabel: (id) => {
+          const channels = discordGuildData.channels.get(currentGuildId) || [];
+          const found = channels.find((c) => String(c.id) === String(id));
+          return found ? `#${found.name} ${formatChannelKind(found.kind)}` : `Channel ${id}`;
+        },
+        onChange: (id) => {
+          cbChannelContainer._selectedChannelId = id;
+        },
+      });
+    }
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/reddit`);
+      const subs = res.subscriptions || [];
+      if (countBadge) countBadge.textContent = `${subs.length} ${subs.length === 1 ? "feed" : "feeds"}`;
+
+      if (subs.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 4;
+        td.className = "muted text-center";
+        td.textContent = "No subreddit feeds configured for this server. Add one below.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      const channels = await getGuildChannels(currentGuildId);
+
+      subs.forEach((sub) => {
+        const tr = document.createElement("tr");
+
+        const tdSub = document.createElement("td");
+        tdSub.textContent = `r/${sub.subreddit}`;
+        tr.appendChild(tdSub);
+
+        const tdCh = document.createElement("td");
+        const ch = channels.find((c) => String(c.id) === String(sub.channel_id));
+        tdCh.textContent = ch ? `#${ch.name} ${formatChannelKind(ch.kind)}` : `Channel ${sub.channel_id}`;
+        tr.appendChild(tdCh);
+
+        const tdFilter = document.createElement("td");
+        const filterBadge = document.createElement("span");
+        filterBadge.className = "badge badge-neutral";
+        filterBadge.textContent = sub.post_filter || "new";
+        tdFilter.appendChild(filterBadge);
+        tr.appendChild(tdFilter);
+
+        const tdAction = document.createElement("td");
+        const btnDel = document.createElement("button");
+        btnDel.type = "button";
+        btnDel.className = "btn btn-danger btn-sm";
+        btnDel.textContent = "Delete";
+        btnDel.addEventListener("click", async () => {
+          try {
+            await apiFetch(`/api/guilds/${currentGuildId}/reddit/${sub.id}`, {
+              method: "DELETE",
+            });
+            showToast(`Deleted feed r/${sub.subreddit}.`);
+            await loadRedditModule();
+          } catch (e) {
+            showToast(`Failed to delete feed: ${e.message}`);
+          }
+        });
+        tdAction.appendChild(btnDel);
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      showToast(`Failed to load Reddit feeds: ${e.message}`);
+    }
+  }
+
+  async function saveRedditGlobalSettings() {
+    const clientId = getValue("reddit-global-client-id");
+    const clientSecret = getValue("reddit-global-client-secret");
+    const webhookSecret = getValue("reddit-global-webhook-secret");
+
+    try {
+      await apiFetch("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          reddit_client_id: clientId,
+          reddit_client_secret: clientSecret,
+          reddit_webhook_secret: webhookSecret,
+        }),
+      });
+      showToast("Saved global Reddit & Devvit settings.");
+    } catch (e) {
+      showToast(`Failed to save settings: ${e.message}`);
+    }
+  }
+
+  async function addRedditSubscription() {
+    if (!currentGuildId) return;
+    const subName = getValue("reddit-new-sub-name");
+    const cbChannelContainer = document.getElementById("cb-reddit-channel");
+    const channelId = cbChannelContainer ? cbChannelContainer._selectedChannelId : null;
+    const filter = getValue("reddit-new-sub-filter") || "new";
+
+    if (!subName || !channelId) {
+      showToast("Subreddit name and destination channel are required.");
+      return;
+    }
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/reddit`, {
+        method: "POST",
+        body: JSON.stringify({
+          subreddit: subName.trim(),
+          channel_id: String(channelId),
+          post_filter: filter,
+        }),
+      });
+      showToast(`Added feed r/${subName.trim()}.`);
+      setValue("reddit-new-sub-name", "");
+      await loadRedditModule();
+    } catch (e) {
+      showToast(`Failed to add feed: ${e.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // Governance & Delegated Access Module (Feature F1)
+  // ==========================================================================
+  async function loadGrantsModule() {
+    if (!currentGuildId) return;
+
+    const tbody = document.getElementById("grants-table-body");
+    const countBadge = document.getElementById("grants-count-badge");
+    if (!tbody) return;
+
+    tbody.replaceChildren();
+
+    const cbPrincipalContainer = document.getElementById("cb-grant-principal");
+    const typeSel = document.getElementById("grant-principal-type");
+
+    function setupGrantPrincipalCombobox() {
+      if (!cbPrincipalContainer) return;
+      const isRole = !typeSel || typeSel.value === "role";
+
+      cbPrincipalContainer._combobox = createCombobox({
+        container: cbPrincipalContainer,
+        placeholder: isRole ? "Search role..." : "Search member by name (min 2 chars)...",
+        multiSelect: false,
+        getItems: async (q) => {
+          if (isRole) {
+            const roles = await getGuildRoles(currentGuildId);
+            return roles
+              .filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
+              .map((r) => ({
+                id: r.id,
+                label: `@${r.name}`,
+              }));
+          } else {
+            const members = await searchGuildMembers(currentGuildId, q);
+            return members.map((m) => ({
+              id: m.id,
+              label: `${m.display_name || m.username} (@${m.username})`,
+            }));
+          }
+        },
+        resolveLabel: (id) => {
+          if (isRole) {
+            const roles = discordGuildData.roles.get(currentGuildId) || [];
+            const r = roles.find((x) => String(x.id) === String(id));
+            return r ? `@${r.name}` : `Role ${id}`;
+          } else {
+            return `User ${id}`;
+          }
+        },
+        onChange: (id) => {
+          cbPrincipalContainer._selectedPrincipalId = id;
+        },
+      });
+    }
+
+    if (typeSel && !typeSel._hasGrantListener) {
+      typeSel._hasGrantListener = true;
+      typeSel.addEventListener("change", () => {
+        setupGrantPrincipalCombobox();
+      });
+    }
+    setupGrantPrincipalCombobox();
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/grants`);
+      const grants = res.grants || [];
+      if (countBadge) countBadge.textContent = `${grants.length} ${grants.length === 1 ? "grant" : "grants"}`;
+
+      if (grants.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.className = "muted text-center";
+        td.textContent = "No delegated access grants configured. Administrators and Bot Owners have bypass.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      const roles = await getGuildRoles(currentGuildId);
+
+      grants.forEach((grant) => {
+        const tr = document.createElement("tr");
+
+        const tdType = document.createElement("td");
+        const typeBadge = document.createElement("span");
+        typeBadge.className = grant.principal_type === "role" ? "badge badge-cyan" : "badge badge-purple";
+        typeBadge.textContent = grant.principal_type === "role" ? "ROLE" : "USER";
+        tdType.appendChild(typeBadge);
+        tr.appendChild(tdType);
+
+        const tdPrincipal = document.createElement("td");
+        if (grant.principal_type === "role") {
+          const r = roles.find((x) => String(x.id) === String(grant.principal_id));
+          tdPrincipal.textContent = r ? `@${r.name} (${grant.principal_id})` : `Role ID ${grant.principal_id}`;
+        } else {
+          tdPrincipal.textContent = `User ID ${grant.principal_id}`;
+        }
+        tr.appendChild(tdPrincipal);
+
+        const tdDomain = document.createElement("td");
+        const domBadge = document.createElement("span");
+        domBadge.className = "badge badge-neutral";
+        domBadge.textContent = grant.domain === "*" ? "ALL (*)" : grant.domain.toUpperCase();
+        tdDomain.appendChild(domBadge);
+        tr.appendChild(tdDomain);
+
+        const tdLevel = document.createElement("td");
+        const lvlBadge = document.createElement("span");
+        if (grant.access_level === "admin") lvlBadge.className = "badge badge-danger";
+        else if (grant.access_level === "write") lvlBadge.className = "badge badge-warning";
+        else lvlBadge.className = "badge badge-success";
+        lvlBadge.textContent = grant.access_level.toUpperCase();
+        tdLevel.appendChild(lvlBadge);
+        tr.appendChild(tdLevel);
+
+        const tdDate = document.createElement("td");
+        tdDate.textContent = grant.created_at ? new Date(grant.created_at * 1000).toLocaleString() : "N/A";
+        tr.appendChild(tdDate);
+
+        const tdAction = document.createElement("td");
+        const btnRevoke = document.createElement("button");
+        btnRevoke.type = "button";
+        btnRevoke.className = "btn btn-danger btn-sm";
+        btnRevoke.textContent = "Revoke";
+        btnRevoke.addEventListener("click", async () => {
+          try {
+            await apiFetch(`/api/guilds/${currentGuildId}/grants/${grant.id}`, {
+              method: "DELETE",
+            });
+            showToast("Revoked console access grant.");
+            await loadGrantsModule();
+          } catch (e) {
+            showToast(`Failed to revoke grant: ${e.message}`);
+          }
+        });
+        tdAction.appendChild(btnRevoke);
+        tr.appendChild(tdAction);
+
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      showToast(`Failed to load access grants: ${e.message}`);
+    }
+  }
+
+  async function createGrant() {
+    if (!currentGuildId) return;
+    const typeSel = document.getElementById("grant-principal-type");
+    const cbPrincipalContainer = document.getElementById("cb-grant-principal");
+    const domainSel = document.getElementById("grant-domain");
+    const levelSel = document.getElementById("grant-level");
+
+    const principalType = typeSel ? typeSel.value : "role";
+    const principalId = cbPrincipalContainer ? cbPrincipalContainer._selectedPrincipalId : null;
+    const domain = domainSel ? domainSel.value : "*";
+    const accessLevel = levelSel ? levelSel.value : "read";
+
+    if (!principalId) {
+      showToast("Please select a Discord role or member.");
+      return;
+    }
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/grants`, {
+        method: "POST",
+        body: JSON.stringify({
+          principal_type: principalType,
+          principal_id: String(principalId),
+          domain,
+          access_level: accessLevel,
+        }),
+      });
+      showToast("Access grant created successfully.");
+      await loadGrantsModule();
+    } catch (e) {
+      showToast(`Failed to create grant: ${e.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // Configuration Audit Trail Module (Feature F2)
+  // ==========================================================================
+  let auditCurrentOffset = 0;
+  const AUDIT_PAGE_SIZE = 25;
+
+  async function loadAuditLogModule() {
+    if (!currentGuildId) return;
+
+    const tbody = document.getElementById("audit-table-body");
+    const domainSel = document.getElementById("audit-filter-domain");
+    const pageInd = document.getElementById("audit-page-indicator");
+    const btnPrev = document.getElementById("btn-audit-prev");
+    const btnNext = document.getElementById("btn-audit-next");
+    if (!tbody) return;
+
+    tbody.replaceChildren();
+
+    const domain = domainSel ? domainSel.value : "";
+    let url = `/api/guilds/${currentGuildId}/audit-log?limit=${AUDIT_PAGE_SIZE}&offset=${auditCurrentOffset}`;
+    if (domain) {
+      url += `&domain=${encodeURIComponent(domain)}`;
+    }
+
+    if (pageInd) {
+      const pageNum = Math.floor(auditCurrentOffset / AUDIT_PAGE_SIZE) + 1;
+      pageInd.textContent = `Page ${pageNum}`;
+    }
+    if (btnPrev) btnPrev.disabled = auditCurrentOffset === 0;
+
+    try {
+      const res = await apiFetch(url);
+      const logs = res.logs || [];
+
+      if (btnNext) btnNext.disabled = logs.length < AUDIT_PAGE_SIZE;
+
+      if (logs.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 7;
+        td.className = "muted text-center";
+        td.textContent = "No audit log events found matching criteria.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      logs.forEach((log) => {
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        tdTime.textContent = log.created_at ? new Date(log.created_at * 1000).toLocaleString() : "N/A";
+        tr.appendChild(tdTime);
+
+        const tdActor = document.createElement("td");
+        tdActor.textContent = `${log.user_name || "Unknown"} (${log.user_id})`;
+        tr.appendChild(tdActor);
+
+        const tdDomain = document.createElement("td");
+        const dBadge = document.createElement("span");
+        dBadge.className = "badge badge-neutral";
+        dBadge.textContent = log.domain.toUpperCase();
+        tdDomain.appendChild(dBadge);
+        tr.appendChild(tdDomain);
+
+        const tdAction = document.createElement("td");
+        tdAction.textContent = log.action;
+        tr.appendChild(tdAction);
+
+        const tdStatus = document.createElement("td");
+        const sBadge = document.createElement("span");
+        sBadge.className = log.status === "success" ? "badge badge-success" : "badge badge-danger";
+        sBadge.textContent = log.status.toUpperCase();
+        tdStatus.appendChild(sBadge);
+        tr.appendChild(tdStatus);
+
+        const tdIp = document.createElement("td");
+        tdIp.textContent = log.ip_address || "127.0.0.1";
+        tr.appendChild(tdIp);
+
+        const tdDiff = document.createElement("td");
+        if (log.before_json || log.after_json) {
+          const btnDiff = document.createElement("button");
+          btnDiff.type = "button";
+          btnDiff.className = "btn btn-secondary btn-sm";
+          btnDiff.textContent = "View Diff";
+          btnDiff.addEventListener("click", () => {
+            openAuditDiffModal(log);
+          });
+          tdDiff.appendChild(btnDiff);
+        } else {
+          tdDiff.textContent = "-";
+        }
+        tr.appendChild(tdDiff);
+
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      showToast(`Failed to load audit logs: ${e.message}`);
+    }
+  }
+
+  function openAuditDiffModal(log) {
+    const meta = document.getElementById("audit-diff-meta");
+    const preBefore = document.getElementById("audit-diff-before");
+    const preAfter = document.getElementById("audit-diff-after");
+
+    if (meta) {
+      meta.textContent = `Action: ${log.action} | Domain: ${log.domain} | Actor: ${log.user_name} (${log.user_id}) | Time: ${new Date(log.created_at * 1000).toLocaleString()}`;
+    }
+
+    if (preBefore) {
+      try {
+        preBefore.textContent = log.before_json ? JSON.stringify(JSON.parse(log.before_json), null, 2) : "None (New Resource)";
+      } catch (_) {
+        preBefore.textContent = log.before_json || "None";
+      }
+    }
+
+    if (preAfter) {
+      try {
+        preAfter.textContent = log.after_json ? JSON.stringify(JSON.parse(log.after_json), null, 2) : "None (Deleted Resource)";
+      } catch (_) {
+        preAfter.textContent = log.after_json || "None";
+      }
+    }
+
+    openModal("modal-audit-diff");
   }
 
 

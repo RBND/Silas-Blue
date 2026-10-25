@@ -15,11 +15,16 @@ pub async fn ws_logs_handler(
     State(state): State<Arc<WebState>>,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
     let settings = state.storage.get_app_settings();
-    if state.auth.authenticate_request(&headers, &settings).is_none() {
+    let Some(claims) = state.auth.authenticate_request(&headers, &settings) else {
         return Err((
             StatusCode::UNAUTHORIZED,
             "Unauthorized WebSocket connection.",
         ));
+    };
+
+    // Global telemetry stream is restricted to bot owner
+    if !claims.is_owner && !state.auth.is_bot_owner(&claims.user_id, &settings) {
+        return Err((StatusCode::NOT_FOUND, "Not Found"));
     }
 
     // Validate Origin header matches Host to prevent Cross-Site WebSocket Hijacking (CSWSH)
@@ -51,40 +56,47 @@ pub async fn ws_logs_handler(
 
 async fn handle_ws_client(mut socket: WebSocket, state: Arc<WebState>) {
     let mut rx = state.telemetry.subscribe();
+    let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(25));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-    // Send an initial welcome packet
-    let welcome = TelemetryEvent::System {
-        message: "Connected to Silas Blue live telemetry stream.".to_string(),
-    }
-    .to_wire_packet();
-    if let Ok(json_str) = serde_json::to_string(&welcome) {
-        if socket.send(Message::Text(json_str)).await.is_err() {
-            return;
-        }
-    }
-
-    // Stream live events and handle RecvError::Lagged gracefully
+    // Stream live events, maintain 25s ping keepalive, and drain client pong frames
     loop {
-        match rx.recv().await {
-            Ok(packet) => {
-                if let Ok(json_str) = serde_json::to_string(&packet) {
-                    if socket.send(Message::Text(json_str)).await.is_err() {
-                        break;
-                    }
+        tokio::select! {
+            _ = ping_interval.tick() => {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() {
+                    break;
                 }
             }
-            Err(RecvError::Lagged(skipped)) => {
-                let warn_pkt = TelemetryEvent::System {
-                    message: format!("Skipped {skipped} telemetry events due to slow browser tab."),
-                }
-                .to_wire_packet();
-                if let Ok(json_str) = serde_json::to_string(&warn_pkt) {
-                    if socket.send(Message::Text(json_str)).await.is_err() {
-                        break;
-                    }
+            msg_opt = socket.recv() => {
+                match msg_opt {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => { /* drain incoming client pong/text */ }
+                    Some(Err(_)) => break,
                 }
             }
-            Err(RecvError::Closed) => break,
+            recv_res = rx.recv() => {
+                match recv_res {
+                    Ok(packet) => {
+                        if let Ok(json_str) = serde_json::to_string(&packet) {
+                            if socket.send(Message::Text(json_str)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(RecvError::Lagged(skipped)) => {
+                        let warn_pkt = TelemetryEvent::System {
+                            message: format!("Skipped {skipped} telemetry events due to slow browser tab."),
+                        }
+                        .to_wire_packet();
+                        if let Ok(json_str) = serde_json::to_string(&warn_pkt) {
+                            if socket.send(Message::Text(json_str)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(RecvError::Closed) => break,
+                }
+            }
         }
     }
 }

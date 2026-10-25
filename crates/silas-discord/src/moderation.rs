@@ -45,31 +45,12 @@ pub fn mod_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
     ]
 }
 
-/// Helper to parse duration strings like "10m", "1h", "2d", "1w", "300" safely without string slicing.
+/// Helper to parse duration strings like "10m", "1h", "2d", "1w", "1d 2h", "300s" safely via silas-core.
 pub fn parse_duration(s: &str) -> Option<Duration> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
+    match silas_core::duration::parse_duration(s) {
+        Ok(silas_core::duration::ParsedDuration::Finite(d)) => Some(d),
+        _ => None,
     }
-    let mut digits = String::new();
-    let mut unit = String::new();
-    for ch in s.chars() {
-        if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else {
-            unit.push(ch);
-        }
-    }
-    let num: u64 = digits.parse().ok()?;
-    let mult = match unit.trim().to_ascii_lowercase().as_str() {
-        "" | "s" => 1,
-        "m" => 60,
-        "h" => 3600,
-        "d" => 86400,
-        "w" => 604800,
-        _ => return None,
-    };
-    num.checked_mul(mult).map(Duration::from_secs)
 }
 
 /// Helper to verify if caller has moderator permissions or is server/bot owner.

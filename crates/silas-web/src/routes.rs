@@ -1,8 +1,8 @@
 //! REST API routes, OAuth2/OTP handlers, and embedded SPA static asset serving (`rust-embed`).
 
 use crate::auth::{
-    build_clear_cookie, build_session_cookie, extract_cookie, verify_csrf, AuthManager,
-    OAUTH_STATE_COOKIE_NAME,
+    build_clear_cookie, build_oauth_cookie, build_session_cookie, extract_cookie,
+    verify_csrf, AuthManager, SessionClaims, OAUTH_PKCE_COOKIE_NAME, OAUTH_STATE_COOKIE_NAME,
 };
 use crate::ws::ws_logs_handler;
 use axum::body::Body;
@@ -15,22 +15,23 @@ use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::Utc;
-use cookie::{Cookie, SameSite};
 use rand::RngCore;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::Digest;
 use silas_ai::detector::probe_local_providers;
 use silas_ai::{validate_endpoint_url, ProviderManager, REMOTE_PRESETS};
 use silas_core::config::{AppSettingsPatch, GuildConfigPatch};
 use silas_core::events::{TelemetryBus, TelemetryEvent};
+use silas_core::permissions::ConsoleDomain;
 use silas_core::quota::calculate_window_period;
 use silas_discord::BotController;
 use silas_search::SearchCoordinator;
 use silas_core::tagscript::{process_tagscript, TagScriptContext};
 use silas_storage::{
     AutomodConfig, GreetingsConfig, LoggingConfig, NewCustomTrigger, NewModCase,
-    NewReactionRoleEntry, NewReactionRoleGroup, Storage,
+    NewReactionRoleEntry, NewReactionRoleGroup, NewWebAuditLog, Storage,
 };
 use silas_updater::{BotUpdater, CURRENT_VERSION};
 use std::collections::HashMap;
@@ -71,6 +72,20 @@ pub fn build_router(state: Arc<WebState>) -> Router {
             "/guilds/:guild_id/config",
             get(api_get_guild_config).put(api_put_guild_config),
         )
+        .route("/guilds/:guild_id/roles", get(api_get_guild_roles))
+        .route("/guilds/:guild_id/channels", get(api_get_guild_channels))
+        .route("/guilds/:guild_id/emojis", get(api_get_guild_emojis))
+        .route("/guilds/:guild_id/members", get(api_search_guild_members))
+        .route(
+            "/guilds/:guild_id/grants",
+            get(api_list_guild_grants).post(api_upsert_guild_grant),
+        )
+        .route(
+            "/guilds/:guild_id/grants/:grant_id",
+            delete(api_delete_guild_grant),
+        )
+        .route("/guilds/:guild_id/audit-log", get(api_get_guild_audit_log))
+        .route("/audit-log", get(api_get_global_audit_log))
         .route("/guilds/:guild_id/quota/reset", post(api_reset_guild_quota))
         .route(
             "/guilds/:guild_id/memory/clear",
@@ -257,10 +272,11 @@ async fn auth_otp_handler(
 
     state.auth.clear_rate_limit(ip);
     let settings = state.storage.get_app_settings();
+    let is_owner = true; // Local loopback/LAN OTP is directly by the hosting bot administrator
     let Ok(session_tok) =
         state
             .auth
-            .create_session_token("local-console", "Local Console Owner", &settings)
+            .create_session_token("local-console", "Local Console Owner", is_owner, &settings)
     else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "Session signing failed").into_response();
     };
@@ -291,9 +307,17 @@ async fn auth_discord_login(
         return Redirect::to("/login.html?error=oauth_not_configured").into_response();
     }
 
-    let mut state_bytes = [0u8; 16];
+    let is_https = is_https_request(&headers);
+    let mut state_bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut state_bytes);
     let oauth_state = URL_SAFE_NO_PAD.encode(state_bytes);
+
+    // Generate PKCE code verifier and code challenge (S256)
+    let mut verifier_bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut verifier_bytes);
+    let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+    let challenge_digest = sha2::Sha256::digest(code_verifier.as_bytes());
+    let code_challenge = URL_SAFE_NO_PAD.encode(challenge_digest);
 
     let redirect_uri = resolve_oauth_redirect_uri(&headers);
     let mut auth_url = match url::Url::parse("https://discord.com/oauth2/authorize") {
@@ -306,18 +330,18 @@ async fn auth_discord_login(
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair("response_type", "code")
         .append_pair("scope", "identify")
-        .append_pair("state", &oauth_state);
+        .append_pair("state", &oauth_state)
+        .append_pair("code_challenge", &code_challenge)
+        .append_pair("code_challenge_method", "S256");
 
-    let state_cookie = Cookie::build((OAUTH_STATE_COOKIE_NAME, oauth_state))
-        .path("/")
-        .http_only(true)
-        .same_site(SameSite::Lax)
-        .max_age(cookie::time::Duration::minutes(10))
-        .build()
-        .to_string();
+    let state_cookie = build_oauth_cookie(OAUTH_STATE_COOKIE_NAME, &oauth_state, is_https);
+    let pkce_cookie = build_oauth_cookie(OAUTH_PKCE_COOKIE_NAME, &code_verifier, is_https);
 
     let mut resp = Redirect::to(auth_url.as_str()).into_response();
     if let Ok(hv) = HeaderValue::from_str(&state_cookie) {
+        resp.headers_mut().append(header::SET_COOKIE, hv);
+    }
+    if let Ok(hv) = HeaderValue::from_str(&pkce_cookie) {
         resp.headers_mut().append(header::SET_COOKIE, hv);
     }
     resp
@@ -361,22 +385,31 @@ async fn auth_discord_callback(
         return Redirect::to("/login.html?error=oauth_cancelled").into_response();
     };
 
+    let code_verifier = extract_cookie(&headers, OAUTH_PKCE_COOKIE_NAME);
     let settings = state.storage.get_app_settings();
     let effective_client_id = resolve_effective_client_id(&state, &settings);
     let redirect_uri = resolve_oauth_redirect_uri(&headers);
 
     match state
         .auth
-        .verify_discord_oauth_callback(code, &redirect_uri, &effective_client_id, &settings)
+        .verify_discord_oauth_callback(
+            code,
+            code_verifier.as_deref(),
+            &redirect_uri,
+            &effective_client_id,
+            &settings,
+        )
         .await
     {
-        Ok((uid, uname)) => {
+        Ok((uid, uname, is_owner)) => {
             state.auth.clear_rate_limit(ip);
-            let Ok(session_tok) = state.auth.create_session_token(&uid, &uname, &settings) else {
+            let Ok(session_tok) = state.auth.create_session_token(&uid, &uname, is_owner, &settings) else {
                 return Redirect::to("/login.html?error=session_error").into_response();
             };
-            let sess_cookie = build_session_cookie(&session_tok, is_https_request(&headers));
+            let is_https = is_https_request(&headers);
+            let sess_cookie = build_session_cookie(&session_tok, is_https);
             let clear_state = build_clear_cookie(OAUTH_STATE_COOKIE_NAME);
+            let clear_pkce = build_clear_cookie(OAUTH_PKCE_COOKIE_NAME);
 
             let mut resp = Redirect::to("/").into_response();
             if let Ok(hv) = HeaderValue::from_str(&sess_cookie) {
@@ -384,6 +417,9 @@ async fn auth_discord_callback(
             }
             if let Ok(hv2) = HeaderValue::from_str(&clear_state) {
                 resp.headers_mut().append(header::SET_COOKIE, hv2);
+            }
+            if let Ok(hv3) = HeaderValue::from_str(&clear_pkce) {
+                resp.headers_mut().append(header::SET_COOKIE, hv3);
             }
             resp
         }
@@ -416,10 +452,12 @@ async fn api_auth_session(
         && !settings.discord_oauth_client_secret.trim().is_empty();
 
     if let Some(claims) = state.auth.authenticate_request(&headers, &settings) {
+        let is_owner = claims.is_owner || state.auth.is_bot_owner(&claims.user_id, &settings);
         Json(json!({
             "authenticated": true,
             "user_id": claims.user_id,
             "username": claims.username,
+            "is_owner": is_owner,
             "oauth_enabled": oauth_enabled,
             "version": CURRENT_VERSION,
         }))
@@ -438,7 +476,7 @@ fn resolve_oauth_redirect_uri(headers: &HeaderMap) -> String {
     } else {
         "http"
     };
-    let host = headers
+    let raw_host = headers
         .get("x-forwarded-host")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
@@ -446,6 +484,16 @@ fn resolve_oauth_redirect_uri(headers: &HeaderMap) -> String {
         .filter(|s| !s.is_empty())
         .or_else(|| headers.get(header::HOST).and_then(|v| v.to_str().ok()))
         .unwrap_or("127.0.0.1:8080");
+
+    let is_valid_host = !raw_host.is_empty()
+        && raw_host
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == ':' || c == '-');
+    let host = if is_valid_host {
+        raw_host
+    } else {
+        "127.0.0.1:8080"
+    };
     format!("{scheme}://{host}/auth/discord/callback")
 }
 
@@ -530,6 +578,19 @@ async fn api_put_settings(
     let old_epoch = current.session_epoch;
     let claims = state.auth.authenticate_request(&headers, &current);
 
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &current),
+        None => false,
+    };
+
+    if !is_owner {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Not Found" })),
+        )
+            .into_response();
+    }
+
     // Validate custom URLs for SSRF before saving
     if let Some(ref url_str) = patch.ollama_url {
         if !url_str.trim().is_empty() {
@@ -580,6 +641,32 @@ async fn api_put_settings(
     let new_epoch = updated.session_epoch;
     let masked = updated.masked_for_web();
 
+    // Audit log settings change
+    if let Some(ref c) = claims {
+        let before_json = serde_json::to_string(&current.masked_for_web()).unwrap_or_default();
+        let after_json = serde_json::to_string(&masked).unwrap_or_default();
+        let ip_hdr = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(str::trim)
+            .unwrap_or("127.0.0.1");
+
+        let uid_num = c.user_id.parse::<u64>().unwrap_or(0);
+        let audit = NewWebAuditLog {
+            guild_id: None,
+            user_id: uid_num,
+            user_name: &c.username,
+            domain: ConsoleDomain::Settings.as_str(),
+            action: "settings_update",
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            ip_address: ip_hdr,
+            status: "success",
+        };
+        let _ = state.storage.insert_web_audit_log(&audit);
+    }
+
     let mut resp = Json(json!({
         "ok": true,
         "settings": masked,
@@ -591,7 +678,7 @@ async fn api_put_settings(
         if let Some(c) = claims {
             if let Ok(new_tok) = state
                 .auth
-                .create_session_token(&c.user_id, &c.username, &updated)
+                .create_session_token(&c.user_id, &c.username, c.is_owner, &updated)
             {
                 let cookie_str = build_session_cookie(&new_tok, is_https_request(&headers));
                 if let Ok(hv) = HeaderValue::from_str(&cookie_str) {
@@ -690,7 +777,17 @@ async fn api_search_test(
     .into_response()
 }
 
-async fn api_list_guilds(State(state): State<Arc<WebState>>) -> Json<Value> {
+async fn api_list_guilds(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+) -> Json<Value> {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+
     let connected = state.bot.connected_guilds_list();
     let mut seen_ids = std::collections::HashSet::new();
     let mut list = Vec::new();
@@ -698,6 +795,12 @@ async fn api_list_guilds(State(state): State<Arc<WebState>>) -> Json<Value> {
     for g in connected {
         if let Ok(id_num) = g.id.parse::<u64>() {
             seen_ids.insert(id_num);
+            if !is_owner {
+                let user_id_num = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+                if !user_has_guild_access(&state, id_num, user_id_num, &claims).await {
+                    continue;
+                }
+            }
         }
         list.push(json!({
             "id": g.id,
@@ -708,23 +811,86 @@ async fn api_list_guilds(State(state): State<Arc<WebState>>) -> Json<Value> {
         }));
     }
 
-    for gid in state.storage.list_guild_ids() {
-        if gid != 0 && !seen_ids.contains(&gid) {
-            list.push(json!({
-                "id": gid.to_string(),
-                "name": format!("Server {gid}"),
-                "icon_url": null,
-                "member_count": 0,
-                "connected": false,
-            }));
+    if is_owner {
+        for gid in state.storage.list_guild_ids() {
+            if gid != 0 && !seen_ids.contains(&gid) {
+                list.push(json!({
+                    "id": gid.to_string(),
+                    "name": format!("Server {gid}"),
+                    "icon_url": null,
+                    "member_count": 0,
+                    "connected": false,
+                }));
+            }
         }
     }
 
     Json(json!({ "guilds": list }))
 }
 
+/// Helper to evaluate if caller has console access to a specific guild.
+async fn user_has_guild_access(
+    state: &WebState,
+    guild_id: u64,
+    user_id: u64,
+    claims: &Option<SessionClaims>,
+) -> bool {
+    let Some(c) = claims else { return false };
+    let settings = state.storage.get_app_settings();
+    if c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings) {
+        return true;
+    }
+
+    // 1. Check Serenity Cache / Guild permissions
+    if let Some(cache) = state.bot.cache() {
+        if let Some(guild) = cache.guild(guild_id) {
+            if guild.owner_id.get() == user_id {
+                return true;
+            }
+            if let Some(member) = guild.members.get(&serenity::model::id::UserId::new(user_id)) {
+                let perms = guild.member_permissions(member);
+                if perms.contains(serenity::model::permissions::Permissions::ADMINISTRATOR)
+                    || perms.contains(serenity::model::permissions::Permissions::MANAGE_GUILD)
+                    || perms.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 2. Fallback to Discord REST API if member not in cache
+    if let Some(http) = state.bot.http() {
+        if let Ok(member) = http.get_member(serenity::model::id::GuildId::new(guild_id), serenity::model::id::UserId::new(user_id)).await {
+            if let Some(cache) = state.bot.cache() {
+                if let Some(guild) = cache.guild(guild_id) {
+                    let perms = guild.member_permissions(&member);
+                    if perms.contains(serenity::model::permissions::Permissions::ADMINISTRATOR)
+                        || perms.contains(serenity::model::permissions::Permissions::MANAGE_GUILD)
+                        || perms.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Check explicit database grants (by user_id or by member roles)
+    if let Ok(grants) = state.storage.get_web_access_grants(guild_id) {
+        for grant in grants {
+            if grant.target_type == "user" && grant.target_id == user_id {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 async fn api_get_guild_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -734,6 +900,13 @@ async fn api_get_guild_config(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     let cfg = state.storage.get_guild_config(guild_id);
     let meta = state.bot.guild_metadata(guild_id);
@@ -770,6 +943,7 @@ struct GuildConfigWebUpdate {
 
 async fn api_put_guild_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(update): Json<GuildConfigWebUpdate>,
 ) -> Response {
@@ -781,36 +955,488 @@ async fn api_put_guild_config(
             .into_response();
     };
 
-    let updated_cfg = match state
-        .storage
-        .patch_guild_config_async(guild_id, update.patch)
-        .await
-    {
-        Ok(c) => c,
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let current = state.storage.get_guild_config(guild_id);
+    let before_json = serde_json::to_string(&*current).unwrap_or_default();
+
+    if let Some(nick) = update.bot_nickname.as_deref() {
+        let _ = state.bot.update_guild_nickname(guild_id, Some(nick)).await;
+    }
+
+    let updated = match state.storage.patch_guild_config(guild_id, update.patch) {
+        Ok(u) => u,
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
+                Json(json!({ "error": format!("{e}") })),
             )
                 .into_response();
         }
     };
+    let after_json = serde_json::to_string(&*updated).unwrap_or_default();
 
-    if let Some(ref nick) = update.bot_nickname {
-        if state.bot.is_running() && guild_id != 0 {
-            let _ = state.bot.update_guild_nickname(guild_id, Some(nick)).await;
-        }
+    // Audit log
+    if let Some(ref c) = claims {
+        let ip_hdr = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(str::trim)
+            .unwrap_or("127.0.0.1");
+
+        let audit = NewWebAuditLog {
+            guild_id: Some(guild_id),
+            user_id,
+            user_name: &c.username,
+            domain: ConsoleDomain::Settings.as_str(),
+            action: "guild_config_update",
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            ip_address: ip_hdr,
+            status: "success",
+        };
+        let _ = state.storage.insert_web_audit_log(&audit);
     }
 
     Json(json!({
         "ok": true,
-        "config": *updated_cfg,
+        "config": *updated,
     }))
     .into_response()
 }
 
+// ============================================================================
+// Guild Entity Lookups (Roles, Channels, Emojis, Members) via Serenity Cache/HTTP
+// ============================================================================
+
+async fn api_get_guild_roles(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let mut roles_list = Vec::new();
+    if let Some(cache) = state.bot.cache() {
+        if let Some(guild) = cache.guild(guild_id) {
+            for role in guild.roles.values() {
+                roles_list.push(json!({
+                    "id": role.id.to_string(),
+                    "name": role.name,
+                    "color": role.colour.hex(),
+                    "position": role.position,
+                    "managed": role.managed,
+                }));
+            }
+        }
+    }
+
+    roles_list.sort_by(|a, b| {
+        let pos_b = b.get("position").and_then(Value::as_u64).unwrap_or(0);
+        let pos_a = a.get("position").and_then(Value::as_u64).unwrap_or(0);
+        pos_b.cmp(&pos_a)
+    });
+
+    Json(json!({ "roles": roles_list })).into_response()
+}
+
+async fn api_get_guild_channels(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let mut channels_list = Vec::new();
+    if let Some(cache) = state.bot.cache() {
+        if let Some(guild) = cache.guild(guild_id) {
+            for ch in guild.channels.values() {
+                let kind_str = match ch.kind {
+                    serenity::model::channel::ChannelType::Text => "text",
+                    serenity::model::channel::ChannelType::Voice => "voice",
+                    serenity::model::channel::ChannelType::Category => "category",
+                    serenity::model::channel::ChannelType::News => "announcement",
+                    serenity::model::channel::ChannelType::Stage => "stage",
+                    serenity::model::channel::ChannelType::Forum => "forum",
+                    serenity::model::channel::ChannelType::PublicThread
+                    | serenity::model::channel::ChannelType::PrivateThread
+                    | serenity::model::channel::ChannelType::NewsThread => "thread",
+                    _ => "other",
+                };
+                channels_list.push(json!({
+                    "id": ch.id.to_string(),
+                    "name": ch.name,
+                    "kind": kind_str,
+                    "parent_id": ch.parent_id.map(|p| p.to_string()),
+                    "position": ch.position,
+                }));
+            }
+        }
+    }
+
+    channels_list.sort_by(|a, b| {
+        let pos_a = a.get("position").and_then(Value::as_u64).unwrap_or(0);
+        let pos_b = b.get("position").and_then(Value::as_u64).unwrap_or(0);
+        pos_a.cmp(&pos_b)
+    });
+
+    Json(json!({ "channels": channels_list })).into_response()
+}
+
+async fn api_get_guild_emojis(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let mut emojis_list = Vec::new();
+    if let Some(cache) = state.bot.cache() {
+        if let Some(guild) = cache.guild(guild_id) {
+            for em in guild.emojis.values() {
+                emojis_list.push(json!({
+                    "id": em.id.to_string(),
+                    "name": em.name,
+                    "animated": em.animated,
+                    "available": em.available,
+                    "url": em.url(),
+                }));
+            }
+        }
+    }
+
+    emojis_list.sort_by(|a, b| {
+        let name_a = a.get("name").and_then(Value::as_str).unwrap_or("");
+        let name_b = b.get("name").and_then(Value::as_str).unwrap_or("");
+        name_a.cmp(name_b)
+    });
+
+    Json(json!({ "emojis": emojis_list })).into_response()
+}
+
+#[derive(Deserialize)]
+struct MemberSearchQuery {
+    q: Option<String>,
+}
+
+async fn api_search_guild_members(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Query(q): Query<MemberSearchQuery>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let query_str = q.q.as_deref().unwrap_or("").trim();
+    if query_str.len() < 2 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Search query must be at least 2 characters." })),
+        )
+            .into_response();
+    }
+
+    let Some(http) = state.bot.http() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "Discord client is not connected." })),
+        )
+            .into_response();
+    };
+
+    match http
+        .search_guild_members(serenity::model::id::GuildId::new(guild_id), query_str, Some(25))
+        .await
+    {
+        Ok(members) => {
+            let list: Vec<Value> = members
+                .into_iter()
+                .map(|m| {
+                    json!({
+                        "id": m.user.id.to_string(),
+                        "username": m.user.name,
+                        "global_name": m.user.global_name,
+                        "nick": m.nick,
+                        "avatar_url": m.avatar_url().or_else(|| Some(m.user.face())),
+                    })
+                })
+                .collect();
+            Json(json!({ "members": list })).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": format!("Discord search failed: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
+// ============================================================================
+// Access & Grants Endpoints (Feature F1)
+// ============================================================================
+
+async fn api_list_guild_grants(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.get_web_access_grants(guild_id) {
+        Ok(grants) => Json(json!({ "grants": grants })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpsertGrantRequest {
+    target_type: String,
+    target_id: u64,
+    #[serde(default)]
+    target_name: Option<String>,
+    domain: String,
+    access_level: String,
+}
+
+async fn api_upsert_guild_grant(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<UpsertGrantRequest>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    if payload.target_type != "role" && payload.target_type != "user" {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "target_type must be 'role' or 'user'." }))).into_response();
+    }
+
+    let target_name = payload.target_name.as_deref().unwrap_or("Unknown Target");
+
+    match state.storage.create_or_update_web_access_grant(
+        guild_id,
+        &payload.target_type,
+        payload.target_id,
+        target_name,
+        &payload.domain,
+        &payload.access_level,
+    ) {
+        Ok(saved) => {
+            // Audit log
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Permissions.as_str(),
+                    action: "grant_upsert",
+                    before_json: None,
+                    after_json: Some(&serde_json::to_string(&saved).unwrap_or_default()),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            (StatusCode::CREATED, Json(json!({ "grant": saved }))).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn api_delete_guild_grant(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path((guild_id_str, grant_id_str)): Path<(String, String)>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+    let Ok(grant_id) = grant_id_str.parse::<i64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid grant ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.delete_web_access_grant(guild_id, grant_id) {
+        Ok(true) => {
+            // Audit log
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Permissions.as_str(),
+                    action: "grant_delete",
+                    before_json: Some(&format!("{{\"grant_id\": {grant_id}}}")),
+                    after_json: None,
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "ok": true })).into_response()
+        }
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "Grant not found." }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+// ============================================================================
+// Audit Log Query Endpoints (Feature F2)
+// ============================================================================
+
+#[derive(Deserialize)]
+struct AuditLogQuery {
+    domain: Option<String>,
+    user_id: Option<u64>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+async fn api_get_guild_audit_log(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Query(q): Query<AuditLogQuery>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let limit = q.limit.unwrap_or(50).clamp(1, 100) as usize;
+    let offset = q.offset.unwrap_or(0).max(0) as usize;
+
+    match state.storage.list_web_audit_logs(
+        Some(guild_id),
+        q.user_id,
+        q.domain.as_deref(),
+        limit,
+        offset,
+    ) {
+        Ok(logs) => Json(json!({ "logs": logs, "limit": limit, "offset": offset })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+async fn api_get_global_audit_log(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Query(q): Query<AuditLogQuery>,
+) -> Response {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+
+    if !is_owner {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let limit = q.limit.unwrap_or(50).clamp(1, 100) as usize;
+    let offset = q.offset.unwrap_or(0).max(0) as usize;
+
+    match state.storage.list_web_audit_logs(
+        None,
+        q.user_id,
+        q.domain.as_deref(),
+        limit,
+        offset,
+    ) {
+        Ok(logs) => Json(json!({ "logs": logs, "limit": limit, "offset": offset })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
 async fn api_reset_guild_quota(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -820,6 +1446,14 @@ async fn api_reset_guild_quota(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     let cfg = state.storage.get_guild_config(guild_id);
     let tq = &cfg.token_quotas;
     let (win_start, _, _) = calculate_window_period(
@@ -832,7 +1466,30 @@ async fn api_reset_guild_quota(
     );
 
     match state.storage.reset_guild_token_usage(guild_id, win_start) {
-        Ok(deleted) => Json(json!({ "ok": true, "deleted_entries": deleted })).into_response(),
+        Ok(deleted) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "quota_reset",
+                    before_json: None,
+                    after_json: Some(&format!("{{\"deleted_entries\": {deleted}}}")),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "ok": true, "deleted_entries": deleted })).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e.to_string() })),
@@ -843,6 +1500,7 @@ async fn api_reset_guild_quota(
 
 async fn api_clear_guild_memory(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -852,17 +1510,59 @@ async fn api_clear_guild_memory(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     state.bot.memory().clear_guild(guild_id);
+
+    if let Some(ref c) = claims {
+        let ip_hdr = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(str::trim)
+            .unwrap_or("127.0.0.1");
+
+        let audit = NewWebAuditLog {
+            guild_id: Some(guild_id),
+            user_id,
+            user_name: &c.username,
+            domain: ConsoleDomain::Ai.as_str(),
+            action: "memory_clear",
+            before_json: None,
+            after_json: None,
+            ip_address: ip_hdr,
+            status: "success",
+        };
+        let _ = state.storage.insert_web_audit_log(&audit);
+    }
+
     Json(json!({ "ok": true })).into_response()
 }
 
 async fn api_update_check(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
-) -> Json<Value> {
+) -> Response {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+    if !is_owner {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     let channel = params.get("channel").map(|s| s.as_str());
     let res = state.updater.check_for_updates(channel).await;
-    Json(json!(res))
+    Json(json!(res)).into_response()
 }
 
 #[derive(Deserialize)]
@@ -872,8 +1572,19 @@ struct UpdateApplyPayload {
 
 async fn api_update_apply(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateApplyPayload>,
 ) -> Response {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+    if !is_owner {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     match state
         .updater
         .apply_update(payload.channel.as_deref())
@@ -888,12 +1599,38 @@ async fn api_update_apply(
     }
 }
 
-async fn api_update_snapshots(State(state): State<Arc<WebState>>) -> Json<Value> {
+async fn api_update_snapshots(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+) -> Response {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+    if !is_owner {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     let snapshots = state.updater.list_snapshots().unwrap_or_default();
-    Json(json!({ "snapshots": snapshots }))
+    Json(json!({ "snapshots": snapshots })).into_response()
 }
 
-async fn api_create_snapshot(State(state): State<Arc<WebState>>) -> Response {
+async fn api_create_snapshot(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+) -> Response {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+    if !is_owner {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     match state.updater.create_snapshot("manual").await {
         Ok(snap) => Json(json!({ "ok": true, "snapshot": snap })).into_response(),
         Err(e) => (
@@ -905,7 +1642,20 @@ async fn api_create_snapshot(State(state): State<Arc<WebState>>) -> Response {
 }
 
 /// Generate and download a secret-redacted SQLite database backup (`silas-blue-redacted-backup.db`).
-async fn api_download_redacted_backup(State(state): State<Arc<WebState>>) -> Response {
+async fn api_download_redacted_backup(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+) -> Response {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let is_owner = match &claims {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    };
+    if !is_owner {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     let tmp_dir = state.updater.backups_dir().to_path_buf();
     let _ = std::fs::create_dir_all(&tmp_dir);
     let dest = tmp_dir.join(format!("redacted_export_{}.db", Utc::now().timestamp_millis()));
@@ -1023,6 +1773,7 @@ async fn api_webhook_reddit(
 
 async fn api_list_guild_reddit_subs(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1032,6 +1783,13 @@ async fn api_list_guild_reddit_subs(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     match state.storage.list_reddit_subscriptions_for_guild(guild_id) {
         Ok(subs) => Json(json!({ "subscriptions": subs })).into_response(),
@@ -1045,6 +1803,7 @@ async fn api_list_guild_reddit_subs(
 
 async fn api_create_guild_reddit_sub(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(mut new_sub): Json<silas_core::reddit::NewRedditSubscription>,
 ) -> Response {
@@ -1055,6 +1814,13 @@ async fn api_create_guild_reddit_sub(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     new_sub.guild_id = guild_id;
     let clean_sub = silas_core::reddit::clean_subreddit_name(&new_sub.subreddit);
@@ -1107,6 +1873,29 @@ async fn api_create_guild_reddit_sub(
         }
     }
 
+    // Audit log
+    if let Some(ref c) = claims {
+        let ip_hdr = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(str::trim)
+            .unwrap_or("127.0.0.1");
+
+        let audit = NewWebAuditLog {
+            guild_id: Some(guild_id),
+            user_id,
+            user_name: &c.username,
+            domain: ConsoleDomain::Settings.as_str(),
+            action: "reddit_feed_create",
+            before_json: None,
+            after_json: Some(&serde_json::to_string(&created_sub).unwrap_or_default()),
+            ip_address: ip_hdr,
+            status: "success",
+        };
+        let _ = state.storage.insert_web_audit_log(&audit);
+    }
+
     (
         StatusCode::CREATED,
         Json(json!({ "subscription": created_sub })),
@@ -1116,6 +1905,7 @@ async fn api_create_guild_reddit_sub(
 
 async fn api_delete_guild_reddit_sub(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path((guild_id_str, sub_id_str)): Path<(String, String)>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1134,8 +1924,38 @@ async fn api_delete_guild_reddit_sub(
             .into_response();
     };
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     match state.storage.delete_reddit_subscription(sub_id, guild_id) {
-        Ok(true) => Json(json!({ "success": true })).into_response(),
+        Ok(true) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "reddit_feed_delete",
+                    before_json: Some(&format!("{{\"sub_id\": {sub_id}}}")),
+                    after_json: None,
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true })).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Subscription not found." })),
@@ -1168,6 +1988,7 @@ pub struct ModCasesQuery {
 
 async fn api_list_mod_cases(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Query(query): Query<ModCasesQuery>,
 ) -> Response {
@@ -1178,6 +1999,13 @@ async fn api_list_mod_cases(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     let cases = match query.user_id {
         Some(user_id) => state.storage.get_mod_cases_for_user(guild_id, user_id),
@@ -1206,6 +2034,7 @@ pub struct CreateModCaseRequest {
 
 async fn api_create_mod_case(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(payload): Json<CreateModCaseRequest>,
 ) -> Response {
@@ -1217,10 +2046,17 @@ async fn api_create_mod_case(
             .into_response();
     };
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     let new_case = NewModCase {
         guild_id,
         user_id: payload.user_id,
-        moderator_id: payload.moderator_id.unwrap_or(0),
+        moderator_id: payload.moderator_id.unwrap_or(user_id),
         action_type: payload.action_type,
         reason: payload
             .reason
@@ -1231,7 +2067,30 @@ async fn api_create_mod_case(
     };
 
     match state.storage.create_mod_case(&new_case) {
-        Ok(created) => (StatusCode::CREATED, Json(json!({ "case": created }))).into_response(),
+        Ok(created) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Moderation.as_str(),
+                    action: "mod_case_create",
+                    before_json: None,
+                    after_json: Some(&serde_json::to_string(&created).unwrap_or_default()),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            (StatusCode::CREATED, Json(json!({ "case": created }))).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("{e}") })),
@@ -1247,6 +2106,7 @@ pub struct UpdateCaseReasonRequest {
 
 async fn api_update_mod_case_reason(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path((guild_id_str, case_id_str)): Path<(String, String)>,
     Json(payload): Json<UpdateCaseReasonRequest>,
 ) -> Response {
@@ -1265,20 +2125,49 @@ async fn api_update_mod_case_reason(
             .into_response();
     };
 
-    let updated_by_id = state
-        .storage
-        .update_case_reason_by_id(case_id, &payload.reason)
-        .unwrap_or(false);
-    let success = if updated_by_id {
-        true
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    // Verify case belongs to guild
+    if let Ok(Some(existing_case)) = state.storage.get_mod_case(guild_id, case_id) {
+        if existing_case.guild_id != guild_id {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "Case not found." }))).into_response();
+        }
     } else {
-        state
-            .storage
-            .update_case_reason(guild_id, case_id, &payload.reason)
-            .unwrap_or(false)
-    };
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Case not found." }))).into_response();
+    }
+
+    let success = state
+        .storage
+        .update_case_reason(guild_id, case_id, &payload.reason)
+        .unwrap_or(false);
 
     if success {
+        if let Some(ref c) = claims {
+            let ip_hdr = headers
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.split(',').next())
+                .map(str::trim)
+                .unwrap_or("127.0.0.1");
+
+            let audit = NewWebAuditLog {
+                guild_id: Some(guild_id),
+                user_id,
+                user_name: &c.username,
+                domain: ConsoleDomain::Moderation.as_str(),
+                action: "mod_case_reason_update",
+                before_json: None,
+                after_json: Some(&format!("{{\"case_id\": {case_id}, \"reason\": {:?}}}", payload.reason)),
+                ip_address: ip_hdr,
+                status: "success",
+            };
+            let _ = state.storage.insert_web_audit_log(&audit);
+        }
         Json(json!({ "success": true, "reason": payload.reason })).into_response()
     } else {
         (
@@ -1291,8 +2180,16 @@ async fn api_update_mod_case_reason(
 
 async fn api_deactivate_mod_case(
     State(state): State<Arc<WebState>>,
-    Path((_guild_id_str, case_id_str)): Path<(String, String)>,
+    headers: HeaderMap,
+    Path((guild_id_str, case_id_str)): Path<(String, String)>,
 ) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
     let Ok(case_id) = case_id_str.parse::<i64>() else {
         return (
             StatusCode::BAD_REQUEST,
@@ -1301,8 +2198,47 @@ async fn api_deactivate_mod_case(
             .into_response();
     };
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    // Verify case belongs to guild
+    if let Ok(Some(existing_case)) = state.storage.get_mod_case(guild_id, case_id) {
+        if existing_case.guild_id != guild_id {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "Case not found." }))).into_response();
+        }
+    } else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Case not found." }))).into_response();
+    }
+
     match state.storage.deactivate_case(case_id) {
-        Ok(true) => Json(json!({ "success": true, "case_id": case_id })).into_response(),
+        Ok(true) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Moderation.as_str(),
+                    action: "mod_case_deactivate",
+                    before_json: Some(&format!("{{\"case_id\": {case_id}}}")),
+                    after_json: None,
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "case_id": case_id })).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Case not found or already inactive." })),
@@ -1324,6 +2260,7 @@ pub struct StrikesQuery {
 
 async fn api_get_guild_strikes(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Query(query): Query<StrikesQuery>,
 ) -> Response {
@@ -1335,16 +2272,23 @@ async fn api_get_guild_strikes(
             .into_response();
     };
 
-    if let Some(user_id) = query.user_id {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    if let Some(target_user_id) = query.user_id {
         let strikes = state
             .storage
-            .get_user_strikes(guild_id, user_id)
+            .get_user_strikes(guild_id, target_user_id)
             .unwrap_or_default();
         let active_count = state
             .storage
-            .get_active_strikes_count(guild_id, user_id)
+            .get_active_strikes_count(guild_id, target_user_id)
             .unwrap_or(0);
-        Json(json!({ "user_id": user_id, "active_count": active_count, "strikes": strikes }))
+        Json(json!({ "user_id": target_user_id, "active_count": active_count, "strikes": strikes }))
             .into_response()
     } else {
         match state.storage.get_guild_strikes(guild_id, query.limit) {
@@ -1365,6 +2309,7 @@ pub struct DecayStrikesRequest {
 
 async fn api_decay_guild_strikes(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(payload): Json<DecayStrikesRequest>,
 ) -> Response {
@@ -1375,6 +2320,13 @@ async fn api_decay_guild_strikes(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     let cutoff = match payload.cutoff_epoch {
         Some(ts) => ts,
@@ -1391,12 +2343,35 @@ async fn api_decay_guild_strikes(
     };
 
     match state.storage.decay_strikes(guild_id, cutoff) {
-        Ok(count) => Json(json!({
-            "success": true,
-            "decayed_count": count,
-            "cutoff_epoch": cutoff
-        }))
-        .into_response(),
+        Ok(count) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Automod.as_str(),
+                    action: "strike_decay",
+                    before_json: None,
+                    after_json: Some(&format!("{{\"decayed_count\": {count}, \"cutoff_epoch\": {cutoff}}}")),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({
+                "success": true,
+                "decayed_count": count,
+                "cutoff_epoch": cutoff
+            }))
+            .into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("{e}") })),
@@ -1407,6 +2382,7 @@ async fn api_decay_guild_strikes(
 
 async fn api_get_automod_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1416,6 +2392,13 @@ async fn api_get_automod_config(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     match state.storage.get_automod_config(guild_id) {
         Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
@@ -1429,6 +2412,7 @@ async fn api_get_automod_config(
 
 async fn api_put_automod_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(mut config): Json<AutomodConfig>,
 ) -> Response {
@@ -1441,8 +2425,45 @@ async fn api_put_automod_config(
     };
     config.guild_id = guild_id;
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let before_json = state
+        .storage
+        .get_automod_config(guild_id)
+        .ok()
+        .and_then(|c| serde_json::to_string(&c).ok());
+
     match state.storage.save_automod_config(&config) {
-        Ok(()) => Json(json!({ "success": true, "config": config })).into_response(),
+        Ok(()) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let after_json = serde_json::to_string(&config).ok();
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Automod.as_str(),
+                    action: "automod_config_update",
+                    before_json: before_json.as_deref(),
+                    after_json: after_json.as_deref(),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "config": config })).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("{e}") })),
@@ -1453,6 +2474,7 @@ async fn api_put_automod_config(
 
 async fn api_get_logging_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1462,6 +2484,13 @@ async fn api_get_logging_config(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     match state.storage.get_logging_config(guild_id) {
         Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
@@ -1475,6 +2504,7 @@ async fn api_get_logging_config(
 
 async fn api_put_logging_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(mut config): Json<LoggingConfig>,
 ) -> Response {
@@ -1487,8 +2517,45 @@ async fn api_put_logging_config(
     };
     config.guild_id = guild_id;
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let before_json = state
+        .storage
+        .get_logging_config(guild_id)
+        .ok()
+        .and_then(|c| serde_json::to_string(&c).ok());
+
     match state.storage.save_logging_config(&config) {
-        Ok(()) => Json(json!({ "success": true, "config": config })).into_response(),
+        Ok(()) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let after_json = serde_json::to_string(&config).ok();
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Logging.as_str(),
+                    action: "logging_config_update",
+                    before_json: before_json.as_deref(),
+                    after_json: after_json.as_deref(),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "config": config })).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("{e}") })),
@@ -1499,6 +2566,7 @@ async fn api_put_logging_config(
 
 async fn api_get_greetings_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1508,6 +2576,13 @@ async fn api_get_greetings_config(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     match state.storage.get_greetings_config(guild_id) {
         Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
@@ -1521,6 +2596,7 @@ async fn api_get_greetings_config(
 
 async fn api_put_greetings_config(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(mut config): Json<GreetingsConfig>,
 ) -> Response {
@@ -1533,8 +2609,45 @@ async fn api_put_greetings_config(
     };
     config.guild_id = guild_id;
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let before_json = state
+        .storage
+        .get_greetings_config(guild_id)
+        .ok()
+        .and_then(|c| serde_json::to_string(&c).ok());
+
     match state.storage.save_greetings_config(&config) {
-        Ok(()) => Json(json!({ "success": true, "config": config })).into_response(),
+        Ok(()) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let after_json = serde_json::to_string(&config).ok();
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "greetings_config_update",
+                    before_json: before_json.as_deref(),
+                    after_json: after_json.as_deref(),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "config": config })).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("{e}") })),
@@ -1564,6 +2677,7 @@ pub struct CreateReactionRoleEntryItem {
 
 async fn api_list_reaction_roles(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1573,6 +2687,13 @@ async fn api_list_reaction_roles(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     match state.storage.get_guild_reaction_roles(guild_id) {
         Ok(groups) => Json(json!({ "groups": groups })).into_response(),
@@ -1586,6 +2707,7 @@ async fn api_list_reaction_roles(
 
 async fn api_create_reaction_roles(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(payload): Json<CreateReactionRoleGroupRequest>,
 ) -> Response {
@@ -1596,6 +2718,13 @@ async fn api_create_reaction_roles(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     let new_group = NewReactionRoleGroup {
         guild_id,
@@ -1634,13 +2763,44 @@ async fn api_create_reaction_roles(
         }
     }
 
+    if let Some(ref c) = claims {
+        let ip_hdr = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(str::trim)
+            .unwrap_or("127.0.0.1");
+
+        let after_json = serde_json::to_string(&created_group).ok();
+        let audit = NewWebAuditLog {
+            guild_id: Some(guild_id),
+            user_id,
+            user_name: &c.username,
+            domain: ConsoleDomain::Settings.as_str(),
+            action: "reaction_role_group_create",
+            before_json: None,
+            after_json: after_json.as_deref(),
+            ip_address: ip_hdr,
+            status: "success",
+        };
+        let _ = state.storage.insert_web_audit_log(&audit);
+    }
+
     (StatusCode::CREATED, Json(json!({ "group": created_group }))).into_response()
 }
 
 async fn api_delete_reaction_role_group(
     State(state): State<Arc<WebState>>,
-    Path((_guild_id_str, group_id_str)): Path<(String, String)>,
+    headers: HeaderMap,
+    Path((guild_id_str, group_id_str)): Path<(String, String)>,
 ) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
     let Ok(group_id) = group_id_str.parse::<i64>() else {
         return (
             StatusCode::BAD_REQUEST,
@@ -1649,8 +2809,48 @@ async fn api_delete_reaction_role_group(
             .into_response();
     };
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    // Verify group belongs to this guild to prevent cross-guild IDOR
+    let groups = state.storage.get_guild_reaction_roles(guild_id).unwrap_or_default();
+    if !groups.iter().any(|g| g.id == group_id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Reaction role group not found." })),
+        )
+            .into_response();
+    }
+
     match state.storage.delete_reaction_role_group(group_id) {
-        Ok(true) => Json(json!({ "success": true, "group_id": group_id })).into_response(),
+        Ok(true) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "reaction_role_group_delete",
+                    before_json: Some(&format!("{{\"group_id\": {group_id}}}")),
+                    after_json: None,
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "group_id": group_id })).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Reaction role group not found." })),
@@ -1681,6 +2881,7 @@ pub struct CreateCustomTriggerRequest {
 
 async fn api_list_custom_triggers(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1690,6 +2891,13 @@ async fn api_list_custom_triggers(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     match state.storage.list_custom_triggers(guild_id) {
         Ok(triggers) => Json(json!({ "triggers": triggers })).into_response(),
@@ -1703,6 +2911,7 @@ async fn api_list_custom_triggers(
 
 async fn api_create_custom_trigger(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path(guild_id_str): Path<String>,
     Json(payload): Json<CreateCustomTriggerRequest>,
 ) -> Response {
@@ -1713,6 +2922,13 @@ async fn api_create_custom_trigger(
         )
             .into_response();
     };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
 
     let new_trigger = NewCustomTrigger {
         guild_id,
@@ -1728,7 +2944,31 @@ async fn api_create_custom_trigger(
     };
 
     match state.storage.create_custom_trigger(&new_trigger) {
-        Ok(trigger) => Json(json!({ "success": true, "trigger": trigger })).into_response(),
+        Ok(trigger) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let after_json = serde_json::to_string(&trigger).ok();
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "custom_trigger_create",
+                    before_json: None,
+                    after_json: after_json.as_deref(),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "trigger": trigger })).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("{e}") })),
@@ -1739,6 +2979,7 @@ async fn api_create_custom_trigger(
 
 async fn api_delete_custom_trigger(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Path((guild_id_str, trigger_name)): Path<(String, String)>,
 ) -> Response {
     let Ok(guild_id) = guild_id_str.parse::<u64>() else {
@@ -1749,8 +2990,38 @@ async fn api_delete_custom_trigger(
             .into_response();
     };
 
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
     match state.storage.delete_custom_trigger(guild_id, &trigger_name) {
-        Ok(true) => Json(json!({ "success": true, "trigger_name": trigger_name })).into_response(),
+        Ok(true) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "custom_trigger_delete",
+                    before_json: Some(&format!("{{\"trigger_name\": {:?}}}", trigger_name)),
+                    after_json: None,
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "trigger_name": trigger_name })).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": "Trigger not found." })),
