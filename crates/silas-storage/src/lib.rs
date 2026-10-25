@@ -25,7 +25,7 @@ use silas_core::config::{
 };
 use silas_core::reddit::{clean_subreddit_name, NewRedditSubscription, RedditSubscription};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 const RETENTION_DAYS: i64 = 35;
 
 #[derive(Debug, Error)]
@@ -2560,6 +2560,15 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
                 params![now],
             )?;
         }
+        if v < 5 {
+            let _ = conn.execute_batch(
+                "ALTER TABLE guild_configs ADD COLUMN allowed_channels_json TEXT NOT NULL DEFAULT '[]';",
+            );
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (5, ?1)",
+                params![now],
+            )?;
+        }
     }
 
     conn.execute_batch(
@@ -2618,6 +2627,7 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             guild_id INTEGER PRIMARY KEY,
             default_model TEXT NOT NULL DEFAULT '',
             system_prompt TEXT NOT NULL DEFAULT '',
+            allowed_channels_json TEXT NOT NULL DEFAULT '[]',
 
             reply_roles_json TEXT NOT NULL DEFAULT '[\"everyone\"]',
             reply_users_json TEXT NOT NULL DEFAULT '[]',
@@ -3069,6 +3079,7 @@ fn row_to_guild_config(row: &rusqlite::Row<'_>) -> Result<(u64, GuildConfig), ru
 
     let mut cfg = GuildConfig {
         default_model: row.get(1)?,
+        allowed_channels: parse_vec(36),
         system_prompt: row.get(2)?,
         reply_roles: parse_vec(3),
         reply_users: parse_vec(4),
@@ -3132,7 +3143,8 @@ const SELECT_GUILD_COLUMNS: &str = "
     quota_reset_frequency, quota_reset_time,
     quota_reset_tz_offset, quota_reset_day_of_week,
     quota_reset_day_of_month, quota_allow_partial_overage,
-    non_paginated_max_chars, forum_delivery_mode, quota_max_overage_tokens
+    non_paginated_max_chars, forum_delivery_mode, quota_max_overage_tokens,
+    allowed_channels_json
 ";
 
 fn load_guild_config_from_conn(
@@ -3183,12 +3195,12 @@ fn save_guild_config_to_conn(
             quota_reset_frequency, quota_reset_time,
             quota_reset_tz_offset, quota_reset_day_of_week,
             quota_reset_day_of_month, quota_allow_partial_overage,
-            quota_max_overage_tokens, updated_at
+            quota_max_overage_tokens, allowed_channels_json, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
             ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
             ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29,
-            ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
+            ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38
         )
         ON CONFLICT(guild_id) DO UPDATE SET
             default_model = excluded.default_model,
@@ -3226,6 +3238,7 @@ fn save_guild_config_to_conn(
             quota_reset_day_of_month = excluded.quota_reset_day_of_month,
             quota_allow_partial_overage = excluded.quota_allow_partial_overage,
             quota_max_overage_tokens = excluded.quota_max_overage_tokens,
+            allowed_channels_json = excluded.allowed_channels_json,
             updated_at = excluded.updated_at",
         params![
             guild_id as i64,
@@ -3264,6 +3277,7 @@ fn save_guild_config_to_conn(
             i64::from(c.token_quotas.reset_day_of_month),
             i64::from(c.token_quotas.overage_policy.allow_partial_overage),
             c.token_quotas.overage_policy.max_overage_tokens,
+            serde_json::to_string(&c.allowed_channels)?,
             now,
         ],
     )?;
@@ -3302,11 +3316,13 @@ mod tests {
         let patch = GuildConfigPatch {
             system_prompt: Some("Test Persona".to_owned()),
             memory_turns: Some(12),
+            allowed_channels: Some(vec!["123456789012345678".to_owned()]),
             ..Default::default()
         };
         let updated = storage.patch_guild_config(gid, patch).expect("patch guild");
         assert_eq!(updated.system_prompt, "Test Persona");
         assert_eq!(updated.memory_turns, 12);
+        assert_eq!(updated.allowed_channels, vec!["123456789012345678".to_owned()]);
 
         let now = Utc::now();
         storage
@@ -3672,12 +3688,14 @@ mod tests {
             )?;
         }
 
-        // 2. Open via Storage to trigger v4 migration
+        // 2. Open via Storage to trigger migrations up to CURRENT_SCHEMA_VERSION
         let storage = Storage::open(&db_path)?;
         {
             let conn = storage.writer.lock();
             let current_v: u32 = conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))?;
-            assert_eq!(current_v, 4);
+            assert_eq!(current_v, CURRENT_SCHEMA_VERSION);
+            // Verify v5 allowed_channels_json column exists
+            let _: String = conn.query_row("SELECT allowed_channels_json FROM guild_configs LIMIT 1", [], |r| r.get(0)).unwrap_or_else(|_| "[]".to_string());
         }
 
         // 3. Verify AppSettings audit_log_retention_days default and update

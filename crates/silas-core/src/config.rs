@@ -806,6 +806,7 @@ pub struct CompiledGuildLookups {
     pub change_model: CompiledPermissionDomain,
     pub change_permissions: CompiledPermissionDomain,
     pub search: CompiledPermissionDomain,
+    pub allowed_channels: HashSet<u64>,
     pub monitored_forum_channels: HashSet<u64>,
     pub auto_reply_tags_lower: HashSet<String>,
     pub ignore_tags_lower: HashSet<String>,
@@ -816,6 +817,8 @@ pub struct CompiledGuildLookups {
 pub struct GuildConfig {
     #[serde(default)]
     pub default_model: String,
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
     #[serde(default = "default_everyone_vec")]
     pub reply_roles: Vec<String>,
     #[serde(default)]
@@ -906,6 +909,7 @@ impl Default for GuildConfig {
     fn default() -> Self {
         let mut cfg = Self {
             default_model: String::new(),
+            allowed_channels: Vec::new(),
             reply_roles: default_everyone_vec(),
             reply_users: Vec::new(),
             change_model_roles: Vec::new(),
@@ -945,6 +949,7 @@ impl Default for GuildConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GuildConfigPatch {
     pub default_model: Option<String>,
+    pub allowed_channels: Option<Vec<String>>,
     pub reply_roles: Option<Vec<String>>,
     pub reply_users: Option<Vec<String>>,
     pub change_model_roles: Option<Vec<String>>,
@@ -1003,6 +1008,7 @@ impl GuildConfig {
     /// Sanitizes all boundaries, synchronizes v3/v4 random-reply fields, and compiles O(1) lookup tables.
     pub fn sanitize_and_compile(&mut self) {
         self.default_model = truncate_chars(self.default_model.trim(), 256).to_owned();
+        self.allowed_channels = sanitize_snowflake_list(&self.allowed_channels);
         self.reply_roles = sanitize_role_list(&self.reply_roles);
         self.reply_users = sanitize_snowflake_list(&self.reply_users);
         self.change_model_roles = sanitize_role_list(&self.change_model_roles);
@@ -1128,6 +1134,11 @@ impl GuildConfig {
                 &self.change_permission_users,
             ),
             search: CompiledPermissionDomain::compile(&self.search_roles, &self.search_users),
+            allowed_channels: self
+                .allowed_channels
+                .iter()
+                .filter_map(|c| parse_snowflake(c))
+                .collect(),
             monitored_forum_channels: self
                 .forum_monitored_channels
                 .iter()
@@ -1150,6 +1161,9 @@ impl GuildConfig {
     pub fn apply_patch(&mut self, patch: GuildConfigPatch) {
         if let Some(v) = patch.default_model {
             self.default_model = v;
+        }
+        if let Some(v) = patch.allowed_channels {
+            self.allowed_channels = v;
         }
         if let Some(v) = patch.reply_roles {
             self.reply_roles = v;
@@ -1331,6 +1345,23 @@ mod tests {
         assert_eq!(cfg.reply_users, vec!["123456789012345678".to_owned()]);
         assert!(cfg.forum_auto_reply_enabled);
         assert_eq!(cfg.forum_delivery_mode, "interactive");
+    }
+
+    #[test]
+    fn test_guild_config_allowed_channels_compilation() {
+        let mut cfg = GuildConfig::default();
+        assert!(cfg.compiled.allowed_channels.is_empty());
+
+        let raw_patch = serde_json::json!({
+            "allowed_channels": ["111222333444555666", "222333444555666777", "invalid_snowflake", ""]
+        });
+        let patch: GuildConfigPatch = serde_json::from_value(raw_patch).expect("valid patch");
+        cfg.apply_patch(patch);
+
+        assert_eq!(cfg.allowed_channels.len(), 2);
+        assert!(cfg.compiled.allowed_channels.contains(&111222333444555666));
+        assert!(cfg.compiled.allowed_channels.contains(&222333444555666777));
+        assert!(!cfg.compiled.allowed_channels.contains(&0));
     }
 
     #[test]

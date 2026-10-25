@@ -22,6 +22,7 @@ use silas_core::text::truncate_chars;
 use silas_search::grounding::{format_grounded_rag_block, is_refusal_response};
 use silas_search::intent::{build_search_query, should_auto_search};
 use silas_storage::TokenUsageEntry;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -596,6 +597,7 @@ async fn handle_incoming_message(ctx: &Context, msg: &Message, state: &Arc<BotSt
 
     // Determine whether the message explicitly or spontaneously triggers Silas Blue
     let (triggered, cleaned_prompt) = evaluate_message_trigger(
+        ctx,
         raw_content,
         msg,
         bot_uid,
@@ -616,8 +618,12 @@ async fn handle_incoming_message(ctx: &Context, msg: &Message, state: &Arc<BotSt
     let settings = state.storage.get_app_settings();
     let user_id = msg.author.id.get();
 
-    // 2. Permission & Quota check
+    // 2. Channel Whitelist, Permission & Quota check
     if let (Some(gid), Some(cfg)) = (guild_id, guild_cfg.as_ref()) {
+        if !is_channel_allowed(ctx, msg, &cfg.compiled.allowed_channels) {
+            return;
+        }
+
         let member_info = extract_member_info(ctx, msg, &settings.bot_owner_id);
         let member_ctx = MemberContext {
             user_id,
@@ -961,8 +967,45 @@ async fn send_message_with_automod_guard(
     }
 }
 
+/// Determines whether a Discord channel (or thread whose parent channel is configured)
+/// is allowed to receive bot LLM replies under guild configuration.
+/// If `allowed_channels` is empty, all channels in the guild are allowed.
+fn is_channel_allowed(
+    ctx: &Context,
+    msg: &Message,
+    allowed_channels: &HashSet<u64>,
+) -> bool {
+    if allowed_channels.is_empty() {
+        return true;
+    }
+    let ch_id = msg.channel_id.get();
+    if allowed_channels.contains(&ch_id) {
+        return true;
+    }
+    if let Some(gid) = msg.guild_id {
+        if let Some(guild) = ctx.cache.guild(gid) {
+            if let Some(ch) = guild.channels.get(&msg.channel_id) {
+                if let Some(parent) = ch.parent_id {
+                    if allowed_channels.contains(&parent.get()) {
+                        return true;
+                    }
+                }
+            }
+            if let Some(thread) = guild.threads.iter().find(|t| t.id == msg.channel_id) {
+                if let Some(parent) = thread.parent_id {
+                    if allowed_channels.contains(&parent.get()) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Evaluate if a message triggers the bot via DM, `@mention`, reply to bot, custom prefix, or spontaneous reply mode.
 fn evaluate_message_trigger(
+    ctx: &Context,
     raw_content: &str,
     msg: &Message,
     bot_uid: u64,
@@ -1012,6 +1055,9 @@ fn evaluate_message_trigger(
 
     // Check spontaneous reply mode (`random_reply_mode`)
     if let Some(cfg) = guild_cfg {
+        if !is_channel_allowed(ctx, msg, &cfg.compiled.allowed_channels) {
+            return (false, String::new());
+        }
         let mode = cfg.random_reply_mode.trim().to_lowercase();
         if mode != "off" && !mode.is_empty() && cfg.random_reply_value > 0 {
             let channel_id = msg.channel_id.get();

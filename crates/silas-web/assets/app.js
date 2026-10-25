@@ -1034,7 +1034,7 @@
 
       setValue("gcfg-bot-nickname", (meta && meta.bot_nickname) || "");
       setValue("gcfg-default-model", c.default_model || "");
-      setValue("gcfg-allowed-channels", c.reply_users || []);
+      setValue("gcfg-allowed-channels", c.allowed_channels || []);
       setValue("gcfg-prompt-roles", c.reply_roles || []);
       setValue("gcfg-model-roles", c.change_model_roles || []);
       setValue("gcfg-admin-roles", c.change_permission_roles || []);
@@ -1100,7 +1100,7 @@
     const patch = {
       bot_nickname: getValue("gcfg-bot-nickname"),
       default_model: getValue("gcfg-default-model"),
-      reply_users: parseCsvList("gcfg-allowed-channels"),
+      allowed_channels: parseCsvList("gcfg-allowed-channels"),
       reply_roles: parseCsvList("gcfg-prompt-roles"),
       change_model_roles: parseCsvList("gcfg-model-roles"),
       change_permission_roles: parseCsvList("gcfg-admin-roles"),
