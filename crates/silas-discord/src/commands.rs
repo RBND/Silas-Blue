@@ -22,7 +22,7 @@ pub type Context<'a> = poise::Context<'a, Arc<BotState>, CommandError>;
 
 /// Return the full vector of registered Poise commands.
 pub fn all_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
-    vec![
+    let mut cmds = vec![
         models(),
         setmodel(),
         clear(),
@@ -47,7 +47,11 @@ pub fn all_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
         setglobalname(),
         update(),
         reddit(),
-    ]
+        crate::reaction_roles::rr(),
+        crate::triggers::tag(),
+    ];
+    cmds.extend(crate::moderation::mod_commands());
+    cmds
 }
 
 struct CallerRoleInfo {

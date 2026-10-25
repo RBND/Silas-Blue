@@ -12,6 +12,7 @@ use serenity::all::{
     ShardManager,
 };
 use silas_ai::ProviderManager;
+use silas_core::cache::MessageRingBuffer;
 use silas_core::config::{AppSettings, GuildConfig};
 use silas_core::events::{TelemetryBus, TelemetryEvent};
 use silas_core::memory::ConversationMemory;
@@ -93,6 +94,7 @@ pub struct BotState {
     pub updater: Arc<BotUpdater>,
     pub telemetry: TelemetryBus,
     pub pagination: Arc<PaginationStore>,
+    pub message_cache: Arc<MessageRingBuffer>,
     pub forum_replied_threads: DashMap<u64, ForumThreadState>,
     pub channel_random_state: DashMap<u64, ChannelRandomState>,
     pub connected_guilds: Arc<DashMap<u64, ConnectedGuildInfo>>,
@@ -137,6 +139,7 @@ pub struct BotController {
     quota_reservations: Arc<QuotaReservationManager>,
     updater: Arc<BotUpdater>,
     telemetry: TelemetryBus,
+    message_cache: Arc<MessageRingBuffer>,
     connected_guilds: Arc<DashMap<u64, ConnectedGuildInfo>>,
     bot_identity: Arc<RwLock<BotUserIdentity>>,
     gateway_ready: Arc<AtomicBool>,
@@ -154,29 +157,33 @@ impl BotController {
         telemetry: TelemetryBus,
     ) -> Self {
         let http = Arc::new(RwLock::new(None));
-        let this = Self {
-            inner: Arc::new(tokio::sync::Mutex::new(None)),
-            storage: storage.clone(),
-            ai,
-            search,
-            memory,
-            quota_reservations,
-            updater,
-            telemetry,
-            connected_guilds: Arc::new(DashMap::new()),
-            bot_identity: Arc::new(RwLock::new(BotUserIdentity::default())),
-            gateway_ready: Arc::new(AtomicBool::new(false)),
-            http: Arc::clone(&http),
-        };
+        let message_cache = Arc::new(MessageRingBuffer::default());
 
         // Spawn background Reddit feed polling worker
         let http_getter = {
             let http_clone = Arc::clone(&http);
             Arc::new(move || http_clone.read().clone())
         };
-        crate::reddit::spawn_reddit_poller(storage, http_getter);
+        crate::reddit::spawn_reddit_poller(storage.clone(), http_getter);
 
-        this
+        // Spawn background moderation scheduler worker
+        crate::scheduler::spawn_scheduler_worker(storage.clone(), Arc::clone(&http));
+
+        Self {
+            inner: Arc::new(tokio::sync::Mutex::new(None)),
+            storage,
+            ai,
+            search,
+            memory,
+            quota_reservations,
+            updater,
+            telemetry,
+            message_cache,
+            connected_guilds: Arc::new(DashMap::new()),
+            bot_identity: Arc::new(RwLock::new(BotUserIdentity::default())),
+            gateway_ready: Arc::new(AtomicBool::new(false)),
+            http: Arc::clone(&http),
+        }
     }
 
     pub fn http(&self) -> Option<Arc<Http>> {
@@ -267,6 +274,7 @@ impl BotController {
             updater: Arc::clone(&self.updater),
             telemetry: self.telemetry.clone(),
             pagination: Arc::new(PaginationStore::new()),
+            message_cache: Arc::clone(&self.message_cache),
             forum_replied_threads: DashMap::new(),
             channel_random_state: DashMap::new(),
             connected_guilds: Arc::clone(&self.connected_guilds),
@@ -278,11 +286,16 @@ impl BotController {
 
         let state_for_setup = Arc::clone(&state);
 
-        // Least-privilege GatewayIntents: never request GUILD_PRESENCES or GUILD_MEMBERS.
+        // Expanded GatewayIntents for Carl.gg feature parity:
+        // Guilds, messages, direct messages, content, members, reactions, moderation, voice.
         let intents = GatewayIntents::GUILDS
             | GatewayIntents::GUILD_MESSAGES
             | GatewayIntents::DIRECT_MESSAGES
-            | GatewayIntents::MESSAGE_CONTENT;
+            | GatewayIntents::MESSAGE_CONTENT
+            | GatewayIntents::GUILD_MEMBERS
+            | GatewayIntents::GUILD_MESSAGE_REACTIONS
+            | GatewayIntents::GUILD_MODERATION
+            | GatewayIntents::GUILD_VOICE_STATES;
 
         let allowed_mentions = CreateAllowedMentions::new()
             .everyone(false)

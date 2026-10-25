@@ -97,6 +97,9 @@ pub fn process_tagscript(template: &str, ctx: &TagScriptContext) -> TagScriptOut
     TagScriptEngine::eval(template, ctx)
 }
 
+/// Alias for `process_tagscript`.
+pub use process_tagscript as evaluate_tagscript;
+
 fn parse_tags(
     input: &str,
     ctx: &TagScriptContext,

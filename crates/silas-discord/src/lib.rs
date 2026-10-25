@@ -1,10 +1,17 @@
 //! Discord gateway client, event handlers, interactive pagination, and hybrid Poise commands.
 
+pub mod automod;
 pub mod bot;
 pub mod commands;
+pub mod greetings;
 pub mod handlers;
+pub mod logging;
+pub mod moderation;
 pub mod pagination_ui;
+pub mod reaction_roles;
 pub mod reddit;
+pub mod scheduler;
+pub mod triggers;
 
 pub use bot::{
     BotController, BotState, BotUserIdentity, ConnectedGuildInfo, GuildChannelInfo, GuildRoleInfo,

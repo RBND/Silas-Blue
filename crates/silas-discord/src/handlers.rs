@@ -80,22 +80,69 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
         FullEvent::MessageDelete {
             channel_id,
             deleted_message_id,
-            ..
+            guild_id,
         } => {
             state
                 .memory
                 .evict_message(channel_id.get(), deleted_message_id.get());
+
+            crate::logging::log_message_delete(
+                &ctx.http,
+                &state.storage,
+                &state.message_cache,
+                channel_id.get(),
+                deleted_message_id.get(),
+                guild_id.map(|g| g.get()),
+            )
+            .await;
         }
         FullEvent::MessageDeleteBulk {
             channel_id,
             multiple_deleted_messages_ids,
-            ..
+            guild_id,
         } => {
             let ids: Vec<u64> = multiple_deleted_messages_ids
                 .iter()
                 .map(|m| m.get())
                 .collect();
             state.memory.evict_messages_bulk(channel_id.get(), &ids);
+
+            for mid in &ids {
+                crate::logging::log_message_delete(
+                    &ctx.http,
+                    &state.storage,
+                    &state.message_cache,
+                    channel_id.get(),
+                    *mid,
+                    guild_id.map(|g| g.get()),
+                )
+                .await;
+            }
+        }
+        FullEvent::MessageUpdate { event, .. } => {
+            if let (Some(gid), Some(ref new_text)) = (event.guild_id, &event.content) {
+                crate::logging::log_message_edit(
+                    &ctx.http,
+                    &state.storage,
+                    &state.message_cache,
+                    event.channel_id.get(),
+                    event.id.get(),
+                    new_text,
+                    gid.get(),
+                )
+                .await;
+            }
+        }
+        FullEvent::ChannelCreate { channel } => {
+            crate::logging::log_channel_change(
+                &ctx.http,
+                &state.storage,
+                channel.guild_id.get(),
+                "Created",
+                &channel.name,
+                channel.id.get(),
+            )
+            .await;
         }
         FullEvent::ChannelDelete { channel, .. } => {
             state.memory.clear_channel(channel.id.get());
@@ -103,6 +150,167 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
                 let cid = channel.id.get().to_string();
                 g.channels.retain(|c| c.id != cid);
             }
+            crate::logging::log_channel_change(
+                &ctx.http,
+                &state.storage,
+                channel.guild_id.get(),
+                "Deleted",
+                &channel.name,
+                channel.id.get(),
+            )
+            .await;
+        }
+        FullEvent::ChannelUpdate { old: _, new } => {
+            crate::logging::log_channel_change(
+                &ctx.http,
+                &state.storage,
+                new.guild_id.get(),
+                "Updated",
+                &new.name,
+                new.id.get(),
+            )
+            .await;
+        }
+        FullEvent::GuildMemberAddition { new_member } => {
+            crate::logging::log_member_join(
+                &ctx.http,
+                &state.storage,
+                new_member.guild_id.get(),
+                &new_member.user,
+                Some(new_member.user.created_at().unix_timestamp()),
+            )
+            .await;
+            crate::greetings::handle_member_join(&ctx.http, &state.storage, new_member).await;
+        }
+        FullEvent::GuildMemberRemoval {
+            guild_id,
+            user,
+            member_data_if_available: _,
+        } => {
+            crate::logging::log_member_leave(&ctx.http, &state.storage, guild_id.get(), user).await;
+            crate::greetings::handle_member_remove(&ctx.http, &state.storage, guild_id.get(), user).await;
+        }
+        FullEvent::GuildMemberUpdate {
+            old_if_available,
+            new,
+            event,
+        } => {
+            let old_nick = old_if_available.as_ref().and_then(|m| m.nick.as_deref());
+            let new_nick = new.as_ref().and_then(|m| m.nick.as_deref());
+            let old_roles: Vec<u64> = old_if_available
+                .as_ref()
+                .map(|m| m.roles.iter().map(|r| r.get()).collect())
+                .unwrap_or_default();
+            let new_roles: Vec<u64> = new
+                .as_ref()
+                .map(|m| m.roles.iter().map(|r| r.get()).collect())
+                .unwrap_or_default();
+            let added_roles: Vec<u64> = new_roles
+                .iter()
+                .filter(|r| !old_roles.contains(r))
+                .copied()
+                .collect();
+            let removed_roles: Vec<u64> = old_roles
+                .iter()
+                .filter(|r| !new_roles.contains(r))
+                .copied()
+                .collect();
+
+            crate::logging::log_member_update(
+                &ctx.http,
+                &state.storage,
+                event.guild_id.get(),
+                &event.user,
+                old_nick,
+                new_nick,
+                &added_roles,
+                &removed_roles,
+            )
+            .await;
+        }
+        FullEvent::GuildRoleCreate { new } => {
+            crate::logging::log_role_change(
+                &ctx.http,
+                &state.storage,
+                new.guild_id.get(),
+                "Created",
+                &new.name,
+                new.id.get(),
+            )
+            .await;
+        }
+        FullEvent::GuildRoleDelete {
+            guild_id,
+            removed_role_id,
+            removed_role_data_if_available,
+        } => {
+            let role_name = removed_role_data_if_available
+                .as_ref()
+                .map(|r| r.name.as_str())
+                .unwrap_or("Unknown Role");
+            crate::logging::log_role_change(
+                &ctx.http,
+                &state.storage,
+                guild_id.get(),
+                "Deleted",
+                role_name,
+                removed_role_id.get(),
+            )
+            .await;
+        }
+        FullEvent::GuildRoleUpdate {
+            old_data_if_available: _,
+            new,
+        } => {
+            crate::logging::log_role_change(
+                &ctx.http,
+                &state.storage,
+                new.guild_id.get(),
+                "Updated",
+                &new.name,
+                new.id.get(),
+            )
+            .await;
+        }
+        FullEvent::VoiceStateUpdate { old, new } => {
+            if let Some(guild_id) = new.guild_id {
+                let user_opt = new.member.as_ref().map(|m| &m.user);
+                if let Some(user) = user_opt {
+                    let desc = match (old.as_ref().and_then(|o| o.channel_id), new.channel_id) {
+                        (None, Some(cid)) => format!("Joined voice channel <#{cid}>"),
+                        (Some(cid), None) => format!("Left voice channel <#{cid}>"),
+                        (Some(old_cid), Some(new_cid)) if old_cid != new_cid => {
+                            format!("Moved voice channel: <#{old_cid}> -> <#{new_cid}>")
+                        }
+                        _ => {
+                            if new.self_mute != old.as_ref().map(|o| o.self_mute).unwrap_or(false) {
+                                if new.self_mute {
+                                    "Muted self".to_string()
+                                } else {
+                                    "Unmuted self".to_string()
+                                }
+                            } else if new.self_deaf != old.as_ref().map(|o| o.self_deaf).unwrap_or(false) {
+                                if new.self_deaf {
+                                    "Deafened self".to_string()
+                                } else {
+                                    "Undeafened self".to_string()
+                                }
+                            } else {
+                                String::new()
+                            }
+                        }
+                    };
+                    if !desc.is_empty() {
+                        crate::logging::log_voice_state(&ctx.http, &state.storage, guild_id.get(), user, &desc).await;
+                    }
+                }
+            }
+        }
+        FullEvent::ReactionAdd { add_reaction } => {
+            crate::reaction_roles::handle_reaction_add(ctx, add_reaction, state).await;
+        }
+        FullEvent::ReactionRemove { removed_reaction } => {
+            crate::reaction_roles::handle_reaction_remove(ctx, removed_reaction, state).await;
         }
         FullEvent::ThreadDelete { thread, .. } => {
             state.memory.clear_channel(thread.id.get());
@@ -112,12 +320,46 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
             interaction: Interaction::Component(comp),
             ..
         } => {
-            let _ = state.pagination.handle_interaction(ctx, comp).await;
+            let handled = state.pagination.handle_interaction(ctx, comp).await;
+            if !handled {
+                crate::reaction_roles::handle_component_interaction(ctx, comp, state).await;
+            }
         }
         FullEvent::ThreadCreate { thread, .. } => {
             handle_forum_thread_create(ctx, thread, state).await;
         }
         FullEvent::Message { new_message, .. } => {
+            // Cache incoming message for LRU audit diffs
+            let attachments = new_message
+                .attachments
+                .iter()
+                .map(|a| a.url.clone())
+                .collect();
+
+            state.message_cache.insert(silas_core::cache::CachedMessage {
+                id: new_message.id.get(),
+                guild_id: new_message.guild_id.map(|g| g.get()),
+                channel_id: new_message.channel_id.get(),
+                author_id: new_message.author.id.get(),
+                author_tag: new_message.author.tag(),
+                author_avatar: new_message.author.avatar_url(),
+                content: new_message.content.clone(),
+                attachments,
+                timestamp: new_message.timestamp.unix_timestamp(),
+            });
+
+            // 1. Automod evaluation
+            if let Some(infraction) = crate::automod::evaluate_message(ctx, new_message, state).await {
+                crate::automod::handle_infraction(ctx, new_message, state, infraction).await;
+                return;
+            }
+
+            // 2. Custom triggers / tags evaluation
+            if crate::triggers::evaluate_message_triggers(ctx, new_message, state).await {
+                return;
+            }
+
+            // 3. AI conversation / forum auto-reply / spontaneous chatter
             handle_incoming_message(ctx, new_message, state).await;
         }
         _ => {}

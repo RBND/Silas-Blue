@@ -28,3 +28,4 @@ poise.workspace = true
 serenity.workspace = true
 reqwest.workspace = true
 html-escape.workspace = true
+regex.workspace = true
