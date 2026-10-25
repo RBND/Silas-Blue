@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v4.0.4</span>
+          <span id="sidebar-version" class="badge badge-neutral">v4.0.8</span>
         </div>
       </div>
 
@@ -36,6 +36,25 @@
         </button>
         <button type="button" class="nav-item" data-view="invite">
           Invite &amp; Permissions
+        </button>
+        <div class="sidebar-nav-divider" role="separator"><span>MODERATION &amp; AUTOMATION</span></div>
+        <button type="button" class="nav-item" data-view="moderation">
+          🛡️ Moderation &amp; Cases
+        </button>
+        <button type="button" class="nav-item" data-view="automod">
+          🤖 Automod &amp; Strikes
+        </button>
+        <button type="button" class="nav-item" data-view="logging">
+          📜 Audit Logging
+        </button>
+        <button type="button" class="nav-item" data-view="greetings">
+          👋 Greetings &amp; Autorole
+        </button>
+        <button type="button" class="nav-item" data-view="reaction-roles">
+          🎭 Reaction Roles
+        </button>
+        <button type="button" class="nav-item" data-view="triggers">
+          ⚡ Custom Triggers
         </button>
       </nav>
 
@@ -607,6 +626,692 @@
           </div>
         </div>
       </section>
+      <!-- VIEW 6: Moderation & Cases -->
+      <section id="view-moderation" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>🛡️ Moderation &amp; Cases</h2>
+            <p class="subtitle">Infraction history, live strikes tally, reason editing, and manual penalties.</p>
+          </div>
+          <div class="header-actions">
+            <select id="mod-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-open-manual-case" class="btn btn-primary">+ Issue Action / Strike</button>
+            <button type="button" id="btn-refresh-cases" class="btn btn-secondary">Refresh</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Filter Cases &amp; Active Strikes</h3>
+            <div class="header-actions">
+              <button type="button" id="btn-trigger-strike-decay" class="btn btn-secondary btn-sm">Trigger Strike Decay</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="mod-filter-user">Filter by Discord User ID</label>
+              <input type="text" id="mod-filter-user" class="input-text" placeholder="Leave empty for all server cases">
+            </div>
+            <div class="form-group form-actions-inline">
+              <button type="button" id="btn-apply-case-filter" class="btn btn-secondary">Apply Filter</button>
+              <button type="button" id="btn-reset-case-filter" class="btn btn-secondary">Reset</button>
+            </div>
+          </div>
+          <div id="mod-strikes-summary" class="status-note" style="margin-top: 0.75rem;">
+            Select or filter by a user to view active strike points.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Infraction History Log</h3>
+            <span id="mod-cases-count-badge" class="badge badge-neutral">0 cases</span>
+          </div>
+          <div class="table-container" style="margin-top: 0.75rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Case #</th>
+                  <th>Target User</th>
+                  <th>Moderator</th>
+                  <th>Action</th>
+                  <th>Reason</th>
+                  <th>Duration / Expires</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="mod-cases-table-body">
+                <tr><td colspan="8" class="muted text-center">Loading cases...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 7: Automod & Strikes -->
+      <section id="view-automod" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>🤖 Automod &amp; Threat Defense</h2>
+            <p class="subtitle">Anti-spam burst limiters, invite/link sanitization, blocked words, and strike ladders.</p>
+          </div>
+          <div class="header-actions">
+            <select id="automod-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-save-automod" class="btn btn-primary">Save Automod Config</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <h3>Core Automated Threat Rules</h3>
+          <div class="form-grid">
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="am-enabled" checked> Enable Automod Engine for Server</label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="am-ai-mod"> Enable AI-Assisted Moderation Classifier</label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="am-anti-spam" checked> Anti-Spam Burst Limiter</label>
+            </div>
+            <div class="form-group">
+              <label for="am-spam-max">Spam Message Threshold / Interval</label>
+              <div class="form-row">
+                <input type="number" id="am-spam-max" class="input-text" min="2" max="20" value="5" placeholder="Max msgs">
+                <input type="number" id="am-spam-interval" class="input-text" min="1" max="60" value="5" placeholder="Interval (sec)">
+              </div>
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="am-anti-invites" checked> Anti-Discord Invites (Block unauthorized invite links)</label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="am-anti-links"> Anti-Links (Block all external hyperlinks unless whitelisted)</label>
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="am-anti-caps"> Anti-Excessive Caps Lock</label>
+            </div>
+            <div class="form-group">
+              <label for="am-caps-min">Caps Detection (Min Chars / Min Percent)</label>
+              <div class="form-row">
+                <input type="number" id="am-caps-min" class="input-text" min="5" max="100" value="10" placeholder="Min chars">
+                <input type="number" id="am-caps-pct" class="input-text" min="50" max="100" value="70" placeholder="Caps %">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="am-mention-max">Mass Mentions Limit (Max User/Role tags per msg)</label>
+              <input type="number" id="am-mention-max" class="input-text" min="1" max="50" value="5">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Blocked Content &amp; Whitelists</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="am-blocked-words">Blocked Words / Phrases (comma-separated or one per line)</label>
+              <textarea id="am-blocked-words" class="input-textarea" rows="3" placeholder="badword1, badword2, slur"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="am-whitelisted-domains">Whitelisted Web Domains (comma-separated)</label>
+              <textarea id="am-whitelisted-domains" class="input-textarea" rows="3" placeholder="discord.com, youtube.com, github.com"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="am-ignored-channels">Ignored Channel IDs (bypass automod, comma-separated)</label>
+              <input type="text" id="am-ignored-channels" class="input-text" placeholder="123456789, 987654321">
+            </div>
+            <div class="form-group">
+              <label for="am-ignored-roles">Ignored Role IDs (bypass automod, comma-separated)</label>
+              <input type="text" id="am-ignored-roles" class="input-text" placeholder="1122334455, 6677889900">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Weighted Strike Multipliers &amp; Decay Schedule</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="am-weight-spam">Spam Strikes</label>
+              <input type="number" id="am-weight-spam" class="input-text" min="1" max="10" value="2">
+            </div>
+            <div class="form-group">
+              <label for="am-weight-invite">Invite Strikes</label>
+              <input type="number" id="am-weight-invite" class="input-text" min="1" max="10" value="3">
+            </div>
+            <div class="form-group">
+              <label for="am-weight-badword">Bad Word Strikes</label>
+              <input type="number" id="am-weight-badword" class="input-text" min="1" max="10" value="2">
+            </div>
+            <div class="form-group">
+              <label for="am-weight-caps">Caps Strikes</label>
+              <input type="number" id="am-weight-caps" class="input-text" min="1" max="10" value="1">
+            </div>
+            <div class="form-group">
+              <label for="am-weight-mention">Mass Mention Strikes</label>
+              <input type="number" id="am-weight-mention" class="input-text" min="1" max="10" value="3">
+            </div>
+            <div class="form-group">
+              <label for="am-decay-hours">Strike Decay Period (hours, 168 = 7 days)</label>
+              <input type="number" id="am-decay-hours" class="input-text" min="1" max="8760" value="168">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Automod Escalation Punishment Ladder</h3>
+            <span class="badge badge-neutral">Automatic Threshold Enforcement</span>
+          </div>
+          <p class="help-text">When accumulated strikes reach a milestone, the punishment automatically executes.</p>
+          <div class="table-container" style="margin-top: 0.75rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Strikes Required</th>
+                  <th>Action</th>
+                  <th>Duration (Seconds)</th>
+                  <th>Remove</th>
+                </tr>
+              </thead>
+              <tbody id="am-ladder-table-body">
+                <tr><td colspan="4" class="muted text-center">Loading punishment ladder...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="subcard" style="margin-top: 1rem;">
+            <h4>Add Punishment Step</h4>
+            <div class="form-row" style="margin-top: 0.5rem;">
+              <div class="form-group">
+                <label for="am-new-step-strikes">Strikes</label>
+                <input type="number" id="am-new-step-strikes" class="input-text" min="1" max="50" value="4">
+              </div>
+              <div class="form-group">
+                <label for="am-new-step-action">Action</label>
+                <select id="am-new-step-action" class="input-select">
+                  <option value="warn">Warn</option>
+                  <option value="timeout">Timeout</option>
+                  <option value="kick">Kick</option>
+                  <option value="ban">Ban</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="am-new-step-duration">Duration Sec (Timeout only)</label>
+                <input type="number" id="am-new-step-duration" class="input-text" min="0" placeholder="e.g. 3600 for 1h">
+              </div>
+              <div class="form-group form-actions-inline">
+                <button type="button" id="btn-add-ladder-step" class="btn btn-secondary">+ Add Step</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 8: Audit Logging -->
+      <section id="view-logging" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>📜 Audit Logging Routing</h2>
+            <p class="subtitle">Multi-channel routing for moderation actions, message edit diffs, voice activity, and member lifecycle.</p>
+          </div>
+          <div class="header-actions">
+            <select id="logging-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-save-logging" class="btn btn-primary">Save Logging Config</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <h3>Log Channel Routing</h3>
+          <p class="help-text">Leave specific channels unset to route everything into the Unified Log Channel, or isolate channels per event category.</p>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="log-unified-channel">Unified All-Events Channel ID</label>
+              <input type="text" id="log-unified-channel" class="input-text" placeholder="Channel ID for all events (fallback)">
+            </div>
+            <div class="form-group">
+              <label for="log-mod-channel">Moderation Log Channel ID</label>
+              <input type="text" id="log-mod-channel" class="input-text" placeholder="Warns, strikes, kicks, bans, mutes">
+            </div>
+            <div class="form-group">
+              <label for="log-message-channel">Message Log Channel ID</label>
+              <input type="text" id="log-message-channel" class="input-text" placeholder="Edits (with diffs) and deletions">
+            </div>
+            <div class="form-group">
+              <label for="log-member-channel">Member Lifecycle Channel ID</label>
+              <input type="text" id="log-member-channel" class="input-text" placeholder="Joins, leaves, role updates, nick changes">
+            </div>
+            <div class="form-group">
+              <label for="log-server-channel">Server Structure Channel ID</label>
+              <input type="text" id="log-server-channel" class="input-text" placeholder="Channels, roles, emoji modifications">
+            </div>
+            <div class="form-group">
+              <label for="log-voice-channel">Voice Activity Channel ID</label>
+              <input type="text" id="log-voice-channel" class="input-text" placeholder="Voice join, leave, channel switches, mute/deaf">
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Log Filters &amp; Visual Styling</h3>
+          <div class="form-grid">
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="log-bots" checked> Log Bot Accounts &amp; Automated Webhook Actions</label>
+            </div>
+            <div class="form-group">
+              <label for="log-embed-color">Embed Accent Color</label>
+              <div class="form-row">
+                <input type="color" id="log-embed-color-picker" value="#36393f" class="color-picker-input">
+                <input type="text" id="log-embed-color-hex" class="input-text" value="#36393f" placeholder="#36393f">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="log-ignored-channels">Ignored Channel IDs (comma-separated)</label>
+              <input type="text" id="log-ignored-channels" class="input-text" placeholder="No message edit/delete logs from these channels">
+            </div>
+            <div class="form-group">
+              <label for="log-ignored-roles">Ignored Role IDs (comma-separated)</label>
+              <input type="text" id="log-ignored-roles" class="input-text" placeholder="Actions by these roles will not be logged">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 9: Greetings & Autorole -->
+      <section id="view-greetings" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>👋 Greetings &amp; Autorole</h2>
+            <p class="subtitle">Welcome and farewell announcements, member &amp; bot autoroles, and live TagScript embed previews.</p>
+          </div>
+          <div class="header-actions">
+            <select id="greetings-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-save-greetings" class="btn btn-primary">Save Greetings Config</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <h3>Welcome Announcements</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="greet-welcome-channel">Welcome Public Channel ID</label>
+              <input type="text" id="greet-welcome-channel" class="input-text" placeholder="Channel ID for welcome posts">
+            </div>
+            <div class="form-group checkbox-group">
+              <label><input type="checkbox" id="greet-dm-enabled"> Send Direct Message (DM) to New User</label>
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="greet-welcome-msg">Welcome Public Message Text (Supports TagScript: <code>{user}</code>, <code>{server}</code>, <code>{server.members}</code>)</label>
+              <textarea id="greet-welcome-msg" class="input-textarea" rows="2" placeholder="Welcome {user} to {server}! You are member #{server.members}."></textarea>
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="greet-welcome-embed">Welcome Embed Template (TagScript or Embed tags: <code>{title:...}</code> <code>{description:...}</code> <code>{color:#38bdf8}</code>)</label>
+              <textarea id="greet-welcome-embed" class="input-textarea" rows="3" placeholder="{title: Welcome to {server}} {description: Please check the rules in #rules!} {color: #38bdf8}"></textarea>
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="greet-dm-msg">Welcome Direct Message (DM) Text</label>
+              <textarea id="greet-dm-msg" class="input-textarea" rows="2" placeholder="Hey {user.name}, welcome to {server}! Feel free to introduce yourself."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Live Discord Embed Preview</h3>
+            <button type="button" id="btn-preview-welcome-embed" class="btn btn-secondary btn-sm">Refresh Embed Preview</button>
+          </div>
+          <div class="discord-embed-wrapper" style="margin-top: 1rem;">
+            <div id="welcome-live-embed" class="discord-embed-card">
+              <div class="discord-embed-bar" id="embed-preview-bar"></div>
+              <div class="discord-embed-content">
+                <div class="discord-embed-title" id="embed-preview-title">Welcome to Neon Sanctuary</div>
+                <div class="discord-embed-desc" id="embed-preview-desc">Welcome {user} to the server! Read our guidelines to get started.</div>
+                <div class="discord-embed-footer" id="embed-preview-footer">Silas Blue • Member #1337</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Farewell Announcements</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="greet-farewell-channel">Farewell Channel ID</label>
+              <input type="text" id="greet-farewell-channel" class="input-text" placeholder="Channel ID for farewell posts">
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="greet-farewell-msg">Farewell Message Text</label>
+              <textarea id="greet-farewell-msg" class="input-textarea" rows="2" placeholder="Goodbye {user.name}, we will miss you!"></textarea>
+            </div>
+            <div class="form-group" style="grid-column: 1 / -1;">
+              <label for="greet-farewell-embed">Farewell Embed Template</label>
+              <textarea id="greet-farewell-embed" class="input-textarea" rows="2" placeholder="{title: Member Departed} {description: {user.name} has left the server.} {color: #ef4444}"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Autorole Assignment</h3>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="greet-member-roles">Human Member Autorole IDs (comma-separated)</label>
+              <input type="text" id="greet-member-roles" class="input-text" placeholder="1122334455, 6677889900">
+            </div>
+            <div class="form-group">
+              <label for="greet-bot-roles">Bot Autorole IDs (comma-separated)</label>
+              <input type="text" id="greet-bot-roles" class="input-text" placeholder="9988776655">
+            </div>
+            <div class="form-group">
+              <label for="greet-delay-seconds">Autorole Delay (Seconds, 0 for immediate)</label>
+              <input type="number" id="greet-delay-seconds" class="input-text" min="0" max="86400" value="0">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 10: Reaction Roles -->
+      <section id="view-reaction-roles" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>🎭 Reaction Roles &amp; Components</h2>
+            <p class="subtitle">Emoji reactions, Discord interactive button panels, and role selection systems.</p>
+          </div>
+          <div class="header-actions">
+            <select id="rr-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-open-rr-modal" class="btn btn-primary">+ Create Reaction Role Group</button>
+            <button type="button" id="btn-refresh-rr" class="btn btn-secondary">Refresh</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Active Reaction Role Groups</h3>
+            <span id="rr-groups-count-badge" class="badge badge-neutral">0 groups</span>
+          </div>
+          <div id="rr-groups-container" class="rr-cards-grid" style="margin-top: 1rem;">
+            <p class="muted">Loading reaction role groups...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 11: Custom Triggers & TagScript Simulator -->
+      <section id="view-triggers" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>⚡ Custom Triggers &amp; TagScript Simulator</h2>
+            <p class="subtitle">Automated keyword triggers, custom commands, and interactive TagScript live sandbox.</p>
+          </div>
+          <div class="header-actions">
+            <select id="triggers-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-open-trigger-modal" class="btn btn-primary">+ Create Custom Trigger</button>
+            <button type="button" id="btn-refresh-triggers" class="btn btn-secondary">Refresh</button>
+          </div>
+        </header>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Active Guild Custom Triggers</h3>
+            <span id="triggers-count-badge" class="badge badge-neutral">0 triggers</span>
+          </div>
+          <div class="table-container" style="margin-top: 0.75rem;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Trigger</th>
+                  <th>Match Mode</th>
+                  <th>Response Preview</th>
+                  <th>Cooldown</th>
+                  <th>Options</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="triggers-table-body">
+                <tr><td colspan="7" class="muted text-center">Loading custom triggers...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header-split">
+            <h3>Interactive TagScript Simulator &amp; Live Bench</h3>
+            <span class="badge badge-online">Silas Blue Engine</span>
+          </div>
+          <p class="help-text">
+            Test any TagScript template in real-time. Directives like <code>{user}</code>, <code>{any: opt1 | opt2}</code>, <code>{if(...): yes | no}</code>, <code>{title:...}</code>, <code>{color:#38bdf8}</code>, <code>{delete}</code>, and Silas AI <code>{ai: prompt}</code> are evaluated instantly.
+          </p>
+
+          <div class="tagscript-chips-row" style="margin-bottom: 0.75rem;">
+            <button type="button" class="tagscript-chip" data-insert="{user}">+ {user}</button>
+            <button type="button" class="tagscript-chip" data-insert="{server.members}">+ {server.members}</button>
+            <button type="button" class="tagscript-chip" data-insert="{any: Option A | Option B | Option C}">+ {any:...}</button>
+            <button type="button" class="tagscript-chip" data-insert="{if({user.id} == 12345): Boss | Member}">+ {if:...}</button>
+            <button type="button" class="tagscript-chip" data-insert="{title: Announcement} {description: Hello!} {color: #38bdf8}">+ {embed}</button>
+            <button type="button" class="tagscript-chip" data-insert="{delete}">+ {delete}</button>
+            <button type="button" class="tagscript-chip" data-insert="{ai: Give a friendly cyberpunk greeting}">+ {ai:...}</button>
+          </div>
+
+          <div class="form-group">
+            <label for="tagscript-bench-input">Template to Evaluate</label>
+            <textarea id="tagscript-bench-input" class="input-textarea" rows="4" placeholder="Type or paste TagScript template here...">Greetings {user}! Welcome to {server}. {any: Grab a snack | Read the rules} {title: Server Information} {description: We have {server.members} members!} {color: #38bdf8} {ai: Brief welcome quote in cyberpunk theme}</textarea>
+          </div>
+
+          <div class="form-row" style="margin-top: 0.75rem;">
+            <button type="button" id="btn-eval-tagscript" class="btn btn-primary">Run TagScript Simulator</button>
+          </div>
+
+          <div class="subcard" style="margin-top: 1.25rem;">
+            <h4>Simulator Output</h4>
+            <div class="form-group" style="margin-top: 0.5rem;">
+              <label>Rendered Message Body</label>
+              <div id="tagscript-out-body" class="status-note" style="min-height: 48px; white-space: pre-wrap;">-</div>
+            </div>
+
+            <div class="form-group" style="margin-top: 0.75rem;">
+              <label>Evaluated Discord Embed</label>
+              <div class="discord-embed-wrapper">
+                <div id="tagscript-out-embed" class="discord-embed-card hidden">
+                  <div class="discord-embed-bar" id="ts-embed-bar"></div>
+                  <div class="discord-embed-content">
+                    <div class="discord-embed-title" id="ts-embed-title"></div>
+                    <div class="discord-embed-desc" id="ts-embed-desc"></div>
+                    <div class="discord-embed-footer" id="ts-embed-footer"></div>
+                  </div>
+                </div>
+                <div id="tagscript-out-no-embed" class="muted">No embed tags generated in output.</div>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 0.75rem;">
+              <label>Detected Bot Actions</label>
+              <div id="tagscript-out-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="muted">No action tags.</span>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 0.75rem;">
+              <label>Detected Silas AI Prompt Directive</label>
+              <div id="tagscript-out-ai" class="status-note">None</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <!-- MODALS & DIALOGS -->
+      <!-- ================================================================ -->
+
+      <!-- Modal: Manual Moderation Case / Strike -->
+      <div id="modal-manual-case" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-case-title">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <h3 id="modal-case-title">Issue Manual Infraction / Strike</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-manual-case" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="mcase-user-id">Target Discord User ID *</label>
+              <input type="text" id="mcase-user-id" class="input-text" placeholder="e.g. 123456789012345678" required>
+            </div>
+            <div class="form-group">
+              <label for="mcase-action-type">Infraction Action Type *</label>
+              <select id="mcase-action-type" class="input-select">
+                <option value="warn">Warn</option>
+                <option value="timeout">Timeout</option>
+                <option value="kick">Kick</option>
+                <option value="softban">Softban</option>
+                <option value="tempban">Tempban</option>
+                <option value="ban">Ban</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="mcase-reason">Infraction Reason</label>
+              <input type="text" id="mcase-reason" class="input-text" placeholder="Reason for penalty" value="Manual disciplinary action">
+            </div>
+            <div class="form-group">
+              <label for="mcase-duration">Duration in Seconds (Timeouts &amp; Tempbans only)</label>
+              <input type="number" id="mcase-duration" class="input-text" min="0" placeholder="e.g. 3600 for 1 hour">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-manual-case">Cancel</button>
+            <button type="button" id="btn-submit-manual-case" class="btn btn-primary">Submit Case</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Edit Case Reason -->
+      <div id="modal-edit-reason" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-reason-title">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <h3 id="modal-reason-title">Update Case Reason</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-edit-reason" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="edit-reason-case-id">
+            <div class="form-group">
+              <label for="edit-reason-text">New Reason</label>
+              <textarea id="edit-reason-text" class="input-textarea" rows="3" placeholder="Enter updated infraction reason"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-edit-reason">Cancel</button>
+            <button type="button" id="btn-submit-edit-reason" class="btn btn-primary">Save Reason</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Create Reaction Role Group -->
+      <div id="modal-create-rr" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-rr-title">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <h3 id="modal-rr-title">Create Reaction Role Group</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-create-rr" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="rr-input-channel">Discord Channel ID *</label>
+                <input type="text" id="rr-input-channel" class="input-text" placeholder="Channel where message resides" required>
+              </div>
+              <div class="form-group">
+                <label for="rr-input-message">Discord Message ID *</label>
+                <input type="text" id="rr-input-message" class="input-text" placeholder="Message ID to bind roles to" required>
+              </div>
+              <div class="form-group">
+                <label for="rr-input-grouptype">Group Behavior Type</label>
+                <select id="rr-input-grouptype" class="input-select">
+                  <option value="normal">Normal (Toggle on click / react)</option>
+                  <option value="unique">Unique (Pick only one in group)</option>
+                  <option value="verify">Verify (Grant role once, cannot unverify)</option>
+                  <option value="drop">Drop (Reverse toggle)</option>
+                  <option value="binding">Binding (Requires prerequisite role)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="rr-input-component">Component Interaction Type</label>
+                <select id="rr-input-component" class="input-select">
+                  <option value="reaction">Classic Emoji Reaction</option>
+                  <option value="button">Modern Discord Button</option>
+                </select>
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="rr-input-reqrole">Required Role ID (For Binding mode, optional)</label>
+                <input type="text" id="rr-input-reqrole" class="input-text" placeholder="Leave empty if none">
+              </div>
+            </div>
+
+            <div class="subcard" style="margin-top: 1rem;">
+              <div class="card-header-split">
+                <h4>Role Mappings</h4>
+                <button type="button" id="btn-add-rr-entry-row" class="btn btn-secondary btn-sm">+ Add Role Mapping</button>
+              </div>
+              <div id="rr-entries-builder" style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                <!-- Dynamically populated entry rows -->
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-create-rr">Cancel</button>
+            <button type="button" id="btn-submit-create-rr" class="btn btn-primary">Create Group</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Create / Edit Custom Trigger -->
+      <div id="modal-create-trigger" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-trig-title">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <h3 id="modal-trig-title">Create / Edit Custom Trigger</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-create-trigger" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="trig-name">Trigger Name / Keyword *</label>
+                <input type="text" id="trig-name" class="input-text" placeholder="e.g. !rules, welcome, ping" required>
+              </div>
+              <div class="form-group">
+                <label for="trig-mode">Match Mode</label>
+                <select id="trig-mode" class="input-select">
+                  <option value="prefix">Prefix (Starts with keyword)</option>
+                  <option value="exact">Exact (Whole message match)</option>
+                  <option value="contains">Contains (Anywhere in message)</option>
+                  <option value="regex">Regex Pattern</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="trig-cooldown">Cooldown (Seconds)</label>
+                <input type="number" id="trig-cooldown" class="input-text" min="0" value="0">
+              </div>
+              <div class="form-group checkbox-group" style="align-self: center;">
+                <label><input type="checkbox" id="trig-enabled" checked> Trigger Enabled</label>
+              </div>
+              <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="trig-delete-msg"> Delete Author Trigger Message</label>
+              </div>
+              <div class="form-group checkbox-group">
+                <label><input type="checkbox" id="trig-reply-dm"> Reply in Author DM</label>
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="trig-roles">Allowed Role IDs (comma-separated, leave blank for all)</label>
+                <input type="text" id="trig-roles" class="input-text" placeholder="12345, 67890">
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="trig-channels">Ignored Channel IDs (comma-separated)</label>
+                <input type="text" id="trig-channels" class="input-text" placeholder="112233, 445566">
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="trig-response">Response Template (TagScript supported: <code>{user}</code>, <code>{ai:...}</code>, <code>{embed}</code>) *</label>
+                <textarea id="trig-response" class="input-textarea" rows="4" placeholder="Hello {user}, here is your info..." required></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-create-trigger">Cancel</button>
+            <button type="button" id="btn-submit-save-trigger" class="btn btn-primary">Save Trigger</button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
   <script src="/app.js"></script>

@@ -149,6 +149,7 @@
             panel.classList.add("hidden");
           }
         });
+        refreshActiveModule(target);
       });
     });
 
@@ -345,34 +346,73 @@
   // Server Configuration (4 Sub-Tabs + Chip Selectors)
   // ==========================================================================
   async function loadGuildList() {
-    const sel = document.getElementById("guild-selector");
-    if (!sel) return;
+    const selectors = document.querySelectorAll("#guild-selector, .guild-selector-sync");
+    if (selectors.length === 0) return;
     try {
       const res = await apiFetch("/api/guilds");
       const guilds = res.guilds || [];
-      sel.replaceChildren();
 
-      if (guilds.length === 0) {
-        const opt = document.createElement("option");
-        opt.value = "0";
-        opt.textContent = "Default Server Template (No Connected Guilds)";
-        sel.appendChild(opt);
-        currentGuildId = "0";
-      } else {
-        guilds.forEach((g) => {
+      selectors.forEach((sel) => {
+        sel.replaceChildren();
+        if (guilds.length === 0) {
           const opt = document.createElement("option");
-          opt.value = g.id;
-          opt.textContent = g.connected ? `${g.name} (${g.id})` : `${g.name} [Offline]`;
+          opt.value = "0";
+          opt.textContent = "Default Server Template (No Connected Guilds)";
           sel.appendChild(opt);
-        });
-        if (!currentGuildId || !guilds.some((g) => g.id === currentGuildId)) {
-          currentGuildId = guilds[0].id;
+          currentGuildId = "0";
+        } else {
+          guilds.forEach((g) => {
+            const opt = document.createElement("option");
+            opt.value = g.id;
+            opt.textContent = g.connected ? `${g.name} (${g.id})` : `${g.name} [Offline]`;
+            sel.appendChild(opt);
+          });
+          if (!currentGuildId || !guilds.some((g) => g.id === currentGuildId)) {
+            currentGuildId = guilds[0].id;
+          }
+          sel.value = currentGuildId;
         }
-        sel.value = currentGuildId;
-      }
+      });
 
       await loadSelectedGuildConfig();
     } catch (_) {}
+  }
+
+  function syncAllGuildSelectors(newGuildId) {
+    currentGuildId = newGuildId;
+    const selectors = document.querySelectorAll("#guild-selector, .guild-selector-sync");
+    selectors.forEach((sel) => {
+      sel.value = currentGuildId;
+    });
+    refreshActiveModule();
+  }
+
+  async function refreshActiveModule(optView) {
+    const activeNav = document.querySelector(".nav-item.active[data-view]");
+    const view = optView || (activeNav ? activeNav.getAttribute("data-view") : "");
+    switch (view) {
+      case "servers":
+        await loadSelectedGuildConfig();
+        break;
+      case "moderation":
+        await loadModCases();
+        break;
+      case "automod":
+        await loadAutomodConfig();
+        break;
+      case "logging":
+        await loadLoggingConfig();
+        break;
+      case "greetings":
+        await loadGreetingsConfig();
+        break;
+      case "reaction-roles":
+        await loadReactionRoles();
+        break;
+      case "triggers":
+        await loadCustomTriggers();
+        break;
+    }
   }
 
   async function loadSelectedGuildConfig() {
@@ -924,6 +964,1166 @@
       }
     });
 
+  // ==========================================================================
+  // Modal Helpers
+  // ==========================================================================
+  function openModal(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.remove("hidden");
+  }
+
+  function closeModal(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.add("hidden");
+  }
+
+  function initModals() {
+    document.querySelectorAll("[data-modal]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-modal");
+        closeModal(id);
+      });
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        document.querySelectorAll(".modal-backdrop:not(.hidden)").forEach((m) => {
+          m.classList.add("hidden");
+        });
+      }
+    });
+  }
+
+  // ==========================================================================
+  // 1. Moderation Cases & Strikes Module
+  // ==========================================================================
+  async function loadModCases(filterUserId = null) {
+    const tbody = document.getElementById("mod-cases-table-body");
+    const countBadge = document.getElementById("mod-cases-count-badge");
+    const summaryBox = document.getElementById("mod-strikes-summary");
+    if (!tbody || !currentGuildId) return;
+
+    tbody.replaceChildren();
+    const loadingTr = document.createElement("tr");
+    const loadingTd = document.createElement("td");
+    loadingTd.colSpan = 8;
+    loadingTd.className = "muted text-center";
+    loadingTd.textContent = "Loading cases & strikes...";
+    loadingTr.appendChild(loadingTd);
+    tbody.appendChild(loadingTr);
+
+    try {
+      const casesUrl = filterUserId
+        ? `/api/guilds/${currentGuildId}/cases?user_id=${encodeURIComponent(filterUserId)}`
+        : `/api/guilds/${currentGuildId}/cases`;
+      const strikesUrl = filterUserId
+        ? `/api/guilds/${currentGuildId}/strikes?user_id=${encodeURIComponent(filterUserId)}`
+        : `/api/guilds/${currentGuildId}/strikes`;
+
+      const [casesRes, strikesRes] = await Promise.all([
+        apiFetch(casesUrl),
+        apiFetch(strikesUrl),
+      ]);
+
+      const cases = casesRes.cases || [];
+      if (countBadge) countBadge.textContent = `${cases.length} cases`;
+
+      if (summaryBox) {
+        if (filterUserId) {
+          const actCount = strikesRes.active_count ?? 0;
+          const totalStrikes = (strikesRes.strikes || []).length;
+          summaryBox.textContent = `User ${filterUserId} has ${actCount} active strike points (${totalStrikes} total recorded strike entries).`;
+        } else {
+          const totalStrikes = (strikesRes.strikes || []).length;
+          summaryBox.textContent = `Server has ${totalStrikes} total recorded strike entries across all members.`;
+        }
+      }
+
+      tbody.replaceChildren();
+      if (cases.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 8;
+        td.className = "muted text-center";
+        td.textContent = filterUserId
+          ? `No cases found for user ${filterUserId}.`
+          : "No moderation cases recorded for this server.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      cases.forEach((c) => {
+        const tr = document.createElement("tr");
+
+        // Case Number
+        const tdNum = document.createElement("td");
+        const badgeNum = document.createElement("span");
+        badgeNum.className = "badge badge-neutral";
+        badgeNum.textContent = `#${c.case_number}`;
+        tdNum.appendChild(badgeNum);
+        tr.appendChild(tdNum);
+
+        // Target User
+        const tdUser = document.createElement("td");
+        const codeUser = document.createElement("code");
+        codeUser.textContent = String(c.user_id);
+        tdUser.appendChild(codeUser);
+        tr.appendChild(tdUser);
+
+        // Moderator
+        const tdMod = document.createElement("td");
+        tdMod.textContent = c.moderator_id === 0 ? "System / Automod" : String(c.moderator_id);
+        tr.appendChild(tdMod);
+
+        // Action Type
+        const tdAction = document.createElement("td");
+        const badgeAction = document.createElement("span");
+        const act = (c.action_type || "").toLowerCase();
+        let badgeClass = "badge-neutral";
+        if (act === "ban" || act === "kick") badgeClass = "badge-danger";
+        else if (act === "timeout" || act === "tempban") badgeClass = "badge-warning";
+        else if (act === "softban") badgeClass = "badge-amber";
+        badgeAction.className = `badge ${badgeClass}`;
+        badgeAction.textContent = c.action_type;
+        tdAction.appendChild(badgeAction);
+        tr.appendChild(tdAction);
+
+        // Reason
+        const tdReason = document.createElement("td");
+        tdReason.textContent = c.reason || "No reason provided";
+        tr.appendChild(tdReason);
+
+        // Duration / Expires
+        const tdDuration = document.createElement("td");
+        if (c.duration_seconds) {
+          tdDuration.textContent = `${c.duration_seconds}s`;
+        } else if (c.expires_at) {
+          const exp = new Date(c.expires_at * 1000).toLocaleString();
+          tdDuration.textContent = `Until ${exp}`;
+        } else {
+          tdDuration.textContent = "Permanent / N/A";
+        }
+        tr.appendChild(tdDuration);
+
+        // Status
+        const tdStatus = document.createElement("td");
+        const badgeStatus = document.createElement("span");
+        badgeStatus.className = c.active ? "badge badge-online" : "badge badge-offline";
+        badgeStatus.textContent = c.active ? "Active" : "Inactive";
+        tdStatus.appendChild(badgeStatus);
+        tr.appendChild(tdStatus);
+
+        // Actions
+        const tdActions = document.createElement("td");
+        const actionsWrap = document.createElement("div");
+        actionsWrap.style.display = "flex";
+        actionsWrap.style.gap = "0.35rem";
+
+        const btnEdit = document.createElement("button");
+        btnEdit.type = "button";
+        btnEdit.className = "btn btn-secondary btn-sm";
+        btnEdit.textContent = "Edit Reason";
+        btnEdit.addEventListener("click", () => {
+          setValue("edit-reason-case-id", String(c.id));
+          setValue("edit-reason-text", c.reason || "");
+          openModal("modal-edit-reason");
+        });
+        actionsWrap.appendChild(btnEdit);
+
+        if (c.active) {
+          const btnDeact = document.createElement("button");
+          btnDeact.type = "button";
+          btnDeact.className = "btn btn-danger btn-sm";
+          btnDeact.textContent = "Deactivate";
+          btnDeact.addEventListener("click", async () => {
+            try {
+              await apiFetch(`/api/guilds/${currentGuildId}/cases/${c.id}`, {
+                method: "DELETE",
+              });
+              showToast(`Deactivated case #${c.case_number}.`);
+              const fUser = getValue("mod-filter-user");
+              await loadModCases(fUser || null);
+            } catch (err) {
+              showToast(`Failed to deactivate case: ${err.message}`);
+            }
+          });
+          actionsWrap.appendChild(btnDeact);
+        }
+
+        tdActions.appendChild(actionsWrap);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      tbody.replaceChildren();
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 8;
+      td.className = "muted text-center";
+      td.textContent = `Error loading cases: ${err.message}`;
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function submitManualCase() {
+    const rawUserId = getValue("mcase-user-id");
+    if (!rawUserId) {
+      showToast("Target Discord User ID is required.");
+      return;
+    }
+    const actionType = getValue("mcase-action-type") || "warn";
+    const reason = getValue("mcase-reason") || "Manual action";
+    const rawDuration = getValue("mcase-duration");
+    const durationSeconds = rawDuration ? parseInt(rawDuration, 10) : null;
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/cases`, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: rawUserId.trim(),
+          action_type: actionType,
+          reason: reason.trim(),
+          duration_seconds: durationSeconds,
+        }),
+      });
+      showToast(`Created ${actionType} case for user ${rawUserId}.`);
+      closeModal("modal-manual-case");
+      setValue("mcase-user-id", "");
+      setValue("mcase-reason", "Manual disciplinary action");
+      setValue("mcase-duration", "");
+      const fUser = getValue("mod-filter-user");
+      await loadModCases(fUser || null);
+    } catch (err) {
+      showToast(`Failed to create case: ${err.message}`);
+    }
+  }
+
+  async function submitEditReason() {
+    const caseId = getValue("edit-reason-case-id");
+    const newReason = getValue("edit-reason-text");
+    if (!caseId) return;
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/cases/${caseId}/reason`, {
+        method: "PUT",
+        body: JSON.stringify({ reason: newReason.trim() }),
+      });
+      showToast("Updated case reason.");
+      closeModal("modal-edit-reason");
+      const fUser = getValue("mod-filter-user");
+      await loadModCases(fUser || null);
+    } catch (err) {
+      showToast(`Failed to update reason: ${err.message}`);
+    }
+  }
+
+  async function triggerManualStrikeDecay() {
+    if (!currentGuildId) return;
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/strikes/decay`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      showToast(`Decayed ${res.decayed_count || 0} expired strikes.`);
+      const fUser = getValue("mod-filter-user");
+      await loadModCases(fUser || null);
+    } catch (err) {
+      showToast(`Failed to decay strikes: ${err.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // 2. Automod & Strike Ladder Module
+  // ==========================================================================
+  let currentAutomodConfig = null;
+
+  async function loadAutomodConfig() {
+    if (!currentGuildId) return;
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/automod`);
+      currentAutomodConfig = res.config || res;
+
+      setChecked("am-enabled", Boolean(currentAutomodConfig.enabled));
+      setChecked("am-ai-mod", Boolean(currentAutomodConfig.ai_moderation_enabled));
+      setChecked("am-anti-spam", Boolean(currentAutomodConfig.anti_spam_enabled));
+      setValue("am-spam-max", String(currentAutomodConfig.anti_spam_max_messages ?? 5));
+      setValue("am-spam-interval", String(currentAutomodConfig.anti_spam_interval_seconds ?? 5));
+      setChecked("am-anti-invites", Boolean(currentAutomodConfig.anti_invites_enabled));
+      setChecked("am-anti-links", Boolean(currentAutomodConfig.anti_links_enabled));
+      setChecked("am-anti-caps", Boolean(currentAutomodConfig.anti_caps_enabled));
+      setValue("am-caps-min", String(currentAutomodConfig.anti_caps_min_chars ?? 10));
+      setValue("am-caps-pct", String(currentAutomodConfig.anti_caps_percent ?? 70));
+      setValue("am-mention-max", String(currentAutomodConfig.anti_mention_max ?? 5));
+
+      setValue("am-blocked-words", (currentAutomodConfig.blocked_words || []).join(", "));
+      setValue("am-whitelisted-domains", (currentAutomodConfig.whitelisted_domains || []).join(", "));
+      setValue("am-ignored-channels", (currentAutomodConfig.ignored_channels || []).join(", "));
+      setValue("am-ignored-roles", (currentAutomodConfig.ignored_roles || []).join(", "));
+
+      const weights = currentAutomodConfig.strike_weights || {};
+      setValue("am-weight-spam", String(weights.spam ?? 2));
+      setValue("am-weight-invite", String(weights.invite ?? 3));
+      setValue("am-weight-badword", String(weights.bad_word ?? 2));
+      setValue("am-weight-caps", String(weights.caps ?? 1));
+      setValue("am-weight-mention", String(weights.mention ?? 3));
+      setValue("am-decay-hours", String(currentAutomodConfig.strike_decay_hours ?? 168));
+
+      renderLadderTable();
+    } catch (err) {
+      showToast(`Failed to load automod config: ${err.message}`);
+    }
+  }
+
+  function renderLadderTable() {
+    const tbody = document.getElementById("am-ladder-table-body");
+    if (!tbody || !currentAutomodConfig) return;
+    tbody.replaceChildren();
+
+    const ladder = currentAutomodConfig.punishment_ladder || [];
+    if (ladder.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 4;
+      td.className = "muted text-center";
+      td.textContent = "No escalation steps configured. Add a step below.";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    ladder.forEach((step, idx) => {
+      const tr = document.createElement("tr");
+
+      const tdStrikes = document.createElement("td");
+      const badgeS = document.createElement("span");
+      badgeS.className = "badge badge-neutral";
+      badgeS.textContent = `${step.strikes} Strikes`;
+      tdStrikes.appendChild(badgeS);
+      tr.appendChild(tdStrikes);
+
+      const tdAction = document.createElement("td");
+      const badgeA = document.createElement("span");
+      const act = (step.action || "").toLowerCase();
+      let bClass = "badge-neutral";
+      if (act === "ban" || act === "kick") bClass = "badge-danger";
+      else if (act === "timeout") bClass = "badge-warning";
+      badgeA.className = `badge ${bClass}`;
+      badgeA.textContent = step.action.toUpperCase();
+      tdAction.appendChild(badgeA);
+      tr.appendChild(tdAction);
+
+      const tdDur = document.createElement("td");
+      tdDur.textContent = step.duration_seconds ? `${step.duration_seconds}s` : "Permanent / N/A";
+      tr.appendChild(tdDur);
+
+      const tdDel = document.createElement("td");
+      const btnDel = document.createElement("button");
+      btnDel.type = "button";
+      btnDel.className = "btn btn-danger btn-sm";
+      btnDel.textContent = "Remove";
+      btnDel.addEventListener("click", () => {
+        currentAutomodConfig.punishment_ladder.splice(idx, 1);
+        renderLadderTable();
+      });
+      tdDel.appendChild(btnDel);
+      tr.appendChild(tdDel);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function addLadderStep() {
+    if (!currentAutomodConfig) return;
+    const strikes = parseInt(getValue("am-new-step-strikes"), 10) || 1;
+    const action = getValue("am-new-step-action") || "warn";
+    const durRaw = getValue("am-new-step-duration");
+    const duration_seconds = durRaw ? parseInt(durRaw, 10) : null;
+
+    if (!currentAutomodConfig.punishment_ladder) {
+      currentAutomodConfig.punishment_ladder = [];
+    }
+    currentAutomodConfig.punishment_ladder.push({
+      strikes,
+      action,
+      duration_seconds,
+    });
+    currentAutomodConfig.punishment_ladder.sort((a, b) => a.strikes - b.strikes);
+    renderLadderTable();
+    setValue("am-new-step-duration", "");
+  }
+
+  async function saveAutomodConfig() {
+    if (!currentGuildId || !currentAutomodConfig) return;
+
+    const parseList = (val) =>
+      val
+        .split(/[,
+]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
+    const parseNumList = (val) =>
+      parseList(val)
+        .map((s) => parseInt(s, 10))
+        .filter((n) => !isNaN(n));
+
+    const weights = {
+      spam: parseInt(getValue("am-weight-spam"), 10) || 2,
+      invite: parseInt(getValue("am-weight-invite"), 10) || 3,
+      bad_word: parseInt(getValue("am-weight-badword"), 10) || 2,
+      caps: parseInt(getValue("am-weight-caps"), 10) || 1,
+      mention: parseInt(getValue("am-weight-mention"), 10) || 3,
+    };
+
+    const payload = {
+      guild_id: parseInt(currentGuildId, 10),
+      enabled: getChecked("am-enabled"),
+      anti_spam_enabled: getChecked("am-anti-spam"),
+      anti_spam_max_messages: parseInt(getValue("am-spam-max"), 10) || 5,
+      anti_spam_interval_seconds: parseInt(getValue("am-spam-interval"), 10) || 5,
+      anti_invites_enabled: getChecked("am-anti-invites"),
+      anti_links_enabled: getChecked("am-anti-links"),
+      anti_caps_enabled: getChecked("am-anti-caps"),
+      anti_caps_min_chars: parseInt(getValue("am-caps-min"), 10) || 10,
+      anti_caps_percent: parseInt(getValue("am-caps-pct"), 10) || 70,
+      anti_mention_max: parseInt(getValue("am-mention-max"), 10) || 5,
+      blocked_words: parseList(getValue("am-blocked-words")),
+      whitelisted_domains: parseList(getValue("am-whitelisted-domains")),
+      ignored_channels: parseNumList(getValue("am-ignored-channels")),
+      ignored_roles: parseNumList(getValue("am-ignored-roles")),
+      strike_weights: weights,
+      strike_decay_hours: parseInt(getValue("am-decay-hours"), 10) || 168,
+      punishment_ladder: currentAutomodConfig.punishment_ladder || [],
+      ai_moderation_enabled: getChecked("am-ai-mod"),
+    };
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/automod`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      showToast("Automod configuration saved.");
+    } catch (err) {
+      showToast(`Failed to save automod config: ${err.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // 3. Audit Logging Module
+  // ==========================================================================
+  async function loadLoggingConfig() {
+    if (!currentGuildId) return;
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/logging`);
+      const cfg = res.config || res;
+
+      setValue("log-unified-channel", cfg.unified_channel_id ? String(cfg.unified_channel_id) : "");
+      setValue("log-mod-channel", cfg.mod_channel_id ? String(cfg.mod_channel_id) : "");
+      setValue("log-message-channel", cfg.message_channel_id ? String(cfg.message_channel_id) : "");
+      setValue("log-member-channel", cfg.member_channel_id ? String(cfg.member_channel_id) : "");
+      setValue("log-server-channel", cfg.server_channel_id ? String(cfg.server_channel_id) : "");
+      setValue("log-voice-channel", cfg.voice_channel_id ? String(cfg.voice_channel_id) : "");
+
+      setChecked("log-bots", Boolean(cfg.log_bots));
+      setValue("log-ignored-channels", (cfg.ignored_channels || []).join(", "));
+      setValue("log-ignored-roles", (cfg.ignored_roles || []).join(", "));
+
+      const colNum = cfg.embed_color || 3553599;
+      const hex = `#${colNum.toString(16).padStart(6, "0")}`;
+      setValue("log-embed-color-picker", hex);
+      setValue("log-embed-color-hex", hex);
+    } catch (err) {
+      showToast(`Failed to load logging config: ${err.message}`);
+    }
+  }
+
+  async function saveLoggingConfig() {
+    if (!currentGuildId) return;
+
+    const parseOptId = (val) => {
+      const trimmed = val ? val.trim() : "";
+      return trimmed.length > 0 ? trimmed : null;
+    };
+
+    const parseNumList = (val) =>
+      (val || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => parseInt(s, 10))
+        .filter((n) => !isNaN(n));
+
+    const hexVal = (getValue("log-embed-color-hex") || "#36393f").replace("#", "");
+    const embedColor = parseInt(hexVal, 16) || 3553599;
+
+    const payload = {
+      guild_id: parseInt(currentGuildId, 10),
+      unified_channel_id: parseOptId(getValue("log-unified-channel")),
+      mod_channel_id: parseOptId(getValue("log-mod-channel")),
+      message_channel_id: parseOptId(getValue("log-message-channel")),
+      member_channel_id: parseOptId(getValue("log-member-channel")),
+      server_channel_id: parseOptId(getValue("log-server-channel")),
+      voice_channel_id: parseOptId(getValue("log-voice-channel")),
+      ignored_channels: parseNumList(getValue("log-ignored-channels")),
+      ignored_roles: parseNumList(getValue("log-ignored-roles")),
+      log_bots: getChecked("log-bots"),
+      embed_color: embedColor,
+    };
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/logging`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      showToast("Logging configuration saved.");
+    } catch (err) {
+      showToast(`Failed to save logging config: ${err.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // 4. Greetings, Farewells & Autorole Module
+  // ==========================================================================
+  async function loadGreetingsConfig() {
+    if (!currentGuildId) return;
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/greetings`);
+      const cfg = res.config || res;
+
+      setValue("greet-welcome-channel", cfg.welcome_channel_id ? String(cfg.welcome_channel_id) : "");
+      setValue("greet-welcome-msg", cfg.welcome_message || "");
+      setValue("greet-welcome-embed", cfg.welcome_embed_json || "");
+      setChecked("greet-dm-enabled", Boolean(cfg.welcome_dm_enabled));
+      setValue("greet-dm-msg", cfg.welcome_dm_message || "");
+
+      setValue("greet-farewell-channel", cfg.farewell_channel_id ? String(cfg.farewell_channel_id) : "");
+      setValue("greet-farewell-msg", cfg.farewell_message || "");
+      setValue("greet-farewell-embed", cfg.farewell_embed_json || "");
+
+      setValue("greet-member-roles", (cfg.member_autorole_ids || []).join(", "));
+      setValue("greet-bot-roles", (cfg.bot_autorole_ids || []).join(", "));
+      setValue("greet-delay-seconds", String(cfg.autorole_delay_seconds ?? 0));
+
+      updateGreetingsEmbedPreview();
+    } catch (err) {
+      showToast(`Failed to load greetings config: ${err.message}`);
+    }
+  }
+
+  function updateGreetingsEmbedPreview() {
+    const rawEmbed = getValue("greet-welcome-embed") || "";
+    const rawMsg = getValue("greet-welcome-msg") || "";
+
+    const titleEl = document.getElementById("embed-preview-title");
+    const descEl = document.getElementById("embed-preview-desc");
+    const footerEl = document.getElementById("embed-preview-footer");
+    const barEl = document.getElementById("embed-preview-bar");
+
+    let title = "Welcome to the Server!";
+    let desc = rawMsg || "Welcome {user} to {server}!";
+    let footer = "Silas Blue • Member #1337";
+    let color = "#38bdf8";
+
+    // Check for TagScript embed directives
+    const titleMatch = rawEmbed.match(/\{title:\s*([^}]+)\}/i);
+    if (titleMatch) title = titleMatch[1].trim();
+
+    const descMatch = rawEmbed.match(/\{description:\s*([^}]+)\}/i);
+    if (descMatch) desc = descMatch[1].trim();
+
+    const footerMatch = rawEmbed.match(/\{footer:\s*([^}]+)\}/i);
+    if (footerMatch) footer = footerMatch[1].trim();
+
+    const colorMatch = rawEmbed.match(/\{color:\s*#?([0-9a-fA-F]{6})\}/i);
+    if (colorMatch) color = `#${colorMatch[1]}`;
+
+    if (titleEl) titleEl.textContent = title;
+    if (descEl) descEl.textContent = desc;
+    if (footerEl) footerEl.textContent = footer;
+    if (barEl) barEl.style.backgroundColor = color;
+  }
+
+  async function saveGreetingsConfig() {
+    if (!currentGuildId) return;
+
+    const parseOptId = (val) => {
+      const trimmed = val ? val.trim() : "";
+      return trimmed.length > 0 ? trimmed : null;
+    };
+
+    const parseNumList = (val) =>
+      (val || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => parseInt(s, 10))
+        .filter((n) => !isNaN(n));
+
+    const payload = {
+      guild_id: parseInt(currentGuildId, 10),
+      welcome_channel_id: parseOptId(getValue("greet-welcome-channel")),
+      welcome_message: getValue("greet-welcome-msg") || "",
+      welcome_embed_json: getValue("greet-welcome-embed") || "",
+      welcome_dm_enabled: getChecked("greet-dm-enabled"),
+      welcome_dm_message: getValue("greet-dm-msg") || "",
+      farewell_channel_id: parseOptId(getValue("greet-farewell-channel")),
+      farewell_message: getValue("greet-farewell-msg") || "",
+      farewell_embed_json: getValue("greet-farewell-embed") || "",
+      member_autorole_ids: parseNumList(getValue("greet-member-roles")),
+      bot_autorole_ids: parseNumList(getValue("greet-bot-roles")),
+      autorole_delay_seconds: parseInt(getValue("greet-delay-seconds"), 10) || 0,
+    };
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/greetings`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      showToast("Greetings & Autorole configuration saved.");
+    } catch (err) {
+      showToast(`Failed to save greetings config: ${err.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // 5. Reaction Roles Module
+  // ==========================================================================
+  let rrEntriesBuilder = [];
+
+  async function loadReactionRoles() {
+    const container = document.getElementById("rr-groups-container");
+    const countBadge = document.getElementById("rr-groups-count-badge");
+    if (!container || !currentGuildId) return;
+
+    container.replaceChildren();
+    const loadingP = document.createElement("p");
+    loadingP.className = "muted";
+    loadingP.textContent = "Loading reaction role groups...";
+    container.appendChild(loadingP);
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/reaction-roles`);
+      const groups = res.groups || [];
+      if (countBadge) countBadge.textContent = `${groups.length} groups`;
+
+      container.replaceChildren();
+      if (groups.length === 0) {
+        const p = document.createElement("p");
+        p.className = "muted";
+        p.textContent = "No reaction role groups created yet. Click '+ Create Reaction Role Group' to add one.";
+        container.appendChild(p);
+        return;
+      }
+
+      groups.forEach((g) => {
+        const card = document.createElement("div");
+        card.className = "rr-group-card";
+
+        // Top Row: Channel & Message
+        const topRow = document.createElement("div");
+        topRow.className = "card-header-split";
+
+        const titleDiv = document.createElement("div");
+        const titleH4 = document.createElement("strong");
+        titleH4.textContent = `Channel #${g.channel_id}`;
+        titleDiv.appendChild(titleH4);
+
+        const subP = document.createElement("div");
+        subP.className = "help-text";
+        subP.textContent = `Message ID: ${g.message_id}`;
+        titleDiv.appendChild(subP);
+        topRow.appendChild(titleDiv);
+
+        const badgesDiv = document.createElement("div");
+        badgesDiv.style.display = "flex";
+        badgesDiv.style.gap = "0.35rem";
+
+        const badgeType = document.createElement("span");
+        badgeType.className = "badge badge-cyan";
+        badgeType.textContent = (g.group_type || "normal").toUpperCase();
+        badgesDiv.appendChild(badgeType);
+
+        const badgeComp = document.createElement("span");
+        badgeComp.className = "badge badge-purple";
+        badgeComp.textContent = (g.component_type || "reaction").toUpperCase();
+        badgesDiv.appendChild(badgeComp);
+
+        topRow.appendChild(badgesDiv);
+        card.appendChild(topRow);
+
+        if (g.required_role_id) {
+          const reqDiv = document.createElement("div");
+          reqDiv.className = "status-note";
+          reqDiv.textContent = `Requires Role ID: ${g.required_role_id}`;
+          card.appendChild(reqDiv);
+        }
+
+        // Entries List
+        const entriesTitle = document.createElement("strong");
+        entriesTitle.style.fontSize = "0.82rem";
+        entriesTitle.style.color = "var(--text-secondary)";
+        entriesTitle.textContent = "Role Mappings:";
+        card.appendChild(entriesTitle);
+
+        const entriesList = document.createElement("div");
+        entriesList.className = "rr-entries-list";
+
+        const entries = g.entries || [];
+        if (entries.length === 0) {
+          const noEnt = document.createElement("span");
+          noEnt.className = "muted";
+          noEnt.textContent = "No mapped roles.";
+          entriesList.appendChild(noEnt);
+        } else {
+          entries.forEach((e) => {
+            const chip = document.createElement("span");
+            chip.className = "rr-entry-badge";
+            const label = e.button_label ? ` "${e.button_label}"` : "";
+            chip.textContent = `${e.emoji_or_custom_id} ➔ Role ${e.role_id}${label}`;
+            entriesList.appendChild(chip);
+          });
+        }
+        card.appendChild(entriesList);
+
+        // Delete Button
+        const botRow = document.createElement("div");
+        botRow.style.display = "flex";
+        botRow.style.justifyContent = "flex-end";
+        botRow.style.marginTop = "0.5rem";
+
+        const btnDel = document.createElement("button");
+        btnDel.type = "button";
+        btnDel.className = "btn btn-danger btn-sm";
+        btnDel.textContent = "Delete Group";
+        btnDel.addEventListener("click", async () => {
+          try {
+            await apiFetch(`/api/guilds/${currentGuildId}/reaction-roles/${g.id}`, {
+              method: "DELETE",
+            });
+            showToast("Reaction role group deleted.");
+            await loadReactionRoles();
+          } catch (err) {
+            showToast(`Failed to delete group: ${err.message}`);
+          }
+        });
+        botRow.appendChild(btnDel);
+        card.appendChild(botRow);
+
+        container.appendChild(card);
+      });
+    } catch (err) {
+      container.replaceChildren();
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = `Error loading reaction roles: ${err.message}`;
+      container.appendChild(p);
+    }
+  }
+
+  function addRrEntryRow(emoji = "", roleId = "", label = "", style = "primary") {
+    const list = document.getElementById("rr-entries-builder");
+    if (!list) return;
+
+    const row = document.createElement("div");
+    row.className = "form-row";
+    row.style.alignItems = "center";
+
+    const inEmoji = document.createElement("input");
+    inEmoji.type = "text";
+    inEmoji.className = "input-text";
+    inEmoji.placeholder = "Emoji / Custom ID (e.g. 👍)";
+    inEmoji.value = emoji;
+    inEmoji.style.flex = "1";
+    row.appendChild(inEmoji);
+
+    const inRole = document.createElement("input");
+    inRole.type = "text";
+    inRole.className = "input-text";
+    inRole.placeholder = "Role ID";
+    inRole.value = roleId;
+    inRole.style.flex = "1";
+    row.appendChild(inRole);
+
+    const inLabel = document.createElement("input");
+    inLabel.type = "text";
+    inLabel.className = "input-text";
+    inLabel.placeholder = "Button Label (optional)";
+    inLabel.value = label;
+    inLabel.style.flex = "1";
+    row.appendChild(inLabel);
+
+    const selStyle = document.createElement("select");
+    selStyle.className = "input-select";
+    selStyle.style.width = "110px";
+    ["primary", "secondary", "success", "danger"].forEach((st) => {
+      const opt = document.createElement("option");
+      opt.value = st;
+      opt.textContent = st;
+      if (st === style) opt.selected = true;
+      selStyle.appendChild(opt);
+    });
+    row.appendChild(selStyle);
+
+    const btnRemove = document.createElement("button");
+    btnRemove.type = "button";
+    btnRemove.className = "btn btn-danger btn-sm";
+    btnRemove.textContent = "×";
+        btnRemove.addEventListener("click", () => row.remove());
+    row.appendChild(btnRemove);
+
+    list.appendChild(row);
+  }
+
+  async function submitCreateReactionRole() {
+    const chId = getValue("rr-input-channel");
+    const msgId = getValue("rr-input-message");
+    if (!chId || !msgId) {
+      showToast("Channel ID and Message ID are required.");
+      return;
+    }
+
+    const groupType = getValue("rr-input-grouptype") || "normal";
+    const compType = getValue("rr-input-component") || "reaction";
+    const reqRoleRaw = getValue("rr-input-reqrole");
+    const requiredRoleId = reqRoleRaw ? reqRoleRaw.trim() : null;
+
+    const entries = [];
+    const rows = document.querySelectorAll("#rr-entries-builder .form-row");
+    rows.forEach((r) => {
+      const inputs = r.querySelectorAll("input");
+      const sel = r.querySelector("select");
+      if (inputs.length >= 2) {
+        const emoji = inputs[0].value.trim();
+        const role = inputs[1].value.trim();
+        const lbl = inputs[2] ? inputs[2].value.trim() : "";
+        const style = sel ? sel.value : "primary";
+        if (emoji && role) {
+          entries.push({
+            emoji_or_custom_id: emoji,
+            role_id: role,
+            button_label: lbl.length > 0 ? lbl : null,
+            button_style: style,
+          });
+        }
+      }
+    });
+
+    const payload = {
+      channel_id: chId.trim(),
+      message_id: msgId.trim(),
+      group_type: groupType,
+      required_role_id: requiredRoleId,
+      component_type: compType,
+      entries,
+    };
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/reaction-roles`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      showToast("Reaction role group created.");
+      closeModal("modal-create-rr");
+      setValue("rr-input-channel", "");
+      setValue("rr-input-message", "");
+      setValue("rr-input-reqrole", "");
+      const bList = document.getElementById("rr-entries-builder");
+      if (bList) bList.replaceChildren();
+      await loadReactionRoles();
+    } catch (err) {
+      showToast(`Failed to create reaction role group: ${err.message}`);
+    }
+  }
+
+  // ==========================================================================
+  // 6. Custom Triggers & TagScript Simulator Module
+  // ==========================================================================
+  async function loadCustomTriggers() {
+    const tbody = document.getElementById("triggers-table-body");
+    const countBadge = document.getElementById("triggers-count-badge");
+    if (!tbody || !currentGuildId) return;
+
+    tbody.replaceChildren();
+    const loadingTr = document.createElement("tr");
+    const loadingTd = document.createElement("td");
+    loadingTd.colSpan = 7;
+    loadingTd.className = "muted text-center";
+    loadingTd.textContent = "Loading custom triggers...";
+    loadingTr.appendChild(loadingTd);
+    tbody.appendChild(loadingTr);
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/triggers`);
+      const triggers = res.triggers || [];
+      if (countBadge) countBadge.textContent = `${triggers.length} triggers`;
+
+      tbody.replaceChildren();
+      if (triggers.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 7;
+        td.className = "muted text-center";
+        td.textContent = "No custom triggers configured. Click '+ Create Custom Trigger' to add one.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      triggers.forEach((t) => {
+        const tr = document.createElement("tr");
+
+        // Name
+        const tdName = document.createElement("td");
+        const codeName = document.createElement("code");
+        codeName.textContent = t.trigger_name;
+        tdName.appendChild(codeName);
+        tr.appendChild(tdName);
+
+        // Match Mode
+        const tdMode = document.createElement("td");
+        const badgeMode = document.createElement("span");
+        badgeMode.className = "badge badge-cyan";
+        badgeMode.textContent = (t.match_mode || "prefix").toUpperCase();
+        tdMode.appendChild(badgeMode);
+        tr.appendChild(tdMode);
+
+        // Response Preview
+        const tdResp = document.createElement("td");
+        const respText = t.response_template || "";
+        tdResp.textContent = respText.length > 55 ? `${respText.substring(0, 55)}...` : respText;
+        tr.appendChild(tdResp);
+
+        // Cooldown
+        const tdCd = document.createElement("td");
+        tdCd.textContent = `${t.cooldown_seconds || 0}s`;
+        tr.appendChild(tdCd);
+
+        // Options Flags
+        const tdFlags = document.createElement("td");
+        const flagsDiv = document.createElement("div");
+        flagsDiv.style.display = "flex";
+        flagsDiv.style.gap = "0.25rem";
+        if (t.delete_trigger_message) {
+          const b = document.createElement("span");
+          b.className = "badge badge-neutral";
+          b.textContent = "Del Msg";
+          flagsDiv.appendChild(b);
+        }
+        if (t.reply_in_dm) {
+          const b = document.createElement("span");
+          b.className = "badge badge-neutral";
+          b.textContent = "DM";
+          flagsDiv.appendChild(b);
+        }
+        if (!t.delete_trigger_message && !t.reply_in_dm) {
+          flagsDiv.textContent = "-";
+        }
+        tdFlags.appendChild(flagsDiv);
+        tr.appendChild(tdFlags);
+
+        // Status
+        const tdStatus = document.createElement("td");
+        const badgeEn = document.createElement("span");
+        badgeEn.className = t.enabled ? "badge badge-online" : "badge badge-offline";
+        badgeEn.textContent = t.enabled ? "Enabled" : "Disabled";
+        tdStatus.appendChild(badgeEn);
+        tr.appendChild(tdStatus);
+
+        // Actions
+        const tdActions = document.createElement("td");
+        const actionsWrap = document.createElement("div");
+        actionsWrap.style.display = "flex";
+        actionsWrap.style.gap = "0.35rem";
+
+        const btnEdit = document.createElement("button");
+        btnEdit.type = "button";
+        btnEdit.className = "btn btn-secondary btn-sm";
+        btnEdit.textContent = "Edit";
+        btnEdit.addEventListener("click", () => {
+          setValue("trig-name", t.trigger_name);
+          setValue("trig-mode", t.match_mode || "prefix");
+          setValue("trig-cooldown", String(t.cooldown_seconds || 0));
+          setChecked("trig-enabled", Boolean(t.enabled));
+          setChecked("trig-delete-msg", Boolean(t.delete_trigger_message));
+          setChecked("trig-reply-dm", Boolean(t.reply_in_dm));
+          setValue("trig-roles", (t.allowed_roles || []).join(", "));
+          setValue("trig-channels", (t.ignored_channels || []).join(", "));
+          setValue("trig-response", t.response_template || "");
+          openModal("modal-create-trigger");
+        });
+        actionsWrap.appendChild(btnEdit);
+
+        const btnDel = document.createElement("button");
+        btnDel.type = "button";
+        btnDel.className = "btn btn-danger btn-sm";
+        btnDel.textContent = "Delete";
+        btnDel.addEventListener("click", async () => {
+          try {
+            await apiFetch(`/api/guilds/${currentGuildId}/triggers/${encodeURIComponent(t.trigger_name)}`, {
+              method: "DELETE",
+            });
+            showToast(`Deleted trigger "${t.trigger_name}".`);
+            await loadCustomTriggers();
+          } catch (err) {
+            showToast(`Failed to delete trigger: ${err.message}`);
+          }
+        });
+        actionsWrap.appendChild(btnDel);
+
+        tdActions.appendChild(actionsWrap);
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      tbody.replaceChildren();
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 7;
+      td.className = "muted text-center";
+      td.textContent = `Error loading triggers: ${err.message}`;
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function submitSaveTrigger() {
+    const name = getValue("trig-name");
+    const response = getValue("trig-response");
+    if (!name || !response) {
+      showToast("Trigger Name and Response Template are required.");
+      return;
+    }
+
+    const parseNumList = (val) =>
+      (val || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map((s) => parseInt(s, 10))
+        .filter((n) => !isNaN(n));
+
+    const payload = {
+      trigger_name: name.trim(),
+      match_mode: getValue("trig-mode") || "prefix",
+      response_template: response,
+      cooldown_seconds: parseInt(getValue("trig-cooldown"), 10) || 0,
+      allowed_roles: parseNumList(getValue("trig-roles")),
+      ignored_channels: parseNumList(getValue("trig-channels")),
+      delete_trigger_message: getChecked("trig-delete-msg"),
+      reply_in_dm: getChecked("trig-reply-dm"),
+      enabled: getChecked("trig-enabled"),
+    };
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/triggers`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      showToast(`Saved trigger "${name}".`);
+      closeModal("modal-create-trigger");
+      setValue("trig-name", "");
+      setValue("trig-response", "");
+      await loadCustomTriggers();
+    } catch (err) {
+      showToast(`Failed to save trigger: ${err.message}`);
+    }
+  }
+
+  async function runTagScriptSimulator() {
+    const tmpl = getValue("tagscript-bench-input") || "";
+    const outBody = document.getElementById("tagscript-out-body");
+    const outEmbed = document.getElementById("tagscript-out-embed");
+    const noEmbed = document.getElementById("tagscript-out-no-embed");
+    const outActions = document.getElementById("tagscript-out-actions");
+    const outAi = document.getElementById("tagscript-out-ai");
+
+    if (outBody) outBody.textContent = "Evaluating TagScript template...";
+
+    try {
+      const res = await apiFetch("/api/tagscript/preview", {
+        method: "POST",
+        body: JSON.stringify({
+          template: tmpl,
+          author_name: "CyberUser#0001",
+          guild_name: "Neon Sanctuary",
+          guild_members: 1337,
+        }),
+      });
+
+      const result = res.result || {};
+      if (outBody) outBody.textContent = result.body || "(No message body rendered)";
+
+      // Embed
+      if (result.embed && outEmbed && noEmbed) {
+        outEmbed.classList.remove("hidden");
+        noEmbed.classList.add("hidden");
+
+        const tTitle = document.getElementById("ts-embed-title");
+        const tDesc = document.getElementById("ts-embed-desc");
+        const tFooter = document.getElementById("ts-embed-footer");
+        const tBar = document.getElementById("ts-embed-bar");
+
+        if (tTitle) tTitle.textContent = result.embed.title || "";
+        if (tDesc) tDesc.textContent = result.embed.description || "";
+        if (tFooter) tFooter.textContent = result.embed.footer || "";
+        if (tBar) {
+          const col = result.embed.color
+            ? `#${result.embed.color.toString(16).padStart(6, "0")}`
+            : "var(--accent-primary)";
+          tBar.style.backgroundColor = col;
+        }
+      } else if (outEmbed && noEmbed) {
+        outEmbed.classList.add("hidden");
+        noEmbed.classList.remove("hidden");
+      }
+
+      // Actions
+      if (outActions) {
+        outActions.replaceChildren();
+        const actions = result.actions || [];
+        if (actions.length === 0) {
+          const sp = document.createElement("span");
+          sp.className = "muted";
+          sp.textContent = "No action tags executed.";
+          outActions.appendChild(sp);
+        } else {
+          actions.forEach((a) => {
+            const b = document.createElement("span");
+            b.className = "badge badge-purple";
+            if (typeof a === "string") {
+              b.textContent = a;
+            } else if (a.AddReaction) {
+              b.textContent = `React: ${a.AddReaction}`;
+            } else if (a.AddRole) {
+              b.textContent = `Role(+): ${a.AddRole}`;
+            } else if (a.RemoveRole) {
+              b.textContent = `Role(-): ${a.RemoveRole}`;
+            } else {
+              b.textContent = JSON.stringify(a);
+            }
+            outActions.appendChild(b);
+          });
+        }
+      }
+
+      // AI Directive
+      if (outAi) {
+        if (result.ai_prompt) {
+          outAi.textContent = `Directive: "${result.ai_prompt}"`;
+          outAi.className = "status-note";
+        } else {
+          outAi.textContent = "None detected.";
+          outAi.className = "status-note";
+        }
+      }
+    } catch (err) {
+      if (outBody) outBody.textContent = `Evaluation failed: ${err.message}`;
+    }
+  }
+
     const guildSel = document.getElementById("guild-selector");
     if (guildSel) {
       guildSel.addEventListener("change", async () => {
@@ -931,6 +2131,92 @@
         await loadSelectedGuildConfig();
       });
     }
+
+    // Guild synchronization across all module headers
+    document.querySelectorAll(".guild-selector-sync").forEach((sel) => {
+      sel.addEventListener("change", () => syncAllGuildSelectors(sel.value));
+    });
+
+    // Modals
+    initModals();
+
+    // Module 1: Moderation
+    bindClick("btn-refresh-cases", () => {
+      const fUser = getValue("mod-filter-user");
+      loadModCases(fUser || null);
+    });
+    bindClick("btn-apply-case-filter", () => {
+      const fUser = getValue("mod-filter-user");
+      loadModCases(fUser || null);
+    });
+    bindClick("btn-reset-case-filter", () => {
+      setValue("mod-filter-user", "");
+      loadModCases();
+    });
+    bindClick("btn-open-manual-case", () => openModal("modal-manual-case"));
+    bindClick("btn-submit-manual-case", submitManualCase);
+    bindClick("btn-submit-edit-reason", submitEditReason);
+    bindClick("btn-trigger-strike-decay", triggerManualStrikeDecay);
+
+    // Module 2: Automod
+    bindClick("btn-save-automod", saveAutomodConfig);
+    bindClick("btn-add-ladder-step", addLadderStep);
+
+    // Module 3: Audit Logging
+    bindClick("btn-save-logging", saveLoggingConfig);
+    const colorPicker = document.getElementById("log-embed-color-picker");
+    const colorHex = document.getElementById("log-embed-color-hex");
+    if (colorPicker && colorHex) {
+      colorPicker.addEventListener("input", () => {
+        colorHex.value = colorPicker.value;
+      });
+      colorHex.addEventListener("input", () => {
+        if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) {
+          colorPicker.value = colorHex.value;
+        }
+      });
+    }
+
+    // Module 4: Greetings & Autorole
+    bindClick("btn-save-greetings", saveGreetingsConfig);
+    bindClick("btn-preview-welcome-embed", updateGreetingsEmbedPreview);
+    const greetEmbedIn = document.getElementById("greet-welcome-embed");
+    const greetMsgIn = document.getElementById("greet-welcome-msg");
+    if (greetEmbedIn) greetEmbedIn.addEventListener("input", updateGreetingsEmbedPreview);
+    if (greetMsgIn) greetMsgIn.addEventListener("input", updateGreetingsEmbedPreview);
+
+    // Module 5: Reaction Roles
+    bindClick("btn-refresh-rr", loadReactionRoles);
+    bindClick("btn-open-rr-modal", () => {
+      const bList = document.getElementById("rr-entries-builder");
+      if (bList) bList.replaceChildren();
+      addRrEntryRow("👍", "", "Role Button", "primary");
+      openModal("modal-create-rr");
+    });
+    bindClick("btn-add-rr-entry-row", () => addRrEntryRow());
+    bindClick("btn-submit-create-rr", submitCreateReactionRole);
+
+    // Module 6: Custom Triggers & TagScript Simulator
+    bindClick("btn-refresh-triggers", loadCustomTriggers);
+    bindClick("btn-open-trigger-modal", () => {
+      setValue("trig-name", "");
+      setValue("trig-response", "");
+      openModal("modal-create-trigger");
+    });
+    bindClick("btn-submit-save-trigger", submitSaveTrigger);
+    bindClick("btn-eval-tagscript", runTagScriptSimulator);
+
+    // TagScript Chip Insertions
+    document.querySelectorAll(".tagscript-chip[data-insert]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const token = chip.getAttribute("data-insert");
+        const area = document.getElementById("tagscript-bench-input");
+        if (area && token) {
+          area.value = area.value ? `${area.value} ${token}` : token;
+          area.focus();
+        }
+      });
+    });
 
     bindClick("btn-save-guild-config", saveGuildConfig);
     bindClick("btn-add-reddit-sub", addRedditSubscription);

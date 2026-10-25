@@ -10,7 +10,7 @@ use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -27,7 +27,11 @@ use silas_core::events::{TelemetryBus, TelemetryEvent};
 use silas_core::quota::calculate_window_period;
 use silas_discord::BotController;
 use silas_search::SearchCoordinator;
-use silas_storage::Storage;
+use silas_core::tagscript::{process_tagscript, TagScriptContext};
+use silas_storage::{
+    AutomodConfig, GreetingsConfig, LoggingConfig, NewCustomTrigger, NewModCase,
+    NewReactionRoleEntry, NewReactionRoleGroup, Storage,
+};
 use silas_updater::{BotUpdater, CURRENT_VERSION};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -79,6 +83,58 @@ pub fn build_router(state: Arc<WebState>) -> Router {
         .route(
             "/guilds/:guild_id/reddit/:sub_id",
             delete(api_delete_guild_reddit_sub),
+        )
+        .route(
+            "/guilds/:guild_id/cases",
+            get(api_list_mod_cases).post(api_create_mod_case),
+        )
+        .route(
+            "/guilds/:guild_id/cases/:case_id/reason",
+            put(api_update_mod_case_reason),
+        )
+        .route(
+            "/guilds/:guild_id/cases/:case_id",
+            delete(api_deactivate_mod_case),
+        )
+        .route(
+            "/guilds/:guild_id/strikes",
+            get(api_get_guild_strikes),
+        )
+        .route(
+            "/guilds/:guild_id/strikes/decay",
+            post(api_decay_guild_strikes),
+        )
+        .route(
+            "/guilds/:guild_id/automod",
+            get(api_get_automod_config).put(api_put_automod_config),
+        )
+        .route(
+            "/guilds/:guild_id/logging",
+            get(api_get_logging_config).put(api_put_logging_config),
+        )
+        .route(
+            "/guilds/:guild_id/greetings",
+            get(api_get_greetings_config).put(api_put_greetings_config),
+        )
+        .route(
+            "/guilds/:guild_id/reaction-roles",
+            get(api_list_reaction_roles).post(api_create_reaction_roles),
+        )
+        .route(
+            "/guilds/:guild_id/reaction-roles/:group_id",
+            delete(api_delete_reaction_role_group),
+        )
+        .route(
+            "/guilds/:guild_id/triggers",
+            get(api_list_custom_triggers).post(api_create_custom_trigger),
+        )
+        .route(
+            "/guilds/:guild_id/triggers/:trigger_name",
+            delete(api_delete_custom_trigger),
+        )
+        .route(
+            "/tagscript/preview",
+            post(api_tagscript_preview),
         )
         .route("/reddit/generate-secret", post(api_generate_reddit_secret))
         .route("/update/check", get(api_update_check))
@@ -1101,6 +1157,656 @@ async fn api_generate_reddit_secret() -> Response {
 }
 
 // ============================================================================
+// Moderation, Automod, Logging, Greetings, Reaction Roles & Triggers Endpoints
+// ============================================================================
+
+#[derive(Debug, Deserialize)]
+pub struct ModCasesQuery {
+    pub user_id: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+async fn api_list_mod_cases(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Query(query): Query<ModCasesQuery>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let cases = match query.user_id {
+        Some(user_id) => state.storage.get_mod_cases_for_user(guild_id, user_id),
+        None => state.storage.get_mod_cases_for_guild(guild_id, query.limit),
+    };
+
+    match cases {
+        Ok(c) => Json(json!({ "cases": c })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateModCaseRequest {
+    pub user_id: u64,
+    pub moderator_id: Option<u64>,
+    pub action_type: String,
+    pub reason: Option<String>,
+    pub duration_seconds: Option<i64>,
+    pub expires_at: Option<i64>,
+}
+
+async fn api_create_mod_case(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<CreateModCaseRequest>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let new_case = NewModCase {
+        guild_id,
+        user_id: payload.user_id,
+        moderator_id: payload.moderator_id.unwrap_or(0),
+        action_type: payload.action_type,
+        reason: payload
+            .reason
+            .unwrap_or_else(|| "No reason provided".to_string()),
+        duration_seconds: payload.duration_seconds,
+        created_at: None,
+        expires_at: payload.expires_at,
+    };
+
+    match state.storage.create_mod_case(&new_case) {
+        Ok(created) => (StatusCode::CREATED, Json(json!({ "case": created }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateCaseReasonRequest {
+    pub reason: String,
+}
+
+async fn api_update_mod_case_reason(
+    State(state): State<Arc<WebState>>,
+    Path((guild_id_str, case_id_str)): Path<(String, String)>,
+    Json(payload): Json<UpdateCaseReasonRequest>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+    let Ok(case_id) = case_id_str.parse::<i64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid case ID." })),
+        )
+            .into_response();
+    };
+
+    let updated_by_id = state
+        .storage
+        .update_case_reason_by_id(case_id, &payload.reason)
+        .unwrap_or(false);
+    let success = if updated_by_id {
+        true
+    } else {
+        state
+            .storage
+            .update_case_reason(guild_id, case_id, &payload.reason)
+            .unwrap_or(false)
+    };
+
+    if success {
+        Json(json!({ "success": true, "reason": payload.reason })).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Case not found." })),
+        )
+            .into_response()
+    }
+}
+
+async fn api_deactivate_mod_case(
+    State(state): State<Arc<WebState>>,
+    Path((_guild_id_str, case_id_str)): Path<(String, String)>,
+) -> Response {
+    let Ok(case_id) = case_id_str.parse::<i64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid case ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.deactivate_case(case_id) {
+        Ok(true) => Json(json!({ "success": true, "case_id": case_id })).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Case not found or already inactive." })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StrikesQuery {
+    pub user_id: Option<u64>,
+    pub limit: Option<usize>,
+}
+
+async fn api_get_guild_strikes(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Query(query): Query<StrikesQuery>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    if let Some(user_id) = query.user_id {
+        let strikes = state
+            .storage
+            .get_user_strikes(guild_id, user_id)
+            .unwrap_or_default();
+        let active_count = state
+            .storage
+            .get_active_strikes_count(guild_id, user_id)
+            .unwrap_or(0);
+        Json(json!({ "user_id": user_id, "active_count": active_count, "strikes": strikes }))
+            .into_response()
+    } else {
+        match state.storage.get_guild_strikes(guild_id, query.limit) {
+            Ok(strikes) => Json(json!({ "strikes": strikes })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("{e}") })),
+            )
+                .into_response(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DecayStrikesRequest {
+    pub cutoff_epoch: Option<i64>,
+}
+
+async fn api_decay_guild_strikes(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<DecayStrikesRequest>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let cutoff = match payload.cutoff_epoch {
+        Some(ts) => ts,
+        None => {
+            let automod_cfg = state
+                .storage
+                .get_automod_config(guild_id)
+                .unwrap_or_else(|_| AutomodConfig::default_for_guild(guild_id));
+            let hours = automod_cfg.strike_decay_hours.max(1);
+            Utc::now()
+                .timestamp()
+                .saturating_sub(hours.saturating_mul(3600))
+        }
+    };
+
+    match state.storage.decay_strikes(guild_id, cutoff) {
+        Ok(count) => Json(json!({
+            "success": true,
+            "decayed_count": count,
+            "cutoff_epoch": cutoff
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_get_automod_config(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.get_automod_config(guild_id) {
+        Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_put_automod_config(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(mut config): Json<AutomodConfig>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+    config.guild_id = guild_id;
+
+    match state.storage.save_automod_config(&config) {
+        Ok(()) => Json(json!({ "success": true, "config": config })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_get_logging_config(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.get_logging_config(guild_id) {
+        Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_put_logging_config(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(mut config): Json<LoggingConfig>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+    config.guild_id = guild_id;
+
+    match state.storage.save_logging_config(&config) {
+        Ok(()) => Json(json!({ "success": true, "config": config })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_get_greetings_config(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.get_greetings_config(guild_id) {
+        Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_put_greetings_config(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(mut config): Json<GreetingsConfig>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+    config.guild_id = guild_id;
+
+    match state.storage.save_greetings_config(&config) {
+        Ok(()) => Json(json!({ "success": true, "config": config })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateReactionRoleGroupRequest {
+    pub channel_id: u64,
+    pub message_id: u64,
+    pub group_type: Option<String>,
+    pub required_role_id: Option<u64>,
+    pub component_type: Option<String>,
+    #[serde(default)]
+    pub entries: Vec<CreateReactionRoleEntryItem>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateReactionRoleEntryItem {
+    pub emoji_or_custom_id: String,
+    pub role_id: u64,
+    pub button_label: Option<String>,
+    pub button_style: Option<String>,
+}
+
+async fn api_list_reaction_roles(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.get_guild_reaction_roles(guild_id) {
+        Ok(groups) => Json(json!({ "groups": groups })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_create_reaction_roles(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<CreateReactionRoleGroupRequest>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let new_group = NewReactionRoleGroup {
+        guild_id,
+        channel_id: payload.channel_id,
+        message_id: payload.message_id,
+        group_type: payload
+            .group_type
+            .unwrap_or_else(|| "normal".to_string()),
+        required_role_id: payload.required_role_id,
+        component_type: payload
+            .component_type
+            .unwrap_or_else(|| "reaction".to_string()),
+    };
+
+    let mut created_group = match state.storage.create_reaction_role_group(&new_group) {
+        Ok(g) => g,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("{e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    for entry in payload.entries {
+        let new_entry = NewReactionRoleEntry {
+            group_id: created_group.id,
+            emoji_or_custom_id: entry.emoji_or_custom_id,
+            role_id: entry.role_id,
+            button_label: entry.button_label,
+            button_style: entry.button_style,
+        };
+        if let Ok(saved_entry) = state.storage.add_reaction_role_entry(&new_entry) {
+            created_group.entries.push(saved_entry);
+        }
+    }
+
+    (StatusCode::CREATED, Json(json!({ "group": created_group }))).into_response()
+}
+
+async fn api_delete_reaction_role_group(
+    State(state): State<Arc<WebState>>,
+    Path((_guild_id_str, group_id_str)): Path<(String, String)>,
+) -> Response {
+    let Ok(group_id) = group_id_str.parse::<i64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid group ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.delete_reaction_role_group(group_id) {
+        Ok(true) => Json(json!({ "success": true, "group_id": group_id })).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Reaction role group not found." })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateCustomTriggerRequest {
+    pub trigger_name: String,
+    pub match_mode: Option<String>,
+    pub response_template: String,
+    pub cooldown_seconds: Option<i64>,
+    #[serde(default)]
+    pub allowed_roles: Vec<u64>,
+    #[serde(default)]
+    pub ignored_channels: Vec<u64>,
+    pub delete_trigger_message: Option<bool>,
+    pub reply_in_dm: Option<bool>,
+    pub enabled: Option<bool>,
+}
+
+async fn api_list_custom_triggers(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.list_custom_triggers(guild_id) {
+        Ok(triggers) => Json(json!({ "triggers": triggers })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_create_custom_trigger(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<CreateCustomTriggerRequest>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let new_trigger = NewCustomTrigger {
+        guild_id,
+        trigger_name: payload.trigger_name,
+        match_mode: payload.match_mode.unwrap_or_else(|| "prefix".to_string()),
+        response_template: payload.response_template,
+        cooldown_seconds: payload.cooldown_seconds.unwrap_or(0),
+        allowed_roles: payload.allowed_roles,
+        ignored_channels: payload.ignored_channels,
+        delete_trigger_message: payload.delete_trigger_message.unwrap_or(false),
+        reply_in_dm: payload.reply_in_dm.unwrap_or(false),
+        enabled: payload.enabled.unwrap_or(true),
+    };
+
+    match state.storage.create_custom_trigger(&new_trigger) {
+        Ok(trigger) => Json(json!({ "success": true, "trigger": trigger })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_delete_custom_trigger(
+    State(state): State<Arc<WebState>>,
+    Path((guild_id_str, trigger_name)): Path<(String, String)>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.delete_custom_trigger(guild_id, &trigger_name) {
+        Ok(true) => Json(json!({ "success": true, "trigger_name": trigger_name })).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Trigger not found." })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("{e}") })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TagScriptPreviewRequest {
+    pub template: String,
+    pub author_id: Option<u64>,
+    pub author_name: Option<String>,
+    pub author_avatar: Option<String>,
+    pub target_id: Option<u64>,
+    pub target_name: Option<String>,
+    pub guild_id: Option<u64>,
+    pub guild_name: Option<String>,
+    pub guild_members: Option<u64>,
+    pub channel_id: Option<u64>,
+    pub channel_name: Option<String>,
+    pub custom_vars: Option<HashMap<String, String>>,
+}
+
+async fn api_tagscript_preview(
+    Json(payload): Json<TagScriptPreviewRequest>,
+) -> Response {
+    let ctx = TagScriptContext {
+        author_id: payload.author_id.unwrap_or(123456789012345678),
+        author_name: payload
+            .author_name
+            .unwrap_or_else(|| "CyberUser#0001".to_string()),
+        author_avatar: payload.author_avatar,
+        author_created_at: Some("2026-01-01T00:00:00Z".to_string()),
+        target_id: payload.target_id.or(Some(987654321098765432)),
+        target_name: payload.target_name.or_else(|| Some("TargetMember".to_string())),
+        guild_id: payload.guild_id.or(Some(112233445566778899)),
+        guild_name: payload
+            .guild_name
+            .or_else(|| Some("Neon City Sanctuary".to_string())),
+        guild_members: payload.guild_members.or(Some(1337)),
+        channel_id: payload.channel_id.or(Some(100200300400500600)),
+        channel_name: payload.channel_name.or_else(|| Some("cyber-hub".to_string())),
+        custom_vars: payload.custom_vars.unwrap_or_default(),
+    };
+
+    let result = process_tagscript(&payload.template, &ctx);
+    Json(json!({ "result": result })).into_response()
+}
+
+// ============================================================================
 // Embedded Static Asset Serving
 // ============================================================================
 
@@ -1134,4 +1840,244 @@ async fn serve_embedded_asset(
     }
 
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use silas_storage::{
+        AutomodConfig, GreetingsConfig, LoggingConfig, NewCustomTrigger, NewModCase,
+        NewModStrike, NewReactionRoleEntry, NewReactionRoleGroup, PunishmentStep, Storage,
+    };
+
+    #[tokio::test]
+    async fn test_tagscript_preview_endpoint() {
+        let req = TagScriptPreviewRequest {
+            template: "Hello {user.name}! {delete} {title: Server Rules} {color: #38bdf8} {ai: Cyberpunk status update}".to_string(),
+            author_id: Some(111222333),
+            author_name: Some("NeonAgent".to_string()),
+            author_avatar: None,
+            target_id: None,
+            target_name: None,
+            guild_id: Some(999888777),
+            guild_name: Some("Neo-Tokyo".to_string()),
+            guild_members: Some(42),
+            channel_id: Some(555666),
+            channel_name: Some("matrix".to_string()),
+            custom_vars: None,
+        };
+
+        let response = api_tagscript_preview(Json(req)).await;
+        let (parts, body) = response.into_parts();
+        assert_eq!(parts.status, StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        let val: Value = serde_json::from_slice(&bytes).unwrap();
+
+        let result = val.get("result").unwrap();
+        let rendered_body = result.get("body").unwrap().as_str().unwrap();
+        assert!(rendered_body.contains("Hello NeonAgent!"));
+
+        let embed = result.get("embed").unwrap();
+        assert_eq!(embed.get("title").unwrap().as_str().unwrap(), "Server Rules");
+        assert_eq!(embed.get("color").unwrap().as_u64().unwrap(), 0x38bdf8);
+
+        let actions = result.get("actions").unwrap().as_array().unwrap();
+        assert!(actions.contains(&json!("DeleteMessage")));
+
+        assert_eq!(
+            result.get("ai_prompt").unwrap().as_str().unwrap(),
+            "Cyberpunk status update"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_moderation_cases_storage_and_decay() {
+        let storage = Storage::open(":memory:").unwrap();
+        let guild_id = 123456789;
+
+        // 1. Create a moderation case
+        let new_case = NewModCase {
+            guild_id,
+            user_id: 987654321,
+            moderator_id: 111111111,
+            action_type: "warn".to_string(),
+            reason: "Excessive caps".to_string(),
+            duration_seconds: None,
+            created_at: Some(1700000000),
+            expires_at: None,
+        };
+        let case = storage.create_mod_case(&new_case).unwrap();
+        assert_eq!(case.case_number, 1);
+        assert_eq!(case.reason, "Excessive caps");
+        assert!(case.active);
+
+        // 2. Fetch guild cases
+        let cases = storage.get_mod_cases_for_guild(guild_id, None).unwrap();
+        assert_eq!(cases.len(), 1);
+        assert_eq!(cases.first().unwrap().case_number, 1);
+
+        // 3. Update reason
+        let updated = storage
+            .update_case_reason_by_id(case.id, "Updated: spamming caps lock")
+            .unwrap();
+        assert!(updated);
+        let fetched = storage.get_mod_case(guild_id, 1).unwrap().unwrap();
+        assert_eq!(fetched.reason, "Updated: spamming caps lock");
+
+        // 4. Add strikes and decay
+        let strike = NewModStrike {
+            guild_id,
+            user_id: 987654321,
+            case_id: Some(case.id),
+            strike_count: 2,
+            reason: "Caps spam".to_string(),
+            created_at: Some(1700000000),
+            expires_at: Some(1700000100),
+        };
+        storage.add_strike(&strike).unwrap();
+
+        let count = storage
+            .get_active_strikes_count(guild_id, 987654321)
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let decayed = storage.decay_strikes(guild_id, 1700000500).unwrap();
+        assert_eq!(decayed, 1);
+
+        let count_after = storage
+            .get_active_strikes_count(guild_id, 987654321)
+            .unwrap();
+        assert_eq!(count_after, 0);
+
+        // 5. Deactivate case
+        let deact = storage.deactivate_case(case.id).unwrap();
+        assert!(deact);
+        let fetched_deact = storage.get_mod_case(guild_id, 1).unwrap().unwrap();
+        assert!(!fetched_deact.active);
+    }
+
+    #[tokio::test]
+    async fn test_automod_config_roundtrip() {
+        let storage = Storage::open(":memory:").unwrap();
+        let guild_id = 99887766;
+
+        let mut config = AutomodConfig::default_for_guild(guild_id);
+        config.anti_spam_max_messages = 8;
+        config.blocked_words = vec!["toxic".to_string(), "griefer".to_string()];
+        config.whitelisted_domains = vec!["trusted.org".to_string()];
+        config.punishment_ladder.push(PunishmentStep {
+            strikes: 15,
+            action: "ban".to_string(),
+            duration_seconds: None,
+        });
+
+        storage.save_automod_config(&config).unwrap();
+
+        let loaded = storage.get_automod_config(guild_id).unwrap();
+        assert_eq!(loaded.anti_spam_max_messages, 8);
+        assert_eq!(loaded.blocked_words, vec!["toxic", "griefer"]);
+        assert_eq!(loaded.whitelisted_domains, vec!["trusted.org"]);
+        assert_eq!(loaded.punishment_ladder.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_logging_and_greetings_config_roundtrip() {
+        let storage = Storage::open(":memory:").unwrap();
+        let guild_id = 77665544;
+
+        // Logging config
+        let mut log_cfg = LoggingConfig::default_for_guild(guild_id);
+        log_cfg.unified_channel_id = Some(111222);
+        log_cfg.mod_channel_id = Some(333444);
+        log_cfg.embed_color = 0x38bdf8;
+        log_cfg.log_bots = false;
+        storage.save_logging_config(&log_cfg).unwrap();
+
+        let loaded_log = storage.get_logging_config(guild_id).unwrap();
+        assert_eq!(loaded_log.unified_channel_id, Some(111222));
+        assert_eq!(loaded_log.mod_channel_id, Some(333444));
+        assert_eq!(loaded_log.embed_color, 0x38bdf8);
+        assert!(!loaded_log.log_bots);
+
+        // Greetings config
+        let mut greet_cfg = GreetingsConfig::default_for_guild(guild_id);
+        greet_cfg.welcome_channel_id = Some(555777);
+        greet_cfg.welcome_message = "Welcome {user} to the cyber hub!".to_string();
+        greet_cfg.member_autorole_ids = vec![999111, 999222];
+        greet_cfg.autorole_delay_seconds = 30;
+        storage.save_greetings_config(&greet_cfg).unwrap();
+
+        let loaded_greet = storage.get_greetings_config(guild_id).unwrap();
+        assert_eq!(loaded_greet.welcome_channel_id, Some(555777));
+        assert_eq!(
+            loaded_greet.welcome_message,
+            "Welcome {user} to the cyber hub!"
+        );
+        assert_eq!(loaded_greet.member_autorole_ids, vec![999111, 999222]);
+        assert_eq!(loaded_greet.autorole_delay_seconds, 30);
+    }
+
+    #[tokio::test]
+    async fn test_reaction_roles_and_triggers_roundtrip() {
+        let storage = Storage::open(":memory:").unwrap();
+        let guild_id = 44556677;
+
+        // Reaction roles
+        let new_group = NewReactionRoleGroup {
+            guild_id,
+            channel_id: 101010,
+            message_id: 202020,
+            group_type: "unique".to_string(),
+            required_role_id: None,
+            component_type: "button".to_string(),
+        };
+        let group = storage.create_reaction_role_group(&new_group).unwrap();
+
+        let entry = NewReactionRoleEntry {
+            group_id: group.id,
+            emoji_or_custom_id: "🚀".to_string(),
+            role_id: 888999,
+            button_label: Some("Explorer".to_string()),
+            button_style: Some("primary".to_string()),
+        };
+        storage.add_reaction_role_entry(&entry).unwrap();
+
+        let groups = storage.get_guild_reaction_roles(guild_id).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups.first().unwrap().entries.len(), 1);
+        assert_eq!(groups.first().unwrap().entries.first().unwrap().role_id, 888999);
+
+        let deleted_rr = storage.delete_reaction_role_group(group.id).unwrap();
+        assert!(deleted_rr);
+        assert!(storage
+            .get_guild_reaction_roles(guild_id)
+            .unwrap()
+            .is_empty());
+
+        // Custom triggers
+        let new_trigger = NewCustomTrigger {
+            guild_id,
+            trigger_name: "!ping".to_string(),
+            match_mode: "prefix".to_string(),
+            response_template: "Pong! Gateway latency is low.".to_string(),
+            cooldown_seconds: 5,
+            allowed_roles: vec![],
+            ignored_channels: vec![],
+            delete_trigger_message: true,
+            reply_in_dm: false,
+            enabled: true,
+        };
+        storage.create_custom_trigger(&new_trigger).unwrap();
+
+        let triggers = storage.list_custom_triggers(guild_id).unwrap();
+        assert_eq!(triggers.len(), 1);
+        assert_eq!(triggers.first().unwrap().trigger_name, "!ping");
+        assert!(triggers.first().unwrap().delete_trigger_message);
+
+        let deleted_trig = storage.delete_custom_trigger(guild_id, "!ping").unwrap();
+        assert!(deleted_trig);
+        assert!(storage.list_custom_triggers(guild_id).unwrap().is_empty());
+    }
 }

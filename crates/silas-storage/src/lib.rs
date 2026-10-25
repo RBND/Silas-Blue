@@ -1179,6 +1179,45 @@ impl Storage {
         Ok(list)
     }
 
+    /// Returns all moderation cases recorded for a guild, ordered newest first (optionally limited).
+    pub fn get_mod_cases_for_guild(
+        &self,
+        guild_id: u64,
+        limit: Option<usize>,
+    ) -> Result<Vec<ModCase>, StorageError> {
+        let conn = self.writer.lock();
+        let limit_val = limit.unwrap_or(100) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, case_number, user_id, moderator_id, action_type,
+                    reason, duration_seconds, created_at, expires_at, active
+             FROM mod_cases WHERE guild_id = ?1 ORDER BY case_number DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64, limit_val], |row| {
+            let gid_i64: i64 = row.get(1)?;
+            let uid_i64: i64 = row.get(3)?;
+            let mid_i64: i64 = row.get(4)?;
+            let active_i64: i64 = row.get(10)?;
+            Ok(ModCase {
+                id: row.get(0)?,
+                guild_id: gid_i64 as u64,
+                case_number: row.get(2)?,
+                user_id: uid_i64 as u64,
+                moderator_id: mid_i64 as u64,
+                action_type: row.get(5)?,
+                reason: row.get(6)?,
+                duration_seconds: row.get(7)?,
+                created_at: row.get(8)?,
+                expires_at: row.get(9)?,
+                active: active_i64 != 0,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
     /// Retrieves active timed cases (e.g. tempbans, timeouts) whose expiration timestamp is <= `now_timestamp`.
     pub fn get_active_expired_cases(
         &self,
@@ -1238,6 +1277,20 @@ impl Storage {
         let affected = conn.execute(
             "UPDATE mod_cases SET reason = ?1 WHERE guild_id = ?2 AND case_number = ?3",
             params![new_reason, guild_id as i64, case_number],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Updates the reason of a mod case by database row ID.
+    pub fn update_case_reason_by_id(
+        &self,
+        case_id: i64,
+        new_reason: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "UPDATE mod_cases SET reason = ?1 WHERE id = ?2",
+            params![new_reason, case_id],
         )?;
         Ok(affected > 0)
     }
@@ -1302,6 +1355,41 @@ impl Storage {
              FROM mod_strikes WHERE guild_id = ?1 AND user_id = ?2 ORDER BY id DESC",
         )?;
         let rows = stmt.query_map(params![guild_id as i64, user_id as i64], |row| {
+            let gid_i64: i64 = row.get(1)?;
+            let uid_i64: i64 = row.get(2)?;
+            let decayed_i64: i64 = row.get(8)?;
+            Ok(ModStrike {
+                id: row.get(0)?,
+                guild_id: gid_i64 as u64,
+                user_id: uid_i64 as u64,
+                case_id: row.get(3)?,
+                strike_count: row.get(4)?,
+                reason: row.get(5)?,
+                created_at: row.get(6)?,
+                expires_at: row.get(7)?,
+                decayed: decayed_i64 != 0,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Retrieves all strike records (active and decayed) for a guild, ordered newest first.
+    pub fn get_guild_strikes(
+        &self,
+        guild_id: u64,
+        limit: Option<usize>,
+    ) -> Result<Vec<ModStrike>, StorageError> {
+        let conn = self.writer.lock();
+        let limit_val = limit.unwrap_or(100) as i64;
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, user_id, case_id, strike_count, reason, created_at, expires_at, decayed
+             FROM mod_strikes WHERE guild_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64, limit_val], |row| {
             let gid_i64: i64 = row.get(1)?;
             let uid_i64: i64 = row.get(2)?;
             let decayed_i64: i64 = row.get(8)?;
