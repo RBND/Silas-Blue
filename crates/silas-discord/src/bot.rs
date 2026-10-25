@@ -12,7 +12,7 @@ use serenity::all::{
     ShardManager,
 };
 use silas_ai::ProviderManager;
-use silas_core::cache::MessageRingBuffer;
+use silas_core::cache::{MemberRoleCache, MessageRingBuffer};
 use silas_core::config::{AppSettings, GuildConfig};
 use silas_core::events::{TelemetryBus, TelemetryEvent};
 use silas_core::memory::ConversationMemory;
@@ -95,6 +95,7 @@ pub struct BotState {
     pub telemetry: TelemetryBus,
     pub pagination: Arc<PaginationStore>,
     pub message_cache: Arc<MessageRingBuffer>,
+    pub member_role_cache: Arc<MemberRoleCache>,
     pub forum_replied_threads: DashMap<u64, ForumThreadState>,
     pub channel_random_state: DashMap<u64, ChannelRandomState>,
     pub connected_guilds: Arc<DashMap<u64, ConnectedGuildInfo>>,
@@ -140,6 +141,7 @@ pub struct BotController {
     updater: Arc<BotUpdater>,
     telemetry: TelemetryBus,
     message_cache: Arc<MessageRingBuffer>,
+    member_role_cache: Arc<MemberRoleCache>,
     connected_guilds: Arc<DashMap<u64, ConnectedGuildInfo>>,
     bot_identity: Arc<RwLock<BotUserIdentity>>,
     gateway_ready: Arc<AtomicBool>,
@@ -160,6 +162,7 @@ impl BotController {
         let http = Arc::new(RwLock::new(None));
         let cache = Arc::new(RwLock::new(None));
         let message_cache = Arc::new(MessageRingBuffer::default());
+        let member_role_cache = Arc::new(MemberRoleCache::default());
 
         // Spawn background Reddit feed polling worker
         let http_getter = {
@@ -181,6 +184,7 @@ impl BotController {
             updater,
             telemetry,
             message_cache,
+            member_role_cache,
             connected_guilds: Arc::new(DashMap::new()),
             bot_identity: Arc::new(RwLock::new(BotUserIdentity::default())),
             gateway_ready: Arc::new(AtomicBool::new(false)),
@@ -282,6 +286,7 @@ impl BotController {
             telemetry: self.telemetry.clone(),
             pagination: Arc::new(PaginationStore::new()),
             message_cache: Arc::clone(&self.message_cache),
+            member_role_cache: Arc::clone(&self.member_role_cache),
             forum_replied_threads: DashMap::new(),
             channel_random_state: DashMap::new(),
             connected_guilds: Arc::clone(&self.connected_guilds),

@@ -415,6 +415,13 @@ pub async fn handle_reaction_add(
         return;
     };
 
+    // Pre-populate MemberRoleCache with current known roles to guarantee a fresh baseline
+    state.member_role_cache.insert(
+        gid,
+        user_id.get(),
+        member.roles.iter().map(|r| r.get()).collect(),
+    );
+
     let role_id = RoleId::new(entry.role_id);
 
     match group.group_type.as_str() {
@@ -497,6 +504,13 @@ pub async fn handle_reaction_remove(
         return;
     };
 
+    // Pre-populate MemberRoleCache with current known roles to guarantee a fresh baseline
+    state.member_role_cache.insert(
+        gid,
+        user_id.get(),
+        member.roles.iter().map(|r| r.get()).collect(),
+    );
+
     let role_id = RoleId::new(entry.role_id);
 
     match group.group_type.as_str() {
@@ -546,6 +560,13 @@ pub async fn handle_component_interaction(
     let Ok(member) = guild_id.member(&ctx.http, comp.user.id).await else {
         return;
     };
+
+    // Pre-populate MemberRoleCache with current known roles
+    state.member_role_cache.insert(
+        guild_id.get(),
+        comp.user.id.get(),
+        member.roles.iter().map(|r| r.get()).collect(),
+    );
 
     let role_id = RoleId::new(role_id_raw);
     let has_role = member.roles.contains(&role_id);

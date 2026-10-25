@@ -101,6 +101,63 @@ impl Default for MessageRingBuffer {
     }
 }
 
+/// Default capacity for the member roles cache (10,000 guild-user pairs).
+pub const DEFAULT_MEMBER_ROLE_CACHE_CAPACITY: usize = 10_000;
+
+type MemberRoleMap = IndexMap<(u64, u64), Vec<u64>>;
+
+/// Thread-safe in-memory cache mapping `(guild_id, user_id)` to known role IDs.
+///
+/// Prevents false "all roles added" diffing bugs when Discord emits `GuildMemberUpdate`
+/// for members not present in Serenity's internal cache.
+#[derive(Debug, Clone)]
+pub struct MemberRoleCache {
+    capacity: usize,
+    entries: Arc<RwLock<MemberRoleMap>>,
+}
+
+impl MemberRoleCache {
+    /// Creates a new `MemberRoleCache` with a fixed capacity.
+    pub fn new(capacity: usize) -> Self {
+        let cap = if capacity == 0 {
+            DEFAULT_MEMBER_ROLE_CACHE_CAPACITY
+        } else {
+            capacity
+        };
+        Self {
+            capacity: cap,
+            entries: Arc::new(RwLock::new(IndexMap::with_capacity(cap.min(1024)))),
+        }
+    }
+
+    /// Retrieves a cloned list of role IDs for `(guild_id, user_id)` if cached.
+    pub fn get(&self, guild_id: u64, user_id: u64) -> Option<Vec<u64>> {
+        self.entries.read().get(&(guild_id, user_id)).cloned()
+    }
+
+    /// Inserts or updates the known role IDs for `(guild_id, user_id)`.
+    pub fn insert(&self, guild_id: u64, user_id: u64, roles: Vec<u64>) {
+        let mut guard = self.entries.write();
+        let key = (guild_id, user_id);
+        let _ = guard.shift_remove(&key);
+        while guard.len() >= self.capacity {
+            let _ = guard.shift_remove_index(0);
+        }
+        let _ = guard.insert(key, roles);
+    }
+
+    /// Removes a member from the cache (e.g. on member leave/kick/ban).
+    pub fn remove(&self, guild_id: u64, user_id: u64) -> Option<Vec<u64>> {
+        self.entries.write().shift_remove(&(guild_id, user_id))
+    }
+}
+
+impl Default for MemberRoleCache {
+    fn default() -> Self {
+        Self::new(DEFAULT_MEMBER_ROLE_CACHE_CAPACITY)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

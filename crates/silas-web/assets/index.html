@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v6.0.4</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.5</span>
         </div>
       </div>
 
@@ -311,24 +311,12 @@
         <div class="card" style="margin-top: 1.5rem;">
           <div class="card-header-row">
             <div>
-              <h3>Reddit Integration &amp; Companion App</h3>
-              <p class="section-desc">Configure Reddit OAuth2 client credentials for background polling and webhook secrets for Devvit real-time push.</p>
+              <h3>Reddit &amp; Devvit Real-Time Push</h3>
+              <p class="section-desc">Real-time webhook signature verification for the first-party Silas Blue companion Devvit app.</p>
             </div>
           </div>
           <div class="form-grid">
-            <div class="form-group">
-              <label for="cfg-reddit-client-id">Reddit App Client ID</label>
-              <input type="text" id="cfg-reddit-client-id" class="input-text" placeholder="e.g. 14-char script app ID">
-            </div>
-            <div class="form-group">
-              <label for="cfg-reddit-client-secret">Reddit App Client Secret <span id="badge-has-reddit-secret" class="badge badge-neutral">Unset</span></label>
-              <input type="password" id="cfg-reddit-client-secret" class="input-text" placeholder="Reddit Secret" autocomplete="new-password">
-            </div>
-            <div class="form-group">
-              <label for="cfg-reddit-poll-interval">Polling Interval (Minutes)</label>
-              <input type="number" id="cfg-reddit-poll-interval" class="input-text" min="1" max="1440" value="2">
-            </div>
-            <div class="form-group">
+            <div class="form-group" style="grid-column: 1 / -1;">
               <label for="cfg-reddit-webhook-secret">Devvit Webhook Secret <span id="badge-has-reddit-webhook-secret" class="badge badge-neutral">Unset</span></label>
               <div class="form-row">
                 <input type="password" id="cfg-reddit-webhook-secret" class="input-text" placeholder="Shared secret token" autocomplete="new-password">
@@ -337,7 +325,7 @@
             </div>
           </div>
           <div class="note-box" style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted, #a0aec0);">
-            💡 <strong>Devvit Push:</strong> Subreddit moderators can install the companion Devvit app in <code>devvit/</code>. Configure your Devvit app settings with webhook URL <code>https://&lt;your-domain&gt;/api/webhooks/reddit</code> and the secret token above.
+            💡 <strong>Devvit Real-Time Relay:</strong> The official companion Devvit app delivers posts instantly to Silas Blue at <code>https://&lt;your-domain&gt;/api/webhooks/reddit</code> with zero polling overhead.
           </div>
         </div>
       </section>
@@ -1274,21 +1262,13 @@
         <!-- Global Companion Webhook Credentials (Owner-Only) -->
         <div class="card" id="reddit-global-card">
           <div class="card-header-split">
-            <h3>Global Companion Webhook &amp; App Credentials</h3>
+            <h3>Global Companion Webhook Credentials</h3>
             <span class="badge badge-warning">Owner Only</span>
           </div>
           <p class="help-text">
-            These credentials configure the global Devvit webhook signature verification. The Devvit app installed on Reddit sends events to Silas Blue at <code>https://&lt;your-domain&gt;/api/reddit/webhook</code>.
+            These credentials configure global Devvit webhook signature verification. The companion Devvit app installed on Reddit sends real-time events to Silas Blue at <code>https://&lt;your-domain&gt;/api/webhooks/reddit</code>.
           </p>
           <div class="form-grid" style="margin-top: 0.75rem;">
-            <div class="form-group">
-              <label for="reddit-global-client-id">Reddit App Client ID</label>
-              <input type="text" id="reddit-global-client-id" class="input-text" placeholder="e.g. 14-char app id">
-            </div>
-            <div class="form-group">
-              <label for="reddit-global-client-secret">Reddit App Client Secret</label>
-              <input type="password" id="reddit-global-client-secret" class="input-text" placeholder="Reddit OAuth2 Secret">
-            </div>
             <div class="form-group" style="grid-column: 1 / -1;">
               <label for="reddit-global-webhook-secret">Companion Webhook Shared Secret</label>
               <div class="input-with-btn">
@@ -1298,7 +1278,7 @@
             </div>
           </div>
           <div class="form-actions" style="margin-top: 1rem;">
-            <button type="button" id="btn-save-reddit-global" class="btn btn-primary">Save Global Reddit Settings</button>
+            <button type="button" id="btn-save-reddit-global" class="btn btn-primary">Save Global Secret</button>
           </div>
         </div>
 

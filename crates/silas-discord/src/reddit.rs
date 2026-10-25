@@ -418,6 +418,12 @@ pub fn spawn_reddit_poller(
             }
 
             for (subreddit, target_subs) in sub_map {
+                // If legacy client credentials are not configured, skip unauthenticated calls
+                // to prevent repeated 403 Forbidden errors in logs now that Reddit requires Devvit push.
+                if settings.reddit_client_id.trim().is_empty() || settings.reddit_client_secret.trim().is_empty() {
+                    continue;
+                }
+
                 let posts_res = client.fetch_new_posts(&subreddit, 20, &settings).await;
                 match posts_res {
                     Ok(mut posts) => {

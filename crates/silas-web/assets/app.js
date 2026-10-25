@@ -818,13 +818,9 @@
       setBadgeState("badge-has-remote-key", Boolean(s.remote_api_key));
       setBadgeState("badge-has-tavily", Boolean(s.tavily_api_key));
       setBadgeState("badge-has-brave", Boolean(s.brave_api_key));
-      setBadgeState("badge-has-reddit-secret", Boolean(s.reddit_client_secret));
       setBadgeState("badge-has-reddit-webhook-secret", Boolean(s.reddit_webhook_secret));
 
       setValue("cfg-owner-ids", s.bot_owner_id || "");
-      setValue("cfg-client-id", s.discord_oauth_client_id || "");
-      setValue("cfg-reddit-client-id", s.reddit_client_id || "");
-      setValue("cfg-reddit-poll-interval", s.reddit_poll_interval_minutes || 2);
       setValue("cfg-ai-provider", s.backend_type || "ollama");
       updateActiveProviderDisplay();
       setValue("cfg-ollama-url", s.ollama_url || "http://127.0.0.1:11434");
@@ -914,10 +910,6 @@
     const brvKey = getValue("cfg-brave-key");
     if (brvKey) payload.brave_api_key = brvKey;
 
-    payload.reddit_client_id = getValue("cfg-reddit-client-id");
-    payload.reddit_poll_interval_minutes = parseInt(getValue("cfg-reddit-poll-interval"), 10) || 2;
-    const redSec = getValue("cfg-reddit-client-secret");
-    if (redSec) payload.reddit_client_secret = redSec;
     const redWebhookSec = getValue("cfg-reddit-webhook-secret");
     if (redWebhookSec) payload.reddit_webhook_secret = redWebhookSec;
 
@@ -931,7 +923,6 @@
       setValue("cfg-remote-api-key", "");
       setValue("cfg-tavily-key", "");
       setValue("cfg-brave-key", "");
-      setValue("cfg-reddit-client-secret", "");
       setValue("cfg-reddit-webhook-secret", "");
       showToast("Saved global settings.");
       await loadGlobalSettings();
@@ -3183,8 +3174,6 @@
             const el = document.getElementById(id);
             if (el) el.value = val;
           };
-          setVal("reddit-global-client-id", s.reddit_client_id || "");
-          setVal("reddit-global-client-secret", s.reddit_client_secret || "");
           setVal("reddit-global-webhook-secret", s.reddit_webhook_secret || "");
         } catch (_) {}
       } else {
@@ -3290,20 +3279,16 @@
   }
 
   async function saveRedditGlobalSettings() {
-    const clientId = getValue("reddit-global-client-id");
-    const clientSecret = getValue("reddit-global-client-secret");
     const webhookSecret = getValue("reddit-global-webhook-secret");
 
     try {
       await apiFetch("/api/settings", {
         method: "PUT",
         body: JSON.stringify({
-          reddit_client_id: clientId,
-          reddit_client_secret: clientSecret,
           reddit_webhook_secret: webhookSecret,
         }),
       });
-      showToast("Saved global Reddit & Devvit settings.");
+      showToast("Saved global companion webhook secret.");
     } catch (e) {
       showToast(`Failed to save settings: ${e.message}`);
     }

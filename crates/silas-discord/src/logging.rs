@@ -19,6 +19,16 @@ const COLOR_INFO: u32 = 0x5865F2; // Discord Blurple
 const COLOR_SUCCESS: u32 = 0x57F287; // Discord Green
 const COLOR_MEMBER_LEAVE: u32 = 0x95A5A6; // Gray
 
+/// Formats a user display name as a clickable Discord profile link: `[Display (@name)](https://discord.com/users/{id})`.
+pub fn format_user_profile_link(user: &User) -> String {
+    let display_name = if let Some(ref gn) = user.global_name {
+        format!("{gn} (@{})", user.name)
+    } else {
+        format!("@{}", user.name)
+    };
+    format!("[{display_name}](https://discord.com/users/{})", user.id)
+}
+
 /// Emits an audit log entry for moderation actions (warn, timeout, kick, ban, unban, etc.).
 #[allow(clippy::too_many_arguments)]
 pub async fn log_mod_action(
@@ -236,11 +246,18 @@ pub async fn log_member_join(
         None => "Unknown".to_string(),
     };
 
+    let author_url = format!("https://discord.com/users/{}", user.id);
+    let mut author = CreateEmbedAuthor::new(format!("{} (@{})", user.global_name.as_deref().unwrap_or(&user.name), user.name))
+        .url(author_url);
+    if let Some(avatar_url) = user.avatar_url() {
+        author = author.icon_url(avatar_url);
+    }
+
     let embed = CreateEmbed::new()
         .title("Member Joined")
         .color(Colour::new(COLOR_SUCCESS))
-        .author(CreateEmbedAuthor::new(format!("{} (`{}`)", user.tag(), user.id)))
-        .field("User", format!("<@{}>", user.id), true)
+        .author(author)
+        .field("User", format_user_profile_link(user), true)
         .field("Account Created", created_field, false)
         .timestamp(now_ts)
         .footer(CreateEmbedFooter::new(format!("User ID: {}", user.id)));
@@ -273,11 +290,18 @@ pub async fn log_member_leave(
     let now_ts = Timestamp::from_unix_timestamp(Utc::now().timestamp())
         .unwrap_or_else(|_| Timestamp::now());
 
+    let author_url = format!("https://discord.com/users/{}", user.id);
+    let mut author = CreateEmbedAuthor::new(format!("{} (@{})", user.global_name.as_deref().unwrap_or(&user.name), user.name))
+        .url(author_url);
+    if let Some(avatar_url) = user.avatar_url() {
+        author = author.icon_url(avatar_url);
+    }
+
     let embed = CreateEmbed::new()
         .title("Member Left")
         .color(Colour::new(COLOR_MEMBER_LEAVE))
-        .author(CreateEmbedAuthor::new(format!("{} (`{}`)", user.tag(), user.id)))
-        .field("User", format!("{user} (`{}`)", user.id), true)
+        .author(author)
+        .field("User", format_user_profile_link(user), true)
         .timestamp(now_ts)
         .footer(CreateEmbedFooter::new(format!("User ID: {}", user.id)));
 
@@ -318,10 +342,18 @@ pub async fn log_member_update(
     let now_ts = Timestamp::from_unix_timestamp(Utc::now().timestamp())
         .unwrap_or_else(|_| Timestamp::now());
 
+    let author_url = format!("https://discord.com/users/{}", user.id);
+    let mut author = CreateEmbedAuthor::new(format!("{} (@{})", user.global_name.as_deref().unwrap_or(&user.name), user.name))
+        .url(author_url);
+    if let Some(avatar_url) = user.avatar_url() {
+        author = author.icon_url(avatar_url);
+    }
+
     let mut embed = CreateEmbed::new()
         .title("Member Updated")
         .color(Colour::new(COLOR_INFO))
-        .author(CreateEmbedAuthor::new(format!("{} (`{}`)", user.tag(), user.id)))
+        .author(author)
+        .field("User", format_user_profile_link(user), true)
         .timestamp(now_ts)
         .footer(CreateEmbedFooter::new(format!("User ID: {}", user.id)));
 

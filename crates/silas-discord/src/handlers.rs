@@ -188,6 +188,7 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
             user,
             member_data_if_available: _,
         } => {
+            state.member_role_cache.remove(guild_id.get(), user.id.get());
             crate::logging::log_member_leave(&ctx.http, &state.storage, guild_id.get(), user).await;
             crate::greetings::handle_member_remove(&ctx.http, &state.storage, guild_id.get(), user).await;
         }
@@ -196,31 +197,51 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
             new,
             event,
         } => {
+            let gid = event.guild_id.get();
+            let uid = event.user.id.get();
             let old_nick = old_if_available.as_ref().and_then(|m| m.nick.as_deref());
             let new_nick = new.as_ref().and_then(|m| m.nick.as_deref());
-            let old_roles: Vec<u64> = old_if_available
-                .as_ref()
-                .map(|m| m.roles.iter().map(|r| r.get()).collect())
-                .unwrap_or_default();
+
             let new_roles: Vec<u64> = new
                 .as_ref()
                 .map(|m| m.roles.iter().map(|r| r.get()).collect())
-                .unwrap_or_default();
-            let added_roles: Vec<u64> = new_roles
-                .iter()
-                .filter(|r| !old_roles.contains(r))
-                .copied()
-                .collect();
-            let removed_roles: Vec<u64> = old_roles
-                .iter()
-                .filter(|r| !new_roles.contains(r))
-                .copied()
-                .collect();
+                .unwrap_or_else(|| event.roles.iter().map(|r| r.get()).collect());
+
+            // Retrieve old roles from Serenity cache or our specialized MemberRoleCache.
+            // If neither has baseline role knowledge, do NOT assume old roles was empty [],
+            // which previously caused false "all roles added" diff logs.
+            let cached_baseline = old_if_available
+                .as_ref()
+                .map(|m| m.roles.iter().map(|r| r.get()).collect::<Vec<u64>>())
+                .or_else(|| state.member_role_cache.get(gid, uid));
+
+            let (added_roles, removed_roles) = match cached_baseline {
+                Some(old_roles) => {
+                    let added: Vec<u64> = new_roles
+                        .iter()
+                        .filter(|r| !old_roles.contains(r))
+                        .copied()
+                        .collect();
+                    let removed: Vec<u64> = old_roles
+                        .iter()
+                        .filter(|r| !new_roles.contains(r))
+                        .copied()
+                        .collect();
+                    (added, removed)
+                }
+                None => {
+                    // Cache miss: We don't have a reliable baseline, suppress emitting false additions.
+                    (Vec::new(), Vec::new())
+                }
+            };
+
+            // Update MemberRoleCache with latest known roles
+            state.member_role_cache.insert(gid, uid, new_roles.clone());
 
             crate::logging::log_member_update(
                 &ctx.http,
                 &state.storage,
-                event.guild_id.get(),
+                gid,
                 &event.user,
                 old_nick,
                 new_nick,
