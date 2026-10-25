@@ -1,8 +1,10 @@
 //! Standalone migration utility (`silas-migrate`) converting legacy Silas Blue v3 configurations
 //! (`config/*.json`, `config/bot_token.txt`, `config/web_secret.key`, and `state/usage.db`)
-//! into a clean-room v4 unified SQLite `STRICT` database (`data/silas.db`).
+//! or Carl.gg bot backup exports into a clean-room unified SQLite database (`data/silas.db`).
 
-use clap::Parser;
+mod carl;
+
+use clap::{Parser, Subcommand};
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 use silas_core::config::{AppSettings, GuildConfig};
@@ -14,8 +16,38 @@ use std::path::{Path, PathBuf};
 #[command(
     name = "silas-migrate",
     version = env!("CARGO_PKG_VERSION"),
-    about = "Migrate legacy Silas Blue v3 JSON/SQLite state into a unified v4 SQLite database"
+    about = "Silas Blue state and configuration migration suite"
 )]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Path to the legacy v3 root directory (for legacy v3 migration without subcommand)
+    #[arg(long, default_value = ".")]
+    from: PathBuf,
+
+    /// Destination path for the v4 unified SQLite database
+    #[arg(long, default_value = "data/silas.db")]
+    to: PathBuf,
+
+    /// Parse and validate without writing to disk
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+
+    /// Overwrite the destination database if it already exists
+    #[arg(long, default_value_t = false)]
+    force: bool,
+}
+
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Migrate legacy Silas Blue v3 JSON/SQLite state into a unified SQLite database
+    V3(MigrateArgs),
+    /// Import configuration from a Carl.gg bot JSON backup
+    ImportCarl(CarlArgs),
+}
+
+#[derive(Debug, clap::Args)]
 struct MigrateArgs {
     /// Path to the legacy v3 root directory (containing `config/` and/or `state/`)
     #[arg(long, default_value = ".")]
@@ -34,16 +66,115 @@ struct MigrateArgs {
     force: bool,
 }
 
+#[derive(Debug, clap::Args)]
+struct CarlArgs {
+    /// Path to the Carl.gg backup JSON file
+    #[arg(long)]
+    file: PathBuf,
+
+    /// Target Guild ID (e.g. 295767175426473984)
+    #[arg(long, default_value_t = 0)]
+    guild_id: u64,
+
+    /// Target SQLite database path (default: data/silas.db)
+    #[arg(long, default_value = "data/silas.db")]
+    db: PathBuf,
+
+    /// Parse and validate without writing to database
+    #[arg(long, default_value_t = false)]
+    dry_run: bool,
+}
+
 #[tokio::main]
 async fn main() {
-    if let Err(e) = run_migration().await {
+    let cli = Cli::parse();
+    let res = match cli.command {
+        Some(Commands::V3(args)) => run_v3_migration(args).await,
+        Some(Commands::ImportCarl(args)) => run_carl_import(args),
+        None => {
+            let args = MigrateArgs {
+                from: cli.from,
+                to: cli.to,
+                dry_run: cli.dry_run,
+                force: cli.force,
+            };
+            run_v3_migration(args).await
+        }
+    };
+
+    if let Err(e) = res {
         eprintln!("Migration error: {e}");
         std::process::exit(1);
     }
 }
 
-async fn run_migration() -> Result<(), Box<dyn std::error::Error>> {
-    let args = MigrateArgs::parse();
+fn run_carl_import(args: CarlArgs) -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Carl.gg Configuration Importer ===");
+    println!("Reading backup file: {}", args.file.display());
+    let raw = std::fs::read_to_string(&args.file)?;
+    let parsed = carl::parse_carl_backup(&raw, args.guild_id)?;
+    println!("Target Guild ID: {}", parsed.guild_id);
+    println!(
+        "Mode: {}",
+        if args.dry_run {
+            "DRY RUN (Simulated, no changes written)"
+        } else {
+            "LIVE EXECUTION"
+        }
+    );
+
+    let report = carl::execute_carl_import(&parsed, &args.db, args.dry_run)?;
+
+    println!("\n--- Import Summary ---");
+    println!("Guild ID: {}", report.guild_id);
+    println!(
+        "Welcome / Greetings: {} (Channel: {:?})",
+        if report.welcome_configured {
+            "Configured"
+        } else {
+            "None"
+        },
+        report.welcome_channel_id
+    );
+    println!(
+        "Logging Channel: {} (Channel: {:?})",
+        if report.logging_configured {
+            "Configured"
+        } else {
+            "None"
+        },
+        report.logging_channel_id
+    );
+    println!("Automod Blocked Words: {}", report.automod_words_count);
+    println!(
+        "Automod Ignored Channels: {}",
+        report.automod_ignored_channels_count
+    );
+    println!("Automod Ignored Roles: {}", report.automod_ignored_roles_count);
+    println!(
+        "Reaction Role Groups: {} (Entries: {})",
+        report.reaction_role_groups_count, report.reaction_role_entries_count
+    );
+    println!("Custom Triggers: {}", report.triggers_count);
+    println!("Tags: {}", report.tags_count);
+    println!(
+        "Total Trigger Rules: {}",
+        report.triggers_count + report.tags_count
+    );
+
+    if args.dry_run {
+        println!("\n[DRY RUN COMPLETE] Zero database changes applied.");
+    } else {
+        println!(
+            "\n[SUCCESS] All settings successfully imported into {}!",
+            args.db.display()
+        );
+    }
+
+    Ok(())
+}
+
+async fn run_v3_migration(args: MigrateArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     let config_dir = args.from.join("config");
     let state_dir = args.from.join("state");
