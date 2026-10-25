@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use poise::serenity_prelude as serenity;
-use regex::Regex;
 use serenity::all::{
     Colour, Context as SerenityContext, CreateEmbed, CreateEmbedFooter, CreateMessage,
     Message, Permissions, ReactionType, RoleId,
@@ -17,7 +16,7 @@ use serenity::all::{
 use silas_ai::CompletionRequest;
 use silas_core::tagscript::{evaluate_tagscript, TagScriptAction, TagScriptContext};
 use silas_core::text::truncate_chars;
-use silas_storage::NewCustomTrigger;
+use silas_storage::{NewCustomTrigger, TokenUsageEntry};
 use tracing::debug;
 
 use crate::bot::BotState;
@@ -32,6 +31,12 @@ static TRIGGER_COOLDOWNS: std::sync::OnceLock<DashMap<(u64, i64, u64), Instant>>
 
 fn cooldowns() -> &'static DashMap<(u64, i64, u64), Instant> {
     TRIGGER_COOLDOWNS.get_or_init(DashMap::new)
+}
+
+/// Prunes expired trigger cooldowns to guarantee bounded memory.
+pub fn prune_stale_cooldowns(max_age: Duration) {
+    let now = Instant::now();
+    cooldowns().retain(|_, last_used| now.duration_since(*last_used) <= max_age);
 }
 
 /// Root command group for custom triggers and tags.
@@ -99,6 +104,7 @@ pub async fn get_cmd(
         let guild_cfg = storage.get_guild_config(guild_id);
         let model = ctx.data().resolve_model_for_context(&settings, Some(&guild_cfg)).await;
 
+        let model_str = model.clone();
         let req = CompletionRequest {
             prompt: ai_prompt.clone(),
             model,
@@ -108,6 +114,18 @@ pub async fn get_cmd(
         };
 
         if let Ok(comp) = ctx.data().ai.get().send_prompt(req).await {
+            let _ = storage
+                .record_token_usage_async(TokenUsageEntry {
+                    guild_id,
+                    user_id: author_id,
+                    total_tokens: comp.usage.total_tokens,
+                    prompt_tokens: comp.usage.prompt_tokens,
+                    completion_tokens: comp.usage.completion_tokens,
+                    model: model_str,
+                    recorded_at: chrono::Utc::now().timestamp(),
+                })
+                .await;
+
             let ai_text = comp.content.trim();
             if !ai_text.is_empty() {
                 if !output.body.is_empty() {
@@ -167,7 +185,12 @@ pub async fn create_cmd(
         return Ok(());
     }
 
-    if mode == "regex" && Regex::new(&name).is_err() {
+    if mode == "regex"
+        && regex::RegexBuilder::new(&name)
+            .size_limit(64 * 1024)
+            .build()
+            .is_err()
+    {
         ctx.say("❌ Invalid regex pattern for trigger name.").await?;
         return Ok(());
     }
@@ -315,7 +338,10 @@ pub async fn evaluate_message_triggers(
             "prefix" => content.to_lowercase().starts_with(&trigger.trigger_name.to_lowercase()),
             "contains" => content.to_lowercase().contains(&trigger.trigger_name.to_lowercase()),
             "regex" => {
-                if let Ok(re) = Regex::new(&trigger.trigger_name) {
+                if let Ok(re) = regex::RegexBuilder::new(&trigger.trigger_name)
+                    .size_limit(64 * 1024)
+                    .build()
+                {
                     re.is_match(content)
                 } else {
                     false
@@ -378,6 +404,7 @@ pub async fn evaluate_message_triggers(
             let guild_cfg = state.storage.get_guild_config(gid);
             let model = state.resolve_model_for_context(&settings, Some(&guild_cfg)).await;
 
+            let model_str = model.clone();
             let req = CompletionRequest {
                 prompt: ai_prompt.clone(),
                 model,
@@ -387,6 +414,19 @@ pub async fn evaluate_message_triggers(
             };
 
             if let Ok(comp) = state.ai.get().send_prompt(req).await {
+                let _ = state
+                    .storage
+                    .record_token_usage_async(TokenUsageEntry {
+                        guild_id: gid,
+                        user_id: author_id,
+                        total_tokens: comp.usage.total_tokens,
+                        prompt_tokens: comp.usage.prompt_tokens,
+                        completion_tokens: comp.usage.completion_tokens,
+                        model: model_str,
+                        recorded_at: chrono::Utc::now().timestamp(),
+                    })
+                    .await;
+
                 let ai_text = comp.content.trim();
                 if !ai_text.is_empty() {
                     if !output.body.is_empty() {
@@ -458,7 +498,7 @@ pub async fn evaluate_message_triggers(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use regex::Regex;
 
     fn matches_pattern(pattern: &str, mode: &str, content: &str) -> bool {
         match mode {

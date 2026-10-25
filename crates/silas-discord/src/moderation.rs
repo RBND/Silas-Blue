@@ -72,6 +72,36 @@ pub fn parse_duration(s: &str) -> Option<Duration> {
     num.checked_mul(mult).map(Duration::from_secs)
 }
 
+/// Helper to verify if caller has moderator permissions or is server/bot owner.
+async fn has_mod_permission(ctx: Context<'_>, required_perm: Permissions) -> bool {
+    let Some(guild_id) = ctx.guild_id() else {
+        return false;
+    };
+    let settings = ctx.data().storage.get_app_settings();
+    let caller_id = ctx.author().id;
+
+    if !settings.bot_owner_id.trim().is_empty()
+        && caller_id.to_string() == settings.bot_owner_id.trim()
+    {
+        return true;
+    }
+
+    if let Some(guild) = ctx.serenity_context().cache.guild(guild_id) {
+        if guild.owner_id == caller_id {
+            return true;
+        }
+    }
+
+    if let Some(member) = ctx.author_member().await {
+        let perms = member.permissions.unwrap_or_else(Permissions::empty);
+        if perms.contains(Permissions::ADMINISTRATOR) || perms.contains(required_perm) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Validates permission hierarchy between caller, target member, and bot.
 async fn validate_hierarchy(
     ctx: Context<'_>,
@@ -90,7 +120,13 @@ async fn validate_hierarchy(
         return Err("You cannot moderate yourself.".to_string());
     }
 
-    // 2. Cannot moderate bot owner
+    // 2. Cannot moderate Silas bot itself
+    let bot_id = ctx.serenity_context().cache.current_user().id;
+    if target_user.id == bot_id {
+        return Err("I cannot moderate myself.".to_string());
+    }
+
+    // 3. Cannot moderate bot owner
     if !settings.bot_owner_id.trim().is_empty()
         && target_user.id.to_string() == settings.bot_owner_id.trim()
     {
@@ -115,7 +151,7 @@ async fn validate_hierarchy(
         }
     };
 
-    // 3. Cannot moderate guild owner
+    // 4. Cannot moderate guild owner
     if target_user.id == guild_owner_id {
         return Err("You cannot moderate the server owner.".to_string());
     }
@@ -124,7 +160,7 @@ async fn validate_hierarchy(
         || (!settings.bot_owner_id.trim().is_empty()
             && caller_id.to_string() == settings.bot_owner_id.trim());
 
-    // 4. Verify caller permissions
+    // 5. Verify caller permissions if not owner
     if !is_caller_owner {
         let caller_member = guild_id
             .member(&ctx.serenity_context().http, caller_id)
@@ -138,9 +174,7 @@ async fn validate_hierarchy(
             return Err("You lack the required Discord permissions to run this command.".to_string());
         }
 
-        // Fetch target member if currently in guild
         if let Ok(target_member) = guild_id.member(&ctx.serenity_context().http, target_user.id).await {
-            // Find highest role positions
             let caller_top_role = caller_member
                 .roles
                 .iter()
@@ -158,28 +192,34 @@ async fn validate_hierarchy(
             if target_top_role >= caller_top_role {
                 return Err("You cannot moderate a member with an equal or higher role than yours.".to_string());
             }
-
-            // Check bot's role vs target
-            let bot_id = ctx.serenity_context().cache.current_user().id;
-            let bot_member = guild_id
-                .member(&ctx.serenity_context().http, bot_id)
-                .await
-                .map_err(|e| format!("Failed to fetch bot member details: {e}"))?;
-
-            let bot_top_role = bot_member
-                .roles
-                .iter()
-                .filter_map(|r| role_positions.get(r).copied())
-                .max()
-                .unwrap_or(0);
-
-            if target_top_role >= bot_top_role {
-                return Err("I cannot moderate this user because their role is equal to or higher than my highest role.".to_string());
-            }
-
-            return Ok(Some(target_member));
         }
-    } else if let Ok(target_member) = guild_id.member(&ctx.serenity_context().http, target_user.id).await {
+    }
+
+    // 6. Bot hierarchy check ALWAYS applies if target member is currently in the guild
+    if let Ok(target_member) = guild_id.member(&ctx.serenity_context().http, target_user.id).await {
+        let target_top_role = target_member
+            .roles
+            .iter()
+            .filter_map(|r| role_positions.get(r).copied())
+            .max()
+            .unwrap_or(0);
+
+        let bot_member = guild_id
+            .member(&ctx.serenity_context().http, bot_id)
+            .await
+            .map_err(|e| format!("Failed to fetch bot member details: {e}"))?;
+
+        let bot_top_role = bot_member
+            .roles
+            .iter()
+            .filter_map(|r| role_positions.get(r).copied())
+            .max()
+            .unwrap_or(0);
+
+        if target_top_role >= bot_top_role {
+            return Err("I cannot moderate this user because their role is equal to or higher than my highest role.".to_string());
+        }
+
         return Ok(Some(target_member));
     }
 
@@ -298,12 +338,7 @@ pub async fn delwarn(
     let guild_id = ctx.guild_id().unwrap_or_default().get();
     let storage = &ctx.data().storage;
 
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::MODERATE_MEMBERS) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::MODERATE_MEMBERS).await {
         ctx.say("⛔ You lack `Moderate Members` permission to delete warnings.").await?;
         return Ok(());
     }
@@ -346,6 +381,12 @@ pub async fn warnings(
     ctx.defer().await?;
     let guild_id = ctx.guild_id().unwrap_or_default().get();
     let storage = &ctx.data().storage;
+
+    // Normal users may only view their own warnings; moderators can view anyone's
+    if user.id != ctx.author().id && !has_mod_permission(ctx, Permissions::MODERATE_MEMBERS).await {
+        ctx.say("⛔ You lack `Moderate Members` permission to view warnings of other members.").await?;
+        return Ok(());
+    }
 
     let cases = storage.get_mod_cases_for_user(guild_id, user.id.get())?;
     let warnings: Vec<_> = cases.into_iter().filter(|c| c.action_type == "warn").collect();
@@ -390,6 +431,12 @@ pub async fn strikes(
     ctx.defer().await?;
     let guild_id = ctx.guild_id().unwrap_or_default().get();
     let storage = &ctx.data().storage;
+
+    // Normal users may only view their own strikes; moderators can view anyone's
+    if user.id != ctx.author().id && !has_mod_permission(ctx, Permissions::MODERATE_MEMBERS).await {
+        ctx.say("⛔ You lack `Moderate Members` permission to view strikes of other members.").await?;
+        return Ok(());
+    }
 
     let active_count = storage.get_active_strikes_count(guild_id, user.id.get())?;
     let strike_entries = storage.get_user_strikes(guild_id, user.id.get())?;
@@ -888,12 +935,7 @@ pub async fn unban(
     let guild_id = ctx.guild_id().unwrap_or_default().get();
     let reason = reason.unwrap_or_else(|| "No reason provided".to_string());
 
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::BAN_MEMBERS) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::BAN_MEMBERS).await {
         ctx.say("⛔ You lack `Ban Members` permission to unban users.").await?;
         return Ok(());
     }
@@ -952,12 +994,7 @@ pub async fn purge(
     #[description = "Filter deletion to a specific user"] user: Option<User>,
 ) -> Result<(), CommandError> {
     ctx.defer().await?;
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::MANAGE_MESSAGES) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::MANAGE_MESSAGES).await {
         ctx.say("⛔ You lack `Manage Messages` permission to purge messages.").await?;
         return Ok(());
     }
@@ -1004,12 +1041,7 @@ pub async fn slowmode(
     #[description = "Slowmode duration in seconds (0 to disable, max 21600)"] seconds: u16,
 ) -> Result<(), CommandError> {
     ctx.defer().await?;
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::MANAGE_CHANNELS) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::MANAGE_CHANNELS).await {
         ctx.say("⛔ You lack `Manage Channels` permission.").await?;
         return Ok(());
     }
@@ -1034,12 +1066,7 @@ pub async fn lock(
     #[description = "Optional channel to lock (defaults to current)"] channel: Option<ChannelId>,
 ) -> Result<(), CommandError> {
     ctx.defer().await?;
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::MANAGE_CHANNELS) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::MANAGE_CHANNELS).await {
         ctx.say("⛔ You lack `Manage Channels` permission.").await?;
         return Ok(());
     }
@@ -1069,12 +1096,7 @@ pub async fn unlock(
     #[description = "Optional channel to unlock (defaults to current)"] channel: Option<ChannelId>,
 ) -> Result<(), CommandError> {
     ctx.defer().await?;
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::MANAGE_CHANNELS) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::MANAGE_CHANNELS).await {
         ctx.say("⛔ You lack `Manage Channels` permission.").await?;
         return Ok(());
     }
@@ -1104,12 +1126,7 @@ pub async fn reason(
     let guild_id = ctx.guild_id().unwrap_or_default().get();
     let storage = &ctx.data().storage;
 
-    let member = match ctx.author_member().await {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let perms = member.permissions.unwrap_or_else(Permissions::empty);
-    if !perms.contains(Permissions::MODERATE_MEMBERS) && !perms.contains(Permissions::ADMINISTRATOR) {
+    if !has_mod_permission(ctx, Permissions::MODERATE_MEMBERS).await {
         ctx.say("⛔ You lack `Moderate Members` permission.").await?;
         return Ok(());
     }
@@ -1133,6 +1150,11 @@ pub async fn case(
     ctx.defer().await?;
     let guild_id = ctx.guild_id().unwrap_or_default().get();
     let storage = &ctx.data().storage;
+
+    if !has_mod_permission(ctx, Permissions::MODERATE_MEMBERS).await {
+        ctx.say("⛔ You lack `Moderate Members` permission to inspect moderation cases.").await?;
+        return Ok(());
+    }
 
     let case = match storage.get_mod_case(guild_id, case_number)? {
         Some(c) => c,

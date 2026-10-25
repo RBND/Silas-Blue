@@ -591,14 +591,20 @@
     const listEl = document.getElementById("reddit-subs-list");
     if (!listEl) return;
     if (!guildId || guildId === "0") {
-      listEl.innerHTML = '<p class="muted">Select a connected server to manage subreddit subscriptions.</p>';
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "Select a connected server to manage subreddit subscriptions.";
+      listEl.replaceChildren(p);
       return;
     }
     try {
       const res = await apiFetch(`/api/guilds/${guildId}/reddit`);
       const subs = res.subscriptions || [];
       if (subs.length === 0) {
-        listEl.innerHTML = '<p class="muted">No active subreddit monitors for this server.</p>';
+        const p = document.createElement("p");
+        p.className = "muted";
+        p.textContent = "No active subreddit monitors for this server.";
+        listEl.replaceChildren(p);
         return;
       }
       listEl.replaceChildren();
@@ -608,13 +614,30 @@
         row.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.8rem; background: var(--bg-card-sub, #1f2430); border-radius: 6px; margin-bottom: 0.5rem;";
         
         const details = document.createElement("div");
+        const strong = document.createElement("strong");
+        strong.textContent = `r/${sub.subreddit}`;
+        details.appendChild(strong);
+
+        const arrow = document.createTextNode(" ➔ ");
+        details.appendChild(arrow);
+
+        const chBadge = document.createElement("span");
+        chBadge.className = "badge badge-neutral";
+        chBadge.textContent = `<#${sub.channel_id}>`;
+        details.appendChild(chBadge);
+
         let filters = [];
         if (sub.filter_nsfw) filters.push("NSFW Filter");
         if (sub.min_score > 0) filters.push(`Min Score: ${sub.min_score}`);
         if (sub.flair_filter) filters.push(`Flairs: ${sub.flair_filter}`);
         if (sub.keyword_filter) filters.push(`Keywords: ${sub.keyword_filter}`);
-        
-        details.innerHTML = `<strong>r/${sub.subreddit}</strong> ➔ <span class="badge badge-neutral">&lt;#${sub.channel_id}&gt;</span> ${filters.length ? `<small style="margin-left: 0.5rem; opacity: 0.8">(${filters.join(", ")})</small>` : ""}`;
+
+        if (filters.length > 0) {
+          const small = document.createElement("small");
+          small.style.cssText = "margin-left: 0.5rem; opacity: 0.8";
+          small.textContent = `(${filters.join(", ")})`;
+          details.appendChild(small);
+        }
         
         const delBtn = document.createElement("button");
         delBtn.type = "button";
@@ -636,7 +659,10 @@
         listEl.appendChild(row);
       });
     } catch (e) {
-      listEl.innerHTML = `<p class="muted">Error loading subscriptions: ${e.message}</p>`;
+      const p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = `Error loading subscriptions: ${e.message}`;
+      listEl.replaceChildren(p);
     }
   }
 

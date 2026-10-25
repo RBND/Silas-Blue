@@ -83,9 +83,16 @@ impl SpamRateTracker {
         // Periodically prune stale keys to keep memory bounded (after lock is released)
         let prev_prune = self.last_pruned.load(Ordering::Relaxed);
         let now_sec = Utc::now().timestamp() as u64;
-        if now_sec.saturating_sub(prev_prune) > 300 {
-            self.last_pruned.store(now_sec, Ordering::Relaxed);
-            self.history.retain(|_, v| !v.is_empty());
+        if now_sec.saturating_sub(prev_prune) > 300
+            && self
+                .last_pruned
+                .compare_exchange(prev_prune, now_sec, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+        {
+            self.history.retain(|_, v| {
+                v.retain(|t| now.duration_since(*t) <= Duration::from_secs(300));
+                !v.is_empty()
+            });
         }
 
         is_spam
@@ -118,7 +125,21 @@ pub async fn evaluate_message(
         return None;
     }
 
-    let guild_id = msg.guild_id?.get();
+    let guild_id_serenity = msg.guild_id?;
+    let guild_id = guild_id_serenity.get();
+
+    // Never moderate bot owner or server owner
+    let settings = state.storage.get_app_settings();
+    if !settings.bot_owner_id.trim().is_empty()
+        && msg.author.id.to_string() == settings.bot_owner_id.trim()
+    {
+        return None;
+    }
+    if let Some(guild) = _ctx.cache.guild(guild_id_serenity) {
+        if guild.owner_id == msg.author.id {
+            return None;
+        }
+    }
     let config = state.storage.get_automod_config(guild_id).ok()?;
 
     if !config.enabled {

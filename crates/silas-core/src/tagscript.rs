@@ -697,4 +697,29 @@ mod tests {
         let output_long = process_tagscript(&long_str, &ctx);
         assert!(output_long.body.len() <= MAX_OUTPUT_LENGTH);
     }
+
+    #[test]
+    fn test_adversarial_multibyte_and_malformed_tags() {
+        let ctx = sample_ctx();
+
+        // 1. Multibyte UTF-8 boundary overflow test
+        let emoji_str = "🦀🔥✨🚀".repeat(1200); // 4800 emojis, each 4 bytes = 19200 bytes
+        let out_emoji = process_tagscript(&emoji_str, &ctx);
+        assert!(out_emoji.body.len() <= MAX_OUTPUT_LENGTH);
+        assert!(std::str::from_utf8(out_emoji.body.as_bytes()).is_ok());
+
+        // 2. Unbalanced and malformed braces
+        let malformed = "{{{{{{{{unclosed tags without matching close";
+        let out_malformed = process_tagscript(malformed, &ctx);
+        assert!(out_malformed.body.contains("unclosed"));
+
+        let inverted = "}}}}}}close without open{{{{{";
+        let out_inv = process_tagscript(inverted, &ctx);
+        assert_eq!(out_inv.body, "}}}}}}close without open{{{{{");
+
+        // 3. Empty tag and empty condition
+        let empty_tags = "{}{if():}{any:}{ai:}";
+        let out_empty = process_tagscript(empty_tags, &ctx);
+        assert!(out_empty.body.is_empty() || out_empty.body.contains("{}"));
+    }
 }

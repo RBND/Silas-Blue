@@ -24,6 +24,79 @@ use crate::bot::BotState;
 pub type CommandError = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Arc<BotState>, CommandError>;
 
+/// Validates role hierarchy for role assignment operations (reaction roles / button roles).
+async fn validate_role_assignment_hierarchy(
+    ctx: Context<'_>,
+    role: &Role,
+) -> Result<(), &'static str> {
+    let Some(guild_id) = ctx.guild_id() else {
+        return Err("This command can only be used inside a Discord server.");
+    };
+
+    let settings = ctx.data().storage.get_app_settings();
+    let caller_id = ctx.author().id;
+
+    let (guild_owner_id, role_positions) = {
+        let cache = &ctx.serenity_context().cache;
+        match cache.guild(guild_id) {
+            Some(g) => {
+                let owner = g.owner_id;
+                let mut map = std::collections::HashMap::new();
+                for (id, r) in &g.roles {
+                    let _ = map.insert(*id, r.position);
+                }
+                (owner, map)
+            }
+            None => {
+                return Err("Failed to retrieve server metadata from cache.");
+            }
+        }
+    };
+
+    let is_caller_owner = caller_id == guild_owner_id
+        || (!settings.bot_owner_id.trim().is_empty()
+            && caller_id.to_string() == settings.bot_owner_id.trim());
+
+    // 1. Caller role hierarchy check (if caller is not server/bot owner)
+    if !is_caller_owner {
+        let caller_member = guild_id
+            .member(&ctx.serenity_context().http, caller_id)
+            .await
+            .map_err(|_| "Failed to fetch caller member details.")?;
+
+        let caller_top_role = caller_member
+            .roles
+            .iter()
+            .filter_map(|r| role_positions.get(r).copied())
+            .max()
+            .unwrap_or(0);
+
+        if role.position >= caller_top_role {
+            return Err("You cannot configure a reaction role for a role equal to or higher than your highest role.");
+        }
+    }
+
+    // 2. Bot role hierarchy check (bot must be able to assign this role)
+    let bot_id = ctx.serenity_context().cache.current_user().id;
+    let bot_member = guild_id
+        .member(&ctx.serenity_context().http, bot_id)
+        .await
+        .map_err(|_| "Failed to fetch bot member details.")?;
+
+    let bot_top_role = bot_member
+        .roles
+        .iter()
+        .filter_map(|r| role_positions.get(r).copied())
+        .max()
+        .unwrap_or(0);
+
+    if role.position >= bot_top_role {
+        return Err("I cannot manage this role because it is equal to or higher than my highest role.");
+    }
+
+    Ok(())
+}
+
 /// Root command group for reaction roles.
 #[poise::command(
     slash_command,
@@ -57,6 +130,11 @@ pub async fn add(
     let perms = member.permissions.unwrap_or_else(Permissions::empty);
     if !perms.contains(Permissions::MANAGE_ROLES) && !perms.contains(Permissions::ADMINISTRATOR) {
         ctx.say("⛔ You lack `Manage Roles` permission.").await?;
+        return Ok(());
+    }
+
+    if let Err(err_msg) = validate_role_assignment_hierarchy(ctx, &role).await {
+        ctx.say(format!("⛔ {err_msg}")).await?;
         return Ok(());
     }
 
@@ -147,6 +225,11 @@ pub async fn button_cmd(
     let perms = member.permissions.unwrap_or_else(Permissions::empty);
     if !perms.contains(Permissions::MANAGE_ROLES) && !perms.contains(Permissions::ADMINISTRATOR) {
         ctx.say("⛔ You lack `Manage Roles` permission.").await?;
+        return Ok(());
+    }
+
+    if let Err(err_msg) = validate_role_assignment_hierarchy(ctx, &role).await {
+        ctx.say(format!("⛔ {err_msg}")).await?;
         return Ok(());
     }
 
