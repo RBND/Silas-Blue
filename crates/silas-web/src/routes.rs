@@ -1241,9 +1241,11 @@ async fn api_list_guild_grants(
 
 #[derive(Deserialize)]
 struct UpsertGrantRequest {
+    #[serde(alias = "principal_type")]
     target_type: String,
+    #[serde(alias = "principal_id", with = "silas_core::snowflake")]
     target_id: u64,
-    #[serde(default)]
+    #[serde(default, alias = "principal_name")]
     target_name: Option<String>,
     domain: String,
     access_level: String,
@@ -2024,7 +2026,9 @@ async fn api_list_mod_cases(
 
 #[derive(Debug, Deserialize)]
 pub struct CreateModCaseRequest {
+    #[serde(with = "silas_core::snowflake")]
     pub user_id: u64,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub moderator_id: Option<u64>,
     pub action_type: String,
     pub reason: Option<String>,
@@ -2658,9 +2662,12 @@ async fn api_put_greetings_config(
 
 #[derive(Debug, Deserialize)]
 pub struct CreateReactionRoleGroupRequest {
+    #[serde(with = "silas_core::snowflake")]
     pub channel_id: u64,
+    #[serde(with = "silas_core::snowflake")]
     pub message_id: u64,
     pub group_type: Option<String>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub required_role_id: Option<u64>,
     pub component_type: Option<String>,
     #[serde(default)]
@@ -2670,6 +2677,7 @@ pub struct CreateReactionRoleGroupRequest {
 #[derive(Debug, Deserialize)]
 pub struct CreateReactionRoleEntryItem {
     pub emoji_or_custom_id: String,
+    #[serde(with = "silas_core::snowflake")]
     pub role_id: u64,
     pub button_label: Option<String>,
     pub button_style: Option<String>,
@@ -2870,9 +2878,9 @@ pub struct CreateCustomTriggerRequest {
     pub match_mode: Option<String>,
     pub response_template: String,
     pub cooldown_seconds: Option<i64>,
-    #[serde(default)]
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub allowed_roles: Vec<u64>,
-    #[serde(default)]
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_channels: Vec<u64>,
     pub delete_trigger_message: Option<bool>,
     pub reply_in_dm: Option<bool>,
@@ -3038,14 +3046,19 @@ async fn api_delete_custom_trigger(
 #[derive(Debug, Deserialize)]
 pub struct TagScriptPreviewRequest {
     pub template: String,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub author_id: Option<u64>,
     pub author_name: Option<String>,
     pub author_avatar: Option<String>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub target_id: Option<u64>,
     pub target_name: Option<String>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub guild_id: Option<u64>,
     pub guild_name: Option<String>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub guild_members: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub channel_id: Option<u64>,
     pub channel_name: Option<String>,
     pub custom_vars: Option<HashMap<String, String>>,
@@ -3350,5 +3363,49 @@ mod tests {
         let deleted_trig = storage.delete_custom_trigger(guild_id, "!ping").unwrap();
         assert!(deleted_trig);
         assert!(storage.list_custom_triggers(guild_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_logging_and_greetings_config_json_with_string_snowflakes() -> Result<(), Box<dyn std::error::Error>> {
+        let json_payload = r#"{
+            "guild_id": "295767175426473984",
+            "unified_channel_id": "1341857943265509426",
+            "mod_channel_id": null,
+            "message_channel_id": "",
+            "member_channel_id": null,
+            "server_channel_id": null,
+            "voice_channel_id": null,
+            "ignored_channels": ["295767175426473984", "497607738227097600"],
+            "ignored_roles": ["803771637493137458"],
+            "log_bots": true,
+            "embed_color": 3553599
+        }"#;
+
+        let parsed: LoggingConfig = serde_json::from_str(json_payload)?;
+        assert_eq!(parsed.guild_id, 295767175426473984);
+        assert_eq!(parsed.unified_channel_id, Some(1341857943265509426));
+        assert_eq!(parsed.message_channel_id, None);
+        assert_eq!(parsed.ignored_channels, vec![295767175426473984, 497607738227097600]);
+        assert_eq!(parsed.ignored_roles, vec![803771637493137458]);
+
+        let greet_payload = r#"{
+            "guild_id": "295767175426473984",
+            "welcome_channel_id": "295767175426473984",
+            "welcome_message": "Welcome {user}!",
+            "welcome_embed_json": "",
+            "welcome_dm_enabled": false,
+            "welcome_dm_message": "",
+            "farewell_channel_id": null,
+            "farewell_message": "",
+            "farewell_embed_json": "",
+            "member_autorole_ids": ["803771637493137458"],
+            "bot_autorole_ids": [],
+            "autorole_delay_seconds": 0
+        }"#;
+
+        let parsed_greet: GreetingsConfig = serde_json::from_str(greet_payload)?;
+        assert_eq!(parsed_greet.welcome_channel_id, Some(295767175426473984));
+        assert_eq!(parsed_greet.member_autorole_ids, vec![803771637493137458]);
+        Ok(())
     }
 }

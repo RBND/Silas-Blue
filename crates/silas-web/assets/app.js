@@ -2321,10 +2321,10 @@
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
-    const parseNumList = (val) =>
-      parseList(val)
-        .map((s) => parseInt(s, 10))
-        .filter((n) => !isNaN(n));
+    const parseSnowflakeList = (val) => {
+      if (Array.isArray(val)) return val.map(String).map((s) => s.trim()).filter((s) => s.length > 0);
+      return parseList(val);
+    };
 
     const weights = {
       spam: parseInt(getValue("am-weight-spam"), 10) || 2,
@@ -2335,7 +2335,7 @@
     };
 
     const payload = {
-      guild_id: parseInt(currentGuildId, 10),
+      guild_id: String(currentGuildId),
       enabled: getChecked("am-enabled"),
       anti_spam_enabled: getChecked("am-anti-spam"),
       anti_spam_max_messages: parseInt(getValue("am-spam-max"), 10) || 5,
@@ -2348,8 +2348,8 @@
       anti_mention_max: parseInt(getValue("am-mention-max"), 10) || 5,
       blocked_words: parseList(getValue("am-blocked-words")),
       whitelisted_domains: parseList(getValue("am-whitelisted-domains")),
-      ignored_channels: parseNumList(getValue("am-ignored-channels")),
-      ignored_roles: parseNumList(getValue("am-ignored-roles")),
+      ignored_channels: parseSnowflakeList(comboboxRegistry.has("am-ignored-channels") ? comboboxRegistry.get("am-ignored-channels").getValue() : getValue("am-ignored-channels")),
+      ignored_roles: parseSnowflakeList(comboboxRegistry.has("am-ignored-roles") ? comboboxRegistry.get("am-ignored-roles").getValue() : getValue("am-ignored-roles")),
       strike_weights: weights,
       strike_decay_hours: parseInt(getValue("am-decay-hours"), 10) || 168,
       punishment_ladder: currentAutomodConfig.punishment_ladder || [],
@@ -2403,31 +2403,31 @@
     if (!currentGuildId) return;
 
     const parseOptId = (val) => {
-      const trimmed = val ? val.trim() : "";
+      const trimmed = val ? String(val).trim() : "";
       return trimmed.length > 0 ? trimmed : null;
     };
 
-    const parseNumList = (val) =>
-      (val || "")
+    const parseSnowflakeList = (val) => {
+      if (Array.isArray(val)) return val.map(String).map((s) => s.trim()).filter((s) => s.length > 0);
+      return (val || "")
         .split(",")
         .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .map((s) => parseInt(s, 10))
-        .filter((n) => !isNaN(n));
+        .filter((s) => s.length > 0);
+    };
 
     const hexVal = (getValue("log-embed-color-hex") || "#36393f").replace("#", "");
     const embedColor = parseInt(hexVal, 16) || 3553599;
 
     const payload = {
-      guild_id: parseInt(currentGuildId, 10),
+      guild_id: String(currentGuildId),
       unified_channel_id: parseOptId(getValue("log-unified-channel")),
       mod_channel_id: parseOptId(getValue("log-mod-channel")),
       message_channel_id: parseOptId(getValue("log-message-channel")),
       member_channel_id: parseOptId(getValue("log-member-channel")),
       server_channel_id: parseOptId(getValue("log-server-channel")),
       voice_channel_id: parseOptId(getValue("log-voice-channel")),
-      ignored_channels: parseNumList(getValue("log-ignored-channels")),
-      ignored_roles: parseNumList(getValue("log-ignored-roles")),
+      ignored_channels: parseSnowflakeList(comboboxRegistry.has("log-ignored-channels") ? comboboxRegistry.get("log-ignored-channels").getValue() : getValue("log-ignored-channels")),
+      ignored_roles: parseSnowflakeList(comboboxRegistry.has("log-ignored-roles") ? comboboxRegistry.get("log-ignored-roles").getValue() : getValue("log-ignored-roles")),
       log_bots: getChecked("log-bots"),
       embed_color: embedColor,
     };
@@ -2511,20 +2511,20 @@
     if (!currentGuildId) return;
 
     const parseOptId = (val) => {
-      const trimmed = val ? val.trim() : "";
+      const trimmed = val ? String(val).trim() : "";
       return trimmed.length > 0 ? trimmed : null;
     };
 
-    const parseNumList = (val) =>
-      (val || "")
+    const parseSnowflakeList = (val) => {
+      if (Array.isArray(val)) return val.map(String).map((s) => s.trim()).filter((s) => s.length > 0);
+      return (val || "")
         .split(",")
         .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .map((s) => parseInt(s, 10))
-        .filter((n) => !isNaN(n));
+        .filter((s) => s.length > 0);
+    };
 
     const payload = {
-      guild_id: parseInt(currentGuildId, 10),
+      guild_id: String(currentGuildId),
       welcome_channel_id: parseOptId(getValue("greet-welcome-channel")),
       welcome_message: getValue("greet-welcome-msg") || "",
       welcome_embed_json: getValue("greet-welcome-embed") || "",
@@ -2533,8 +2533,8 @@
       farewell_channel_id: parseOptId(getValue("greet-farewell-channel")),
       farewell_message: getValue("greet-farewell-msg") || "",
       farewell_embed_json: getValue("greet-farewell-embed") || "",
-      member_autorole_ids: parseNumList(getValue("greet-member-roles")),
-      bot_autorole_ids: parseNumList(getValue("greet-bot-roles")),
+      member_autorole_ids: parseSnowflakeList(comboboxRegistry.has("greet-member-roles") ? comboboxRegistry.get("greet-member-roles").getValue() : getValue("greet-member-roles")),
+      bot_autorole_ids: parseSnowflakeList(comboboxRegistry.has("greet-bot-roles") ? comboboxRegistry.get("greet-bot-roles").getValue() : getValue("greet-bot-roles")),
       autorole_delay_seconds: parseInt(getValue("greet-delay-seconds"), 10) || 0,
     };
 
@@ -2768,7 +2768,7 @@
       if (emoji && role) {
         entries.push({
           emoji_or_custom_id: emoji,
-          role_id: role,
+          role_id: String(role).trim(),
           button_label: lbl.length > 0 ? lbl : null,
           button_style: style,
         });
@@ -2776,10 +2776,10 @@
     });
 
     const payload = {
-      channel_id: chId.trim(),
-      message_id: msgId.trim(),
+      channel_id: String(chId).trim(),
+      message_id: String(msgId).trim(),
       group_type: groupType,
-      required_role_id: requiredRoleId,
+      required_role_id: requiredRoleId && String(requiredRoleId).trim().length > 0 ? String(requiredRoleId).trim() : null,
       component_type: compType,
       entries,
     };
@@ -2962,21 +2962,21 @@
       return;
     }
 
-    const parseNumList = (val) =>
-      (val || "")
+    const parseSnowflakeList = (val) => {
+      if (Array.isArray(val)) return val.map(String).map((s) => s.trim()).filter((s) => s.length > 0);
+      return (val || "")
         .split(",")
         .map((s) => s.trim())
-        .filter((s) => s.length > 0)
-        .map((s) => parseInt(s, 10))
-        .filter((n) => !isNaN(n));
+        .filter((s) => s.length > 0);
+    };
 
     const payload = {
       trigger_name: name.trim(),
       match_mode: getValue("trig-mode") || "prefix",
       response_template: response,
       cooldown_seconds: parseInt(getValue("trig-cooldown"), 10) || 0,
-      allowed_roles: parseNumList(getValue("trig-roles")),
-      ignored_channels: parseNumList(getValue("trig-channels")),
+      allowed_roles: parseSnowflakeList(comboboxRegistry.has("trig-roles") ? comboboxRegistry.get("trig-roles").getValue() : getValue("trig-roles")),
+      ignored_channels: parseSnowflakeList(comboboxRegistry.has("trig-channels") ? comboboxRegistry.get("trig-channels").getValue() : getValue("trig-channels")),
       delete_trigger_message: getChecked("trig-delete-msg"),
       reply_in_dm: getChecked("trig-reply-dm"),
       enabled: getChecked("trig-enabled"),

@@ -131,6 +131,7 @@ pub struct PunishmentStep {
 /// Comprehensive configuration for a server's automod engine.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AutomodConfig {
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
     pub enabled: bool,
     pub anti_spam_enabled: bool,
@@ -144,7 +145,9 @@ pub struct AutomodConfig {
     pub anti_mention_max: i64,
     pub blocked_words: Vec<String>,
     pub whitelisted_domains: Vec<String>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_channels: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_roles: Vec<u64>,
     pub strike_weights: HashMap<String, i64>,
     pub strike_decay_hours: i64,
@@ -209,14 +212,23 @@ impl AutomodConfig {
 /// Multi-channel event logging routing and filtering configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoggingConfig {
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub unified_channel_id: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub mod_channel_id: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub message_channel_id: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub member_channel_id: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub server_channel_id: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub voice_channel_id: Option<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_channels: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_roles: Vec<u64>,
     pub log_bots: bool,
     pub embed_color: u32,
@@ -243,16 +255,21 @@ impl LoggingConfig {
 /// Greetings, farewells, and autorole configuration for a server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GreetingsConfig {
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub welcome_channel_id: Option<u64>,
     pub welcome_message: String,
     pub welcome_embed_json: String,
     pub welcome_dm_enabled: bool,
     pub welcome_dm_message: String,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub farewell_channel_id: Option<u64>,
     pub farewell_message: String,
     pub farewell_embed_json: String,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub member_autorole_ids: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub bot_autorole_ids: Vec<u64>,
     pub autorole_delay_seconds: i64,
 }
@@ -280,10 +297,14 @@ impl GreetingsConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReactionRoleGroup {
     pub id: i64,
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
+    #[serde(with = "silas_core::snowflake")]
     pub channel_id: u64,
+    #[serde(with = "silas_core::snowflake")]
     pub message_id: u64,
     pub group_type: String,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub required_role_id: Option<u64>,
     pub component_type: String,
     pub entries: Vec<ReactionRoleEntry>,
@@ -295,6 +316,7 @@ pub struct ReactionRoleEntry {
     pub id: i64,
     pub group_id: i64,
     pub emoji_or_custom_id: String,
+    #[serde(with = "silas_core::snowflake")]
     pub role_id: u64,
     pub button_label: Option<String>,
     pub button_style: Option<String>,
@@ -303,10 +325,14 @@ pub struct ReactionRoleEntry {
 /// Parameters for creating a new reaction role group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewReactionRoleGroup {
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
+    #[serde(with = "silas_core::snowflake")]
     pub channel_id: u64,
+    #[serde(with = "silas_core::snowflake")]
     pub message_id: u64,
     pub group_type: String,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub required_role_id: Option<u64>,
     pub component_type: String,
 }
@@ -316,6 +342,7 @@ pub struct NewReactionRoleGroup {
 pub struct NewReactionRoleEntry {
     pub group_id: i64,
     pub emoji_or_custom_id: String,
+    #[serde(with = "silas_core::snowflake")]
     pub role_id: u64,
     pub button_label: Option<String>,
     pub button_style: Option<String>,
@@ -325,12 +352,15 @@ pub struct NewReactionRoleEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomTrigger {
     pub id: i64,
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
     pub trigger_name: String,
     pub match_mode: String,
     pub response_template: String,
     pub cooldown_seconds: i64,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub allowed_roles: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_channels: Vec<u64>,
     pub delete_trigger_message: bool,
     pub reply_in_dm: bool,
@@ -340,12 +370,15 @@ pub struct CustomTrigger {
 /// Parameters for creating or updating a custom trigger.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewCustomTrigger {
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
     pub trigger_name: String,
     pub match_mode: String,
     pub response_template: String,
     pub cooldown_seconds: i64,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub allowed_roles: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
     pub ignored_channels: Vec<u64>,
     pub delete_trigger_message: bool,
     pub reply_in_dm: bool,
@@ -356,8 +389,10 @@ pub struct NewCustomTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAccessGrant {
     pub id: i64,
+    #[serde(with = "silas_core::snowflake")]
     pub guild_id: u64,
     pub target_type: String, // "role" or "user"
+    #[serde(with = "silas_core::snowflake")]
     pub target_id: u64,
     pub target_name: String,
     pub domain: String,
@@ -370,7 +405,9 @@ pub struct WebAccessGrant {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebAuditLog {
     pub id: i64,
+    #[serde(default, with = "silas_core::snowflake::opt")]
     pub guild_id: Option<u64>,
+    #[serde(with = "silas_core::snowflake")]
     pub user_id: u64,
     pub user_name: String,
     pub domain: String,
