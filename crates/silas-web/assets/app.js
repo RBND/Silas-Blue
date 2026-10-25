@@ -7,7 +7,7 @@
   const CSRF_HEADER = { "X-Requested-With": "SilasBlue-SPA" };
   let remotePresets = [];
   let currentGuildId = null;
-  let telemetryLogs = [];
+    let telemetryLogs = [];
   let wsConnection = null;
 
   // ==========================================================================
@@ -823,172 +823,357 @@
     if (el) el.addEventListener("click", handler);
   }
 
-  document.addEventListener("DOMContentLoaded", async () => {
-    initTheme();
-    initLoginPage();
-
-    if (!document.getElementById("view-overview")) {
-      return;
-    }
-
-    initNavigation();
-
-    try {
-      const sess = await apiFetch("/api/auth/session");
-      if (!sess.authenticated) {
+  function wireAllEventListeners() {
+      // Wire buttons
+      bindClick("logout-btn", async () => {
+        await apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
         window.location.href = "/login.html";
+      });
+  
+      bindClick("btn-bot-start", async () => {
+        try {
+          await apiFetch("/api/bot/start", { method: "POST" });
+          showToast("Started Discord bot.");
+          await refreshStatus();
+        } catch (e) {
+          showToast(`Failed to start bot: ${e.message}`);
+        }
+      });
+  
+      bindClick("btn-bot-stop", async () => {
+        try {
+          await apiFetch("/api/bot/stop", { method: "POST" });
+          showToast("Stopped Discord bot.");
+          await refreshStatus();
+        } catch (e) {
+          showToast(`Failed to stop bot: ${e.message}`);
+        }
+      });
+  
+      bindClick("btn-bot-restart", async () => {
+        try {
+          await apiFetch("/api/bot/restart", { method: "POST" });
+          showToast("Restarted Discord bot.");
+          await refreshStatus();
+        } catch (e) {
+          showToast(`Failed to restart bot: ${e.message}`);
+        }
+      });
+  
+      bindClick("btn-save-global-name", async () => {
+        const username = getValue("bot-global-username");
+        try {
+          const res = await apiFetch("/api/bot/profile", {
+            method: "POST",
+            body: JSON.stringify({ username }),
+          });
+          showToast(`Updated global username to ${res.username}.`);
+        } catch (e) {
+          showToast(e.message);
+        }
+      });
+  
+      bindClick("btn-clear-logs", () => {
+        telemetryLogs = [];
+        renderTelemetryConsole();
+      });
+  
+      const filterEl = document.getElementById("log-filter-level");
+      if (filterEl) filterEl.addEventListener("change", renderTelemetryConsole);
+  
+      bindClick("btn-save-global-settings", saveGlobalSettings);
+      bindClick("btn-refresh-models", () =>
+        refreshModelDropdown(getValue("cfg-active-model"), true)
+      );
+  
+      const presetSel = document.getElementById("cfg-remote-preset");
+      if (presetSel) {
+        presetSel.addEventListener("change", () => {
+          const found = remotePresets.find(
+            (p) => p.name.toLowerCase().includes(presetSel.value.toLowerCase())
+          );
+          if (found && found.base_url) {
+            setValue("cfg-remote-base-url", found.base_url);
+            setValue("cfg-remote-model", found.default_model);
+          }
+        });
+      }
+  
+      bindClick("btn-detect-local", async () => {
+        const box = document.getElementById("detect-report-box");
+        if (!box) return;
+        box.classList.remove("hidden");
+        box.textContent = "Probing local Ollama and llama.cpp endpoints...";
+        try {
+          const res = await apiFetch("/api/ai/detect", { method: "POST" });
+          const p = res.probe;
+          box.textContent = `Ollama (${p.ollama_url}): online=${p.ollama_online} | llama.cpp (${p.llamacpp_url}): online=${p.llamacpp_online}`;
+        } catch (e) {
+          box.textContent = `Probe failed: ${e.message}`;
+        }
+      });
+  
+      bindClick("btn-pull-model", async () => {
+        const model = getValue("pull-model-input");
+        if (!model) return;
+        const box = document.getElementById("pull-progress-status");
+        if (box) {
+          box.classList.remove("hidden");
+          box.textContent = `Starting model pull for ${model}...`;
+        }
+        try {
+          const res = await apiFetch("/api/ai/pull", {
+            method: "POST",
+            body: JSON.stringify({ model }),
+          });
+          if (box) box.textContent = res.message || `Successfully pulled ${model}.`;
+          showToast(`Successfully pulled ${model}.`);
+          await refreshModelDropdown(model, true);
+        } catch (e) {
+          showToast(`Model pull failed: ${e.message}`);
+        }
+      });
+  
+      bindClick("btn-test-search", async () => {
+        const query = getValue("test-search-query");
+        const container = document.getElementById("test-search-results");
+        if (!query || !container) return;
+        container.replaceChildren();
+        try {
+          const res = await apiFetch("/api/search/test", {
+            method: "POST",
+            body: JSON.stringify({ query }),
+          });
+          (res.results || []).forEach((item) => {
+            const row = document.createElement("div");
+            row.className = "usage-row";
+            const title = document.createElement("strong");
+            title.textContent = item.title;
+            const urlSpan = document.createElement("span");
+            urlSpan.textContent = item.url;
+            row.appendChild(title);
+            row.appendChild(urlSpan);
+            container.appendChild(row);
+          });
+        } catch (e) {
+          showToast(`Search test failed: ${e.message}`);
+        }
+      });
+      const guildSel = document.getElementById("guild-selector");
+      if (guildSel) {
+        guildSel.addEventListener("change", async () => {
+          currentGuildId = guildSel.value;
+          await loadSelectedGuildConfig();
+        });
+      }
+  
+      // Guild synchronization across all module headers
+      document.querySelectorAll(".guild-selector-sync").forEach((sel) => {
+        sel.addEventListener("change", () => syncAllGuildSelectors(sel.value));
+      });
+  
+      // Modals
+  
+      // Module 1: Moderation
+      bindClick("btn-refresh-cases", () => {
+        const fUser = getValue("mod-filter-user");
+        loadModCases(fUser || null);
+      });
+      bindClick("btn-apply-case-filter", () => {
+        const fUser = getValue("mod-filter-user");
+        loadModCases(fUser || null);
+      });
+      bindClick("btn-reset-case-filter", () => {
+        setValue("mod-filter-user", "");
+        loadModCases();
+      });
+      bindClick("btn-open-manual-case", () => openModal("modal-manual-case"));
+      bindClick("btn-submit-manual-case", submitManualCase);
+      bindClick("btn-submit-edit-reason", submitEditReason);
+      bindClick("btn-trigger-strike-decay", triggerManualStrikeDecay);
+  
+      // Module 2: Automod
+      bindClick("btn-save-automod", saveAutomodConfig);
+      bindClick("btn-add-ladder-step", addLadderStep);
+  
+      // Module 3: Audit Logging
+      bindClick("btn-save-logging", saveLoggingConfig);
+      const colorPicker = document.getElementById("log-embed-color-picker");
+      const colorHex = document.getElementById("log-embed-color-hex");
+      if (colorPicker && colorHex) {
+        colorPicker.addEventListener("input", () => {
+          colorHex.value = colorPicker.value;
+        });
+        colorHex.addEventListener("input", () => {
+          if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) {
+            colorPicker.value = colorHex.value;
+          }
+        });
+      }
+  
+      // Module 4: Greetings & Autorole
+      bindClick("btn-save-greetings", saveGreetingsConfig);
+      bindClick("btn-preview-welcome-embed", updateGreetingsEmbedPreview);
+      const greetEmbedIn = document.getElementById("greet-welcome-embed");
+      const greetMsgIn = document.getElementById("greet-welcome-msg");
+      if (greetEmbedIn) greetEmbedIn.addEventListener("input", updateGreetingsEmbedPreview);
+      if (greetMsgIn) greetMsgIn.addEventListener("input", updateGreetingsEmbedPreview);
+  
+      // Module 5: Reaction Roles
+      bindClick("btn-refresh-rr", loadReactionRoles);
+      bindClick("btn-open-rr-modal", () => {
+        const bList = document.getElementById("rr-entries-builder");
+        if (bList) bList.replaceChildren();
+        addRrEntryRow("👍", "", "Role Button", "primary");
+        openModal("modal-create-rr");
+      });
+      bindClick("btn-add-rr-entry-row", () => addRrEntryRow());
+      bindClick("btn-submit-create-rr", submitCreateReactionRole);
+  
+      // Module 6: Custom Triggers & TagScript Simulator
+      bindClick("btn-refresh-triggers", loadCustomTriggers);
+      bindClick("btn-open-trigger-modal", () => {
+        setValue("trig-name", "");
+        setValue("trig-response", "");
+        openModal("modal-create-trigger");
+      });
+      bindClick("btn-submit-save-trigger", submitSaveTrigger);
+      bindClick("btn-eval-tagscript", runTagScriptSimulator);
+  
+      // TagScript Chip Insertions
+      document.querySelectorAll(".tagscript-chip[data-insert]").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          const token = chip.getAttribute("data-insert");
+          const area = document.getElementById("tagscript-bench-input");
+          if (area && token) {
+            area.value = area.value ? `${area.value} ${token}` : token;
+            area.focus();
+          }
+        });
+      });
+  
+      bindClick("btn-save-guild-config", saveGuildConfig);
+      bindClick("btn-add-reddit-sub", addRedditSubscription);
+  
+      bindClick("btn-gen-reddit-secret", async () => {
+        try {
+          const res = await apiFetch("/api/reddit/generate-secret", { method: "POST" });
+          if (res.secret) {
+            setValue("cfg-reddit-webhook-secret", res.secret);
+            showToast("Generated new webhook secret (click Save Global Settings to persist).");
+          }
+        } catch (e) {
+          showToast(`Failed to generate secret: ${e.message}`);
+        }
+      });
+  
+      bindClick("btn-reset-guild-quota", async () => {
+        if (!currentGuildId) return;
+        try {
+          await apiFetch(`/api/guilds/${currentGuildId}/quota/reset`, {
+            method: "POST",
+          });
+          showToast("Reset server token usage for current window.");
+          await loadSelectedGuildConfig();
+        } catch (e) {
+          showToast(e.message);
+        }
+      });
+  
+      bindClick("btn-clear-guild-memory", async () => {
+        if (!currentGuildId) return;
+        try {
+          await apiFetch(`/api/guilds/${currentGuildId}/memory/clear`, {
+            method: "POST",
+          });
+          showToast("Cleared volatile conversation memory for server.");
+        } catch (e) {
+          showToast(e.message);
+        }
+      });
+  
+      bindClick("btn-check-update", async () => {
+        const ch = getValue("update-channel-select") || "stable";
+        const box = document.getElementById("update-status-box");
+        if (!box) return;
+        box.textContent = "Checking GitHub Releases...";
+        try {
+          const res = await apiFetch(`/api/update/check?channel=${encodeURIComponent(ch)}`);
+          if (res.error) {
+            box.textContent = `Update check error: ${res.error}`;
+          } else if (res.update_available) {
+            box.textContent = `Update available: v${res.latest_version} (Current: v${res.current_version}, Asset: ${res.binary_asset_name || "none"})`;
+          } else {
+            box.textContent = `Up to date: v${res.current_version} (${res.channel} channel).`;
+          }
+        } catch (e) {
+          box.textContent = `Error: ${e.message}`;
+        }
+      });
+  
+      bindClick("btn-apply-update", async () => {
+        const ch = getValue("update-channel-select") || "stable";
+        const box = document.getElementById("update-status-box");
+        if (box) box.textContent = "Verifying Ed25519 signature, SHA-256 digest, and staging update...";
+        try {
+          const res = await apiFetch("/api/update/apply", {
+            method: "POST",
+            body: JSON.stringify({ channel: ch }),
+          });
+          if (box) box.textContent = res.message || "Update staged.";
+          showToast("Update verified and applied.");
+          await loadSnapshots();
+        } catch (e) {
+          if (box) box.textContent = `Update failed: ${e.message}`;
+          showToast(e.message);
+        }
+      });
+  
+      bindClick("btn-create-snapshot", async () => {
+        try {
+          await apiFetch("/api/update/snapshot", { method: "POST" });
+          showToast("Created local database & binary snapshot.");
+          await loadSnapshots();
+        } catch (e) {
+          showToast(e.message);
+        }
+      });
+  
+      bindClick("btn-copy-invite", async () => {
+        const url = getValue("invite-url-display");
+        if (url && navigator.clipboard) {
+          await navigator.clipboard.writeText(url);
+          showToast("Copied invite URL to clipboard.");
+        }
+      });
+  }
+
+  async function checkSessionAndLoadData() {
+    try {
+      const sess = await apiFetch('/api/auth/session');
+      if (!sess.authenticated) {
+        window.location.href = '/login.html';
         return;
       }
-      setText("session-username", sess.username || "Admin");
+      setText('session-username', sess.username || 'Admin');
     } catch (_) {
+      window.location.href = '/login.html';
       return;
     }
 
-    await Promise.all([
-      refreshStatus(),
-      loadGlobalSettings(),
-      loadGuildList(),
-      loadSnapshots(),
-    ]);
+    try {
+      await Promise.allSettled([
+        refreshStatus(),
+        loadGlobalSettings(),
+        loadGuildList(),
+        loadSnapshots(),
+      ]);
+    } catch (_) {}
 
     connectTelemetryWebSocket();
     setInterval(refreshStatus, 10000);
+  }
 
-    // Wire buttons
-    bindClick("logout-btn", async () => {
-      await apiFetch("/auth/logout", { method: "POST" }).catch(() => {});
-      window.location.href = "/login.html";
-    });
-
-    bindClick("btn-bot-start", async () => {
-      try {
-        await apiFetch("/api/bot/start", { method: "POST" });
-        showToast("Started Discord bot.");
-        await refreshStatus();
-      } catch (e) {
-        showToast(`Failed to start bot: ${e.message}`);
-      }
-    });
-
-    bindClick("btn-bot-stop", async () => {
-      try {
-        await apiFetch("/api/bot/stop", { method: "POST" });
-        showToast("Stopped Discord bot.");
-        await refreshStatus();
-      } catch (e) {
-        showToast(`Failed to stop bot: ${e.message}`);
-      }
-    });
-
-    bindClick("btn-bot-restart", async () => {
-      try {
-        await apiFetch("/api/bot/restart", { method: "POST" });
-        showToast("Restarted Discord bot.");
-        await refreshStatus();
-      } catch (e) {
-        showToast(`Failed to restart bot: ${e.message}`);
-      }
-    });
-
-    bindClick("btn-save-global-name", async () => {
-      const username = getValue("bot-global-username");
-      try {
-        const res = await apiFetch("/api/bot/profile", {
-          method: "POST",
-          body: JSON.stringify({ username }),
-        });
-        showToast(`Updated global username to ${res.username}.`);
-      } catch (e) {
-        showToast(e.message);
-      }
-    });
-
-    bindClick("btn-clear-logs", () => {
-      telemetryLogs = [];
-      renderTelemetryConsole();
-    });
-
-    const filterEl = document.getElementById("log-filter-level");
-    if (filterEl) filterEl.addEventListener("change", renderTelemetryConsole);
-
-    bindClick("btn-save-global-settings", saveGlobalSettings);
-    bindClick("btn-refresh-models", () =>
-      refreshModelDropdown(getValue("cfg-active-model"), true)
-    );
-
-    const presetSel = document.getElementById("cfg-remote-preset");
-    if (presetSel) {
-      presetSel.addEventListener("change", () => {
-        const found = remotePresets.find(
-          (p) => p.name.toLowerCase().includes(presetSel.value.toLowerCase())
-        );
-        if (found && found.base_url) {
-          setValue("cfg-remote-base-url", found.base_url);
-          setValue("cfg-remote-model", found.default_model);
-        }
-      });
-    }
-
-    bindClick("btn-detect-local", async () => {
-      const box = document.getElementById("detect-report-box");
-      if (!box) return;
-      box.classList.remove("hidden");
-      box.textContent = "Probing local Ollama and llama.cpp endpoints...";
-      try {
-        const res = await apiFetch("/api/ai/detect", { method: "POST" });
-        const p = res.probe;
-        box.textContent = `Ollama (${p.ollama_url}): online=${p.ollama_online} | llama.cpp (${p.llamacpp_url}): online=${p.llamacpp_online}`;
-      } catch (e) {
-        box.textContent = `Probe failed: ${e.message}`;
-      }
-    });
-
-    bindClick("btn-pull-model", async () => {
-      const model = getValue("pull-model-input");
-      if (!model) return;
-      const box = document.getElementById("pull-progress-status");
-      if (box) {
-        box.classList.remove("hidden");
-        box.textContent = `Starting model pull for ${model}...`;
-      }
-      try {
-        const res = await apiFetch("/api/ai/pull", {
-          method: "POST",
-          body: JSON.stringify({ model }),
-        });
-        if (box) box.textContent = res.message || `Successfully pulled ${model}.`;
-        showToast(`Successfully pulled ${model}.`);
-        await refreshModelDropdown(model, true);
-      } catch (e) {
-        showToast(`Model pull failed: ${e.message}`);
-      }
-    });
-
-    bindClick("btn-test-search", async () => {
-      const query = getValue("test-search-query");
-      const container = document.getElementById("test-search-results");
-      if (!query || !container) return;
-      container.replaceChildren();
-      try {
-        const res = await apiFetch("/api/search/test", {
-          method: "POST",
-          body: JSON.stringify({ query }),
-        });
-        (res.results || []).forEach((item) => {
-          const row = document.createElement("div");
-          row.className = "usage-row";
-          const title = document.createElement("strong");
-          title.textContent = item.title;
-          const urlSpan = document.createElement("span");
-          urlSpan.textContent = item.url;
-          row.appendChild(title);
-          row.appendChild(urlSpan);
-          container.appendChild(row);
-        });
-      } catch (e) {
-        showToast(`Search test failed: ${e.message}`);
-      }
-    });
 
   // ==========================================================================
   // Modal Helpers
@@ -1384,9 +1569,8 @@
     if (!currentGuildId || !currentAutomodConfig) return;
 
     const parseList = (val) =>
-      val
-        .split(/[,
-]/)
+      (val || "")
+        .split(/[,\n]+/)
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
 
@@ -2150,193 +2334,19 @@
     }
   }
 
-    const guildSel = document.getElementById("guild-selector");
-    if (guildSel) {
-      guildSel.addEventListener("change", async () => {
-        currentGuildId = guildSel.value;
-        await loadSelectedGuildConfig();
-      });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+    initLoginPage();
+
+    if (!document.getElementById('view-overview')) {
+      return;
     }
 
-    // Guild synchronization across all module headers
-    document.querySelectorAll(".guild-selector-sync").forEach((sel) => {
-      sel.addEventListener("change", () => syncAllGuildSelectors(sel.value));
-    });
-
-    // Modals
+    initNavigation();
     initModals();
+    wireAllEventListeners();
 
-    // Module 1: Moderation
-    bindClick("btn-refresh-cases", () => {
-      const fUser = getValue("mod-filter-user");
-      loadModCases(fUser || null);
-    });
-    bindClick("btn-apply-case-filter", () => {
-      const fUser = getValue("mod-filter-user");
-      loadModCases(fUser || null);
-    });
-    bindClick("btn-reset-case-filter", () => {
-      setValue("mod-filter-user", "");
-      loadModCases();
-    });
-    bindClick("btn-open-manual-case", () => openModal("modal-manual-case"));
-    bindClick("btn-submit-manual-case", submitManualCase);
-    bindClick("btn-submit-edit-reason", submitEditReason);
-    bindClick("btn-trigger-strike-decay", triggerManualStrikeDecay);
-
-    // Module 2: Automod
-    bindClick("btn-save-automod", saveAutomodConfig);
-    bindClick("btn-add-ladder-step", addLadderStep);
-
-    // Module 3: Audit Logging
-    bindClick("btn-save-logging", saveLoggingConfig);
-    const colorPicker = document.getElementById("log-embed-color-picker");
-    const colorHex = document.getElementById("log-embed-color-hex");
-    if (colorPicker && colorHex) {
-      colorPicker.addEventListener("input", () => {
-        colorHex.value = colorPicker.value;
-      });
-      colorHex.addEventListener("input", () => {
-        if (/^#[0-9a-fA-F]{6}$/.test(colorHex.value)) {
-          colorPicker.value = colorHex.value;
-        }
-      });
-    }
-
-    // Module 4: Greetings & Autorole
-    bindClick("btn-save-greetings", saveGreetingsConfig);
-    bindClick("btn-preview-welcome-embed", updateGreetingsEmbedPreview);
-    const greetEmbedIn = document.getElementById("greet-welcome-embed");
-    const greetMsgIn = document.getElementById("greet-welcome-msg");
-    if (greetEmbedIn) greetEmbedIn.addEventListener("input", updateGreetingsEmbedPreview);
-    if (greetMsgIn) greetMsgIn.addEventListener("input", updateGreetingsEmbedPreview);
-
-    // Module 5: Reaction Roles
-    bindClick("btn-refresh-rr", loadReactionRoles);
-    bindClick("btn-open-rr-modal", () => {
-      const bList = document.getElementById("rr-entries-builder");
-      if (bList) bList.replaceChildren();
-      addRrEntryRow("👍", "", "Role Button", "primary");
-      openModal("modal-create-rr");
-    });
-    bindClick("btn-add-rr-entry-row", () => addRrEntryRow());
-    bindClick("btn-submit-create-rr", submitCreateReactionRole);
-
-    // Module 6: Custom Triggers & TagScript Simulator
-    bindClick("btn-refresh-triggers", loadCustomTriggers);
-    bindClick("btn-open-trigger-modal", () => {
-      setValue("trig-name", "");
-      setValue("trig-response", "");
-      openModal("modal-create-trigger");
-    });
-    bindClick("btn-submit-save-trigger", submitSaveTrigger);
-    bindClick("btn-eval-tagscript", runTagScriptSimulator);
-
-    // TagScript Chip Insertions
-    document.querySelectorAll(".tagscript-chip[data-insert]").forEach((chip) => {
-      chip.addEventListener("click", () => {
-        const token = chip.getAttribute("data-insert");
-        const area = document.getElementById("tagscript-bench-input");
-        if (area && token) {
-          area.value = area.value ? `${area.value} ${token}` : token;
-          area.focus();
-        }
-      });
-    });
-
-    bindClick("btn-save-guild-config", saveGuildConfig);
-    bindClick("btn-add-reddit-sub", addRedditSubscription);
-
-    bindClick("btn-gen-reddit-secret", async () => {
-      try {
-        const res = await apiFetch("/api/reddit/generate-secret", { method: "POST" });
-        if (res.secret) {
-          setValue("cfg-reddit-webhook-secret", res.secret);
-          showToast("Generated new webhook secret (click Save Global Settings to persist).");
-        }
-      } catch (e) {
-        showToast(`Failed to generate secret: ${e.message}`);
-      }
-    });
-
-    bindClick("btn-reset-guild-quota", async () => {
-      if (!currentGuildId) return;
-      try {
-        await apiFetch(`/api/guilds/${currentGuildId}/quota/reset`, {
-          method: "POST",
-        });
-        showToast("Reset server token usage for current window.");
-        await loadSelectedGuildConfig();
-      } catch (e) {
-        showToast(e.message);
-      }
-    });
-
-    bindClick("btn-clear-guild-memory", async () => {
-      if (!currentGuildId) return;
-      try {
-        await apiFetch(`/api/guilds/${currentGuildId}/memory/clear`, {
-          method: "POST",
-        });
-        showToast("Cleared volatile conversation memory for server.");
-      } catch (e) {
-        showToast(e.message);
-      }
-    });
-
-    bindClick("btn-check-update", async () => {
-      const ch = getValue("update-channel-select") || "stable";
-      const box = document.getElementById("update-status-box");
-      if (!box) return;
-      box.textContent = "Checking GitHub Releases...";
-      try {
-        const res = await apiFetch(`/api/update/check?channel=${encodeURIComponent(ch)}`);
-        if (res.error) {
-          box.textContent = `Update check error: ${res.error}`;
-        } else if (res.update_available) {
-          box.textContent = `Update available: v${res.latest_version} (Current: v${res.current_version}, Asset: ${res.binary_asset_name || "none"})`;
-        } else {
-          box.textContent = `Up to date: v${res.current_version} (${res.channel} channel).`;
-        }
-      } catch (e) {
-        box.textContent = `Error: ${e.message}`;
-      }
-    });
-
-    bindClick("btn-apply-update", async () => {
-      const ch = getValue("update-channel-select") || "stable";
-      const box = document.getElementById("update-status-box");
-      if (box) box.textContent = "Verifying Ed25519 signature, SHA-256 digest, and staging update...";
-      try {
-        const res = await apiFetch("/api/update/apply", {
-          method: "POST",
-          body: JSON.stringify({ channel: ch }),
-        });
-        if (box) box.textContent = res.message || "Update staged.";
-        showToast("Update verified and applied.");
-        await loadSnapshots();
-      } catch (e) {
-        if (box) box.textContent = `Update failed: ${e.message}`;
-        showToast(e.message);
-      }
-    });
-
-    bindClick("btn-create-snapshot", async () => {
-      try {
-        await apiFetch("/api/update/snapshot", { method: "POST" });
-        showToast("Created local database & binary snapshot.");
-        await loadSnapshots();
-      } catch (e) {
-        showToast(e.message);
-      }
-    });
-
-    bindClick("btn-copy-invite", async () => {
-      const url = getValue("invite-url-display");
-      if (url && navigator.clipboard) {
-        await navigator.clipboard.writeText(url);
-        showToast("Copied invite URL to clipboard.");
-      }
-    });
+    checkSessionAndLoadData();
   });
 })();
