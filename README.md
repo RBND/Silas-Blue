@@ -12,6 +12,7 @@ v4 is a single Rust binary with a built-in web UI and SQLite baked in, so there'
 - Restrict who can chat with the bot, run web searches, or change models by Discord role or user ID.
 - Set daily, weekly, or monthly token limits per role so one person doesn't burn through your GPU or API budget.
 - Auto-reply to new posts in designated Discord Forum channels with custom instructions.
+- Subreddit feed monitoring with rich Discord embeds via background polling or real-time Reddit Devvit companion app push.
 - Conversation history stays in RAM and expires automatically. Users can also run `/forget_me` anytime to wipe their messages from memory.
 
 ## Getting Started
@@ -54,6 +55,9 @@ All commands work as `/slash` commands or `!prefix` commands. You can also just 
 | `/setmodel <name>` | Change the server's active model |
 | `/pull <name>` | Pull a model on your local Ollama server |
 | `/status` | Check which backend and model the bot is using |
+| `/reddit subscribe <sub\>` | Monitor a subreddit and post new submissions to a channel |
+| `/reddit unsubscribe <sub\>` | Stop monitoring a subreddit in a channel |
+| `/reddit list` | List active subreddit feed subscriptions in the server |
 
 Server admins can also configure permissions, forum rules, prompts, and quotas from the web UI.
 

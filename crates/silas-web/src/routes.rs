@@ -10,7 +10,7 @@ use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -72,6 +72,15 @@ pub fn build_router(state: Arc<WebState>) -> Router {
             "/guilds/:guild_id/memory/clear",
             post(api_clear_guild_memory),
         )
+        .route(
+            "/guilds/:guild_id/reddit",
+            get(api_list_guild_reddit_subs).post(api_create_guild_reddit_sub),
+        )
+        .route(
+            "/guilds/:guild_id/reddit/:sub_id",
+            delete(api_delete_guild_reddit_sub),
+        )
+        .route("/reddit/generate-secret", post(api_generate_reddit_secret))
         .route("/update/check", get(api_update_check))
         .route("/update/apply", post(api_update_apply))
         .route("/update/snapshots", get(api_update_snapshots))
@@ -91,6 +100,7 @@ pub fn build_router(state: Arc<WebState>) -> Router {
         .route("/auth/discord/callback", get(auth_discord_callback))
         .route("/auth/logout", post(auth_logout))
         .route("/api/auth/session", get(api_auth_session))
+        .route("/api/webhooks/reddit", post(api_webhook_reddit))
         .nest("/api", api_router)
         .fallback(serve_embedded_asset)
         .layer(RequestBodyLimitLayer::new(256 * 1024))
@@ -890,6 +900,204 @@ async fn api_download_redacted_backup(State(state): State<Arc<WebState>>) -> Res
         HeaderValue::from_static("attachment; filename=\"silas-blue-redacted-backup.db\""),
     );
     resp
+}
+
+// ============================================================================
+// Reddit Feeds & Webhook Endpoints
+// ============================================================================
+
+async fn api_webhook_reddit(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Json(post): Json<silas_core::reddit::RedditPost>,
+) -> Response {
+    let settings = state.storage.get_app_settings();
+    let expected_secret = settings.reddit_webhook_secret.trim();
+    if expected_secret.is_empty() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Reddit webhook secret is not configured in Silas Blue settings." })),
+        )
+            .into_response();
+    }
+
+    let provided = headers
+        .get("x-silas-reddit-secret")
+        .and_then(|h| h.to_str().ok())
+        .or_else(|| {
+            headers
+                .get(header::AUTHORIZATION)
+                .and_then(|h| h.to_str().ok())
+                .and_then(|h| h.strip_prefix("Bearer "))
+        })
+        .unwrap_or("")
+        .trim();
+
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+    let hash_expected = Sha256::digest(expected_secret.as_bytes());
+    let hash_provided = Sha256::digest(provided.as_bytes());
+    let valid: bool = hash_expected.ct_eq(&hash_provided).into();
+
+    if !valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "Invalid webhook authentication secret." })),
+        )
+            .into_response();
+    }
+
+    let Some(http) = state.bot.http() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "Discord gateway client is not connected." })),
+        )
+            .into_response();
+    };
+
+    let delivered =
+        silas_discord::dispatch_post_to_matching_subscriptions(&http, &state.storage, &post).await;
+
+    Json(json!({
+        "status": "ok",
+        "delivered_count": delivered
+    }))
+    .into_response()
+}
+
+async fn api_list_guild_reddit_subs(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.list_reddit_subscriptions_for_guild(guild_id) {
+        Ok(subs) => Json(json!({ "subscriptions": subs })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Database error: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_create_guild_reddit_sub(
+    State(state): State<Arc<WebState>>,
+    Path(guild_id_str): Path<String>,
+    Json(mut new_sub): Json<silas_core::reddit::NewRedditSubscription>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    new_sub.guild_id = guild_id;
+    let clean_sub = silas_core::reddit::clean_subreddit_name(&new_sub.subreddit);
+    if clean_sub.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Subreddit name cannot be empty." })),
+        )
+            .into_response();
+    }
+    new_sub.subreddit = clean_sub.clone();
+
+    let client = silas_discord::RedditClient::new();
+    let settings = state.storage.get_app_settings();
+    let recent_posts = client
+        .fetch_new_posts(&clean_sub, 10, &settings)
+        .await
+        .unwrap_or_default();
+
+    let newest_id = recent_posts.first().map(|p| p.normalized_id().to_string());
+
+    let created_sub = match state
+        .storage
+        .create_reddit_subscription(&new_sub, newest_id.as_deref())
+    {
+        Ok(s) => s,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to create subscription: {e}") })),
+            )
+                .into_response();
+        }
+    };
+
+    let backfill = new_sub.backfill_count.min(5);
+    if backfill > 0 {
+        if let Some(http) = state.bot.http() {
+            let mut matching: Vec<_> = recent_posts
+                .into_iter()
+                .filter(|p| p.matches_subscription(&created_sub))
+                .take(backfill as usize)
+                .collect();
+            matching.reverse();
+            for p in matching {
+                let _ =
+                    silas_discord::deliver_reddit_post(&http, &state.storage, &p, &created_sub)
+                        .await;
+            }
+        }
+    }
+
+    (
+        StatusCode::CREATED,
+        Json(json!({ "subscription": created_sub })),
+    )
+        .into_response()
+}
+
+async fn api_delete_guild_reddit_sub(
+    State(state): State<Arc<WebState>>,
+    Path((guild_id_str, sub_id_str)): Path<(String, String)>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let Ok(sub_id) = sub_id_str.parse::<i64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid subscription ID." })),
+        )
+            .into_response();
+    };
+
+    match state.storage.delete_reddit_subscription(sub_id, guild_id) {
+        Ok(true) => Json(json!({ "success": true })).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Subscription not found." })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Database error: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_generate_reddit_secret() -> Response {
+    let mut bytes = [0u8; 24];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let secret = hex::encode(bytes);
+    Json(json!({ "secret": secret })).into_response()
 }
 
 // ============================================================================

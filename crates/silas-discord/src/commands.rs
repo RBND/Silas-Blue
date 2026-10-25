@@ -46,6 +46,7 @@ pub fn all_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
         help(),
         setglobalname(),
         update(),
+        reddit(),
     ]
 }
 
@@ -1266,5 +1267,211 @@ pub async fn update(
         .await?;
     }
 
+    Ok(())
+}
+
+/// Manage automated subreddit feed monitors.
+#[poise::command(
+    slash_command,
+    prefix_command,
+    subcommands("reddit_subscribe", "reddit_unsubscribe", "reddit_list")
+)]
+pub async fn reddit(ctx: Context<'_>) -> Result<(), CommandError> {
+    ctx.say("Use `/reddit subscribe`, `/reddit unsubscribe`, or `/reddit list`.")
+        .await?;
+    Ok(())
+}
+
+/// Subscribe a channel to a subreddit feed.
+#[allow(clippy::too_many_arguments)]
+#[poise::command(slash_command, prefix_command, rename = "subscribe")]
+pub async fn reddit_subscribe(
+    ctx: Context<'_>,
+    #[description = "Subreddit name to monitor (e.g. rust or r/rust)"] subreddit: String,
+    #[description = "Destination channel for posts (defaults to current channel)"] channel: Option<
+        serenity::all::ChannelId,
+    >,
+    #[description = "Number of recent posts to immediately backfill (0 to 5, default 0)"]
+    backfill: Option<u32>,
+    #[description = "Filter out NSFW / Over-18 posts (default true)"] filter_nsfw: Option<bool>,
+    #[description = "Minimum upvote score required to post (default 0)"] min_score: Option<i32>,
+    #[description = "Comma-separated list of allowed flair tags"] flairs: Option<String>,
+    #[description = "Comma-separated list of required title/body keywords"] keywords: Option<String>,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Subreddit subscriptions can only be configured inside a server.")
+            .await?;
+        return Ok(());
+    };
+
+    let target_channel = channel.unwrap_or_else(|| ctx.channel_id());
+    let clean_sub = silas_core::reddit::clean_subreddit_name(&subreddit);
+    if clean_sub.is_empty() {
+        ctx.say("⚠️ Please provide a valid subreddit name.")
+            .await?;
+        return Ok(());
+    }
+
+    let state = ctx.data();
+    let backfill_count = backfill.unwrap_or(0).min(5);
+    let filter_nsfw_val = filter_nsfw.unwrap_or(true);
+    let min_score_val = min_score.unwrap_or(0);
+
+    // Initial check: get current newest posts if backfill requested or to anchor last_seen_post_id
+    let client = crate::reddit::RedditClient::new();
+    let settings = state.storage.get_app_settings();
+    let recent_posts = client
+        .fetch_new_posts(&clean_sub, 10, &settings)
+        .await
+        .unwrap_or_default();
+
+    let newest_id = recent_posts.first().map(|p| p.normalized_id().to_string());
+
+    let new_sub = silas_core::reddit::NewRedditSubscription {
+        guild_id: gid.get(),
+        channel_id: target_channel.get(),
+        subreddit: clean_sub.clone(),
+        filter_nsfw: filter_nsfw_val,
+        min_score: min_score_val,
+        flair_filter: flairs.clone(),
+        keyword_filter: keywords.clone(),
+        backfill_count,
+    };
+
+    let sub_record = state
+        .storage
+        .create_reddit_subscription(&new_sub, newest_id.as_deref())
+        .map_err(|e| format!("Database error: {e}"))?;
+
+    // If backfill was requested, deliver recent matching posts
+    let mut backfilled = 0;
+    if backfill_count > 0 {
+        let maybe_http = { state.http.read().clone() };
+        if let Some(http) = maybe_http {
+            let mut matching: Vec<_> = recent_posts
+                .into_iter()
+                .filter(|p| p.matches_subscription(&sub_record))
+                .take(backfill_count as usize)
+                .collect();
+            matching.reverse(); // deliver oldest to newest
+            for p in matching {
+                if let Ok(true) =
+                    crate::reddit::deliver_reddit_post(&http, &state.storage, &p, &sub_record).await
+                {
+                    backfilled += 1;
+                }
+            }
+        }
+    }
+
+    let mut msg = format!(
+        "✅ Successfully subscribed <#{}> to **r/{}**\n• NSFW Filter: {}\n• Min Score: {}",
+        target_channel.get(),
+        clean_sub,
+        if filter_nsfw_val { "Enabled" } else { "Disabled" },
+        min_score_val
+    );
+    if let Some(ref fl) = flairs {
+        msg.push_str(&format!("\n• Flairs: `{fl}`"));
+    }
+    if let Some(ref kw) = keywords {
+        msg.push_str(&format!("\n• Keywords: `{kw}`"));
+    }
+    if backfilled > 0 {
+        msg.push_str(&format!("\n• Backfilled {} recent post(s).", backfilled));
+    }
+
+    ctx.say(msg).await?;
+    Ok(())
+}
+
+/// Unsubscribe a channel from a subreddit feed.
+#[poise::command(slash_command, prefix_command, rename = "unsubscribe")]
+pub async fn reddit_unsubscribe(
+    ctx: Context<'_>,
+    #[description = "Subreddit name to unsubscribe from"] subreddit: String,
+    #[description = "Channel to unsubscribe (defaults to current channel)"] channel: Option<
+        serenity::all::ChannelId,
+    >,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Subreddit subscriptions can only be configured inside a server.")
+            .await?;
+        return Ok(());
+    };
+
+    let target_channel = channel.unwrap_or_else(|| ctx.channel_id());
+    let clean_sub = silas_core::reddit::clean_subreddit_name(&subreddit);
+    let state = ctx.data();
+
+    let removed = state
+        .storage
+        .delete_reddit_subscription_by_channel(gid.get(), target_channel.get(), &clean_sub)
+        .map_err(|e| format!("Database error: {e}"))?;
+
+    if removed {
+        ctx.say(format!(
+            "✅ Unsubscribed <#{}> from **r/{}**.",
+            target_channel.get(),
+            clean_sub
+        ))
+        .await?;
+    } else {
+        ctx.say(format!(
+            "⚠️ No active subscription found for <#{}> and **r/{}**.",
+            target_channel.get(),
+            clean_sub
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+/// List all active subreddit feeds in this server.
+#[poise::command(slash_command, prefix_command, rename = "list")]
+pub async fn reddit_list(ctx: Context<'_>) -> Result<(), CommandError> {
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Subreddit subscriptions can only be viewed inside a server.")
+            .await?;
+        return Ok(());
+    };
+
+    let state = ctx.data();
+    let subs = state
+        .storage
+        .list_reddit_subscriptions_for_guild(gid.get())
+        .map_err(|e| format!("Database error: {e}"))?;
+
+    if subs.is_empty() {
+        ctx.say("ℹ️ No active subreddit subscriptions configured in this server. Use `/reddit subscribe <subreddit>` to add one.")
+            .await?;
+        return Ok(());
+    }
+
+    let mut out = String::from("📋 **Active Subreddit Subscriptions:**\n");
+    for sub in subs {
+        out.push_str(&format!(
+            "• **r/{}** ➔ <#{}> (Min Score: {}, NSFW Filter: {})",
+            sub.subreddit,
+            sub.channel_id,
+            sub.min_score,
+            if sub.filter_nsfw { "On" } else { "Off" }
+        ));
+        if let Some(ref fl) = sub.flair_filter {
+            out.push_str(&format!(" [Flairs: `{fl}`]"));
+        }
+        if let Some(ref kw) = sub.keyword_filter {
+            out.push_str(&format!(" [Keywords: `{kw}`]"));
+        }
+        out.push('\n');
+    }
+
+    ctx.say(out).await?;
     Ok(())
 }

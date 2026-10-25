@@ -199,6 +199,16 @@ pub struct AppSettings {
     pub update_notify_owner_dm: bool,
     #[serde(default)]
     pub update_notify_channel_id: Option<String>,
+
+    // Reddit Integration
+    #[serde(default)]
+    pub reddit_client_id: String,
+    #[serde(default)]
+    pub reddit_client_secret: String,
+    #[serde(default)]
+    pub reddit_webhook_secret: String,
+    #[serde(default = "default_reddit_poll_interval")]
+    pub reddit_poll_interval_minutes: u32,
 }
 
 impl Drop for AppSettings {
@@ -210,7 +220,13 @@ impl Drop for AppSettings {
         self.remote_api_key.zeroize();
         self.tavily_api_key.zeroize();
         self.brave_api_key.zeroize();
+        self.reddit_client_secret.zeroize();
+        self.reddit_webhook_secret.zeroize();
     }
+}
+
+fn default_reddit_poll_interval() -> u32 {
+    2
 }
 
 fn default_session_epoch() -> i64 {
@@ -307,6 +323,10 @@ impl Default for AppSettings {
             auto_update_check_on_startup: true,
             update_notify_owner_dm: true,
             update_notify_channel_id: None,
+            reddit_client_id: String::new(),
+            reddit_client_secret: String::new(),
+            reddit_webhook_secret: String::new(),
+            reddit_poll_interval_minutes: default_reddit_poll_interval(),
         }
     }
 }
@@ -343,6 +363,10 @@ impl AppSettings {
             "web_search_max_results": self.web_search_max_results,
             "tavily_api_key": mask_opt(&self.tavily_api_key),
             "brave_api_key": mask_opt(&self.brave_api_key),
+            "reddit_client_id": self.reddit_client_id,
+            "reddit_client_secret": mask_opt(&self.reddit_client_secret),
+            "reddit_webhook_secret": mask_opt(&self.reddit_webhook_secret),
+            "reddit_poll_interval_minutes": self.reddit_poll_interval_minutes,
             "theme": self.theme,
             "debug": self.debug,
             "update_channel": self.update_channel,
@@ -413,6 +437,10 @@ pub struct AppSettingsPatch {
     pub auto_update_check_on_startup: Option<bool>,
     pub update_notify_owner_dm: Option<bool>,
     pub update_notify_channel_id: Option<Option<String>>,
+    pub reddit_client_id: Option<String>,
+    pub reddit_client_secret: Option<String>,
+    pub reddit_webhook_secret: Option<String>,
+    pub reddit_poll_interval_minutes: Option<u32>,
 }
 
 const SECRET_MASK: &str = "●●●●●●●●";
@@ -602,6 +630,22 @@ impl AppSettings {
                     None
                 }
             });
+        }
+        if let Some(cid) = patch.reddit_client_id {
+            self.reddit_client_id = cid.trim().to_owned();
+        }
+        if let Some(sec) = patch.reddit_client_secret {
+            if sec != SECRET_MASK {
+                self.reddit_client_secret = sec.trim().to_owned();
+            }
+        }
+        if let Some(sec) = patch.reddit_webhook_secret {
+            if sec != SECRET_MASK {
+                self.reddit_webhook_secret = sec.trim().to_owned();
+            }
+        }
+        if let Some(mins) = patch.reddit_poll_interval_minutes {
+            self.reddit_poll_interval_minutes = mins.clamp(1, 1440);
         }
         Ok(())
     }

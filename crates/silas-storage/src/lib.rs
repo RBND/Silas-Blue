@@ -23,8 +23,9 @@ use silas_core::config::{
     AppSettings, AppSettingsPatch, GuildConfig, GuildConfigPatch, OveragePolicy, TokenQuotaConfig,
     DEFAULT_SYSTEM_PROMPT,
 };
+use silas_core::reddit::{clean_subreddit_name, NewRedditSubscription, RedditSubscription};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 const RETENTION_DAYS: i64 = 35;
 
 #[derive(Debug, Error)]
@@ -511,7 +512,9 @@ impl Storage {
                  local_api_key = '',
                  remote_api_key = '',
                  tavily_api_key = '',
-                 brave_api_key = '';
+                 brave_api_key = '',
+                 reddit_client_secret = '',
+                 reddit_webhook_secret = '';
              VACUUM;",
         )?;
         drop(snap_conn);
@@ -524,6 +527,242 @@ impl Storage {
         let conn = self.writer.lock();
         conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
+    }
+
+    /// Creates a new subreddit feed subscription for a guild channel.
+    pub fn create_reddit_subscription(
+        &self,
+        new_sub: &NewRedditSubscription,
+        last_seen_post_id: Option<&str>,
+    ) -> Result<RedditSubscription, StorageError> {
+        let conn = self.writer.lock();
+        let sub_name = clean_subreddit_name(&new_sub.subreddit);
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO reddit_subscriptions (
+                guild_id, channel_id, subreddit, filter_nsfw, min_score,
+                flair_filter, keyword_filter, created_at, last_seen_post_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                new_sub.guild_id as i64,
+                new_sub.channel_id as i64,
+                sub_name,
+                i64::from(new_sub.filter_nsfw),
+                new_sub.min_score,
+                new_sub.flair_filter,
+                new_sub.keyword_filter,
+                now,
+                last_seen_post_id,
+            ],
+        )?;
+        let id = conn.last_insert_rowid();
+        Ok(RedditSubscription {
+            id,
+            guild_id: new_sub.guild_id,
+            channel_id: new_sub.channel_id,
+            subreddit: sub_name,
+            filter_nsfw: new_sub.filter_nsfw,
+            min_score: new_sub.min_score,
+            flair_filter: new_sub.flair_filter.clone(),
+            keyword_filter: new_sub.keyword_filter.clone(),
+            created_at: now,
+            last_seen_post_id: last_seen_post_id.map(|s| s.to_string()),
+        })
+    }
+
+    /// Deletes a subreddit feed subscription by its unique record ID within a guild.
+    pub fn delete_reddit_subscription(
+        &self,
+        subscription_id: i64,
+        guild_id: u64,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let affected = conn.execute(
+            "DELETE FROM reddit_subscriptions WHERE id = ?1 AND guild_id = ?2",
+            params![subscription_id, guild_id as i64],
+        )?;
+        if affected > 0 {
+            let _ = conn.execute(
+                "DELETE FROM reddit_posted_items WHERE subscription_id = ?1",
+                params![subscription_id],
+            );
+        }
+        Ok(affected > 0)
+    }
+
+    /// Deletes a subreddit feed subscription matching channel and subreddit name.
+    pub fn delete_reddit_subscription_by_channel(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        subreddit: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let sub_name = clean_subreddit_name(subreddit);
+        let affected = conn.execute(
+            "DELETE FROM reddit_subscriptions WHERE guild_id = ?1 AND channel_id = ?2 AND LOWER(subreddit) = ?3",
+            params![guild_id as i64, channel_id as i64, sub_name],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Lists all subreddit subscriptions for a specific guild.
+    pub fn list_reddit_subscriptions_for_guild(
+        &self,
+        guild_id: u64,
+    ) -> Result<Vec<RedditSubscription>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, channel_id, subreddit, filter_nsfw, min_score,
+                    flair_filter, keyword_filter, created_at, last_seen_post_id
+             FROM reddit_subscriptions
+             WHERE guild_id = ?1
+             ORDER BY subreddit ASC",
+        )?;
+        let rows = stmt.query_map(params![guild_id as i64], |row| {
+            Ok(RedditSubscription {
+                id: row.get(0)?,
+                guild_id: row.get::<_, i64>(1)? as u64,
+                channel_id: row.get::<_, i64>(2)? as u64,
+                subreddit: row.get(3)?,
+                filter_nsfw: row.get::<_, i64>(4)? != 0,
+                min_score: row.get(5)?,
+                flair_filter: row.get(6)?,
+                keyword_filter: row.get(7)?,
+                created_at: row.get(8)?,
+                last_seen_post_id: row.get(9)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Lists all subreddit subscriptions across all connected guilds.
+    pub fn list_all_reddit_subscriptions(&self) -> Result<Vec<RedditSubscription>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, channel_id, subreddit, filter_nsfw, min_score,
+                    flair_filter, keyword_filter, created_at, last_seen_post_id
+             FROM reddit_subscriptions
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(RedditSubscription {
+                id: row.get(0)?,
+                guild_id: row.get::<_, i64>(1)? as u64,
+                channel_id: row.get::<_, i64>(2)? as u64,
+                subreddit: row.get(3)?,
+                filter_nsfw: row.get::<_, i64>(4)? != 0,
+                min_score: row.get(5)?,
+                flair_filter: row.get(6)?,
+                keyword_filter: row.get(7)?,
+                created_at: row.get(8)?,
+                last_seen_post_id: row.get(9)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Finds all subscriptions for a specific subreddit (case-insensitive).
+    pub fn find_subscriptions_for_subreddit(
+        &self,
+        subreddit: &str,
+    ) -> Result<Vec<RedditSubscription>, StorageError> {
+        let conn = self.writer.lock();
+        let sub_name = clean_subreddit_name(subreddit);
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, channel_id, subreddit, filter_nsfw, min_score,
+                    flair_filter, keyword_filter, created_at, last_seen_post_id
+             FROM reddit_subscriptions
+             WHERE LOWER(subreddit) = ?1",
+        )?;
+        let rows = stmt.query_map(params![sub_name], |row| {
+            Ok(RedditSubscription {
+                id: row.get(0)?,
+                guild_id: row.get::<_, i64>(1)? as u64,
+                channel_id: row.get::<_, i64>(2)? as u64,
+                subreddit: row.get(3)?,
+                filter_nsfw: row.get::<_, i64>(4)? != 0,
+                min_score: row.get(5)?,
+                flair_filter: row.get(6)?,
+                keyword_filter: row.get(7)?,
+                created_at: row.get(8)?,
+                last_seen_post_id: row.get(9)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Checks if a post has already been delivered to a given subscription.
+    pub fn has_reddit_post_been_delivered(
+        &self,
+        subscription_id: i64,
+        post_id: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM reddit_posted_items WHERE subscription_id = ?1 AND post_id = ?2",
+                params![subscription_id, post_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(exists.is_some())
+    }
+
+    /// Records that a post was delivered to a subscription and updates the last seen post ID.
+    pub fn record_reddit_post_delivered(
+        &self,
+        subscription_id: i64,
+        post_id: &str,
+    ) -> Result<(), StorageError> {
+        let conn = self.writer.lock();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "INSERT OR IGNORE INTO reddit_posted_items (subscription_id, post_id, posted_at) VALUES (?1, ?2, ?3)",
+            params![subscription_id, post_id, now],
+        )?;
+        conn.execute(
+            "UPDATE reddit_subscriptions SET last_seen_post_id = ?1 WHERE id = ?2",
+            params![post_id, subscription_id],
+        )?;
+        Ok(())
+    }
+
+    /// Updates only the last seen post ID for a subscription.
+    pub fn update_reddit_last_seen(
+        &self,
+        subscription_id: i64,
+        post_id: &str,
+    ) -> Result<(), StorageError> {
+        let conn = self.writer.lock();
+        conn.execute(
+            "UPDATE reddit_subscriptions SET last_seen_post_id = ?1 WHERE id = ?2",
+            params![post_id, subscription_id],
+        )?;
+        Ok(())
+    }
+
+    /// Prunes delivered post records older than or equal to `retention_days`.
+    pub fn prune_old_reddit_posts(&self, retention_days: i64) -> Result<usize, StorageError> {
+        let conn = self.writer.lock();
+        let cutoff = Utc::now().timestamp() - (retention_days * 86400);
+        let count = conn.execute(
+            "DELETE FROM reddit_posted_items WHERE posted_at <= ?1",
+            params![cutoff],
+        )?;
+        Ok(count)
     }
 }
 
@@ -576,12 +815,25 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
         .optional()?
         .flatten();
 
+    let now = Utc::now().timestamp();
     if let Some(v) = max_ver {
         if v > CURRENT_SCHEMA_VERSION {
             return Err(StorageError::NewerSchemaVersion {
                 db_version: v,
                 max_supported: CURRENT_SCHEMA_VERSION,
             });
+        }
+        if v < 2 {
+            let _ = conn.execute_batch(
+                "ALTER TABLE app_settings ADD COLUMN reddit_client_id TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE app_settings ADD COLUMN reddit_client_secret TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE app_settings ADD COLUMN reddit_webhook_secret TEXT NOT NULL DEFAULT '';
+                 ALTER TABLE app_settings ADD COLUMN reddit_poll_interval_minutes INTEGER NOT NULL DEFAULT 2;",
+            );
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (2, ?1)",
+                params![now],
+            )?;
         }
     }
 
@@ -618,6 +870,11 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             web_search_max_results INTEGER NOT NULL DEFAULT 5,
             tavily_api_key TEXT NOT NULL DEFAULT '',
             brave_api_key TEXT NOT NULL DEFAULT '',
+
+            reddit_client_id TEXT NOT NULL DEFAULT '',
+            reddit_client_secret TEXT NOT NULL DEFAULT '',
+            reddit_webhook_secret TEXT NOT NULL DEFAULT '',
+            reddit_poll_interval_minutes INTEGER NOT NULL DEFAULT 2,
 
             theme TEXT NOT NULL DEFAULT 'retrowave',
             debug_enabled INTEGER NOT NULL DEFAULT 0,
@@ -704,7 +961,36 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             release_notes TEXT,
             release_url TEXT,
             update_available INTEGER NOT NULL DEFAULT 0
-        ) STRICT;",
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS reddit_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            subreddit TEXT NOT NULL,
+            filter_nsfw INTEGER NOT NULL DEFAULT 1,
+            min_score INTEGER NOT NULL DEFAULT 0,
+            flair_filter TEXT,
+            keyword_filter TEXT,
+            created_at INTEGER NOT NULL,
+            last_seen_post_id TEXT
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_reddit_subscriptions_guild
+        ON reddit_subscriptions (guild_id);
+
+        CREATE INDEX IF NOT EXISTS idx_reddit_subscriptions_sub
+        ON reddit_subscriptions (subreddit);
+
+        CREATE TABLE IF NOT EXISTS reddit_posted_items (
+            subscription_id INTEGER NOT NULL,
+            post_id TEXT NOT NULL,
+            posted_at INTEGER NOT NULL,
+            PRIMARY KEY (subscription_id, post_id)
+        ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_reddit_posted_items_posted_at
+        ON reddit_posted_items (posted_at);",
     )?;
 
     let now = Utc::now().timestamp();
@@ -743,7 +1029,9 @@ fn load_app_settings_from_conn(conn: &Connection) -> Result<AppSettings, Storage
             theme, debug_enabled,
             update_channel, auto_update_enabled, auto_update_mode,
             auto_update_interval_hours, auto_update_check_on_startup,
-            update_notify_owner_dm, update_notify_channel_id
+            update_notify_owner_dm, update_notify_channel_id,
+            reddit_client_id, reddit_client_secret, reddit_webhook_secret,
+            reddit_poll_interval_minutes
          FROM app_settings WHERE id = 1",
         [],
         |row| {
@@ -784,6 +1072,10 @@ fn load_app_settings_from_conn(conn: &Connection) -> Result<AppSettings, Storage
                 auto_update_check_on_startup: row.get::<_, i64>(33)? != 0,
                 update_notify_owner_dm: row.get::<_, i64>(34)? != 0,
                 update_notify_channel_id: row.get(35)?,
+                reddit_client_id: row.get(36)?,
+                reddit_client_secret: row.get(37)?,
+                reddit_webhook_secret: row.get(38)?,
+                reddit_poll_interval_minutes: row.get::<_, i64>(39)?.clamp(1, 1440) as u32,
             })
         },
     )
@@ -828,7 +1120,11 @@ fn save_app_settings_to_conn(conn: &Connection, s: &AppSettings) -> Result<(), S
             auto_update_interval_hours = ?33,
             auto_update_check_on_startup = ?34,
             update_notify_owner_dm = ?35,
-            update_notify_channel_id = ?36
+            update_notify_channel_id = ?36,
+            reddit_client_id = ?37,
+            reddit_client_secret = ?38,
+            reddit_webhook_secret = ?39,
+            reddit_poll_interval_minutes = ?40
          WHERE id = 1",
         params![
             s.discord_token,
@@ -867,6 +1163,10 @@ fn save_app_settings_to_conn(conn: &Connection, s: &AppSettings) -> Result<(), S
             i64::from(s.auto_update_check_on_startup),
             i64::from(s.update_notify_owner_dm),
             s.update_notify_channel_id,
+            s.reddit_client_id,
+            s.reddit_client_secret,
+            s.reddit_webhook_secret,
+            i64::from(s.reddit_poll_interval_minutes),
         ],
     )?;
     Ok(())
@@ -1193,6 +1493,65 @@ mod tests {
         assert!(app.remote_api_key.is_empty());
 
         drop(verify_storage);
+        drop(storage);
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_reddit_subscriptions_storage() {
+        let temp_dir = std::env::temp_dir().join(format!("silas_test_reddit_{}", rand::random::<u64>()));
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+        let db_path = temp_dir.join("silas.db");
+
+        let storage = Storage::open(&db_path).expect("open file db");
+
+        let new_sub = NewRedditSubscription {
+            guild_id: 12345,
+            channel_id: 67890,
+            subreddit: "r/rust".to_string(),
+            filter_nsfw: true,
+            min_score: 10,
+            flair_filter: Some("News".to_string()),
+            keyword_filter: None,
+            backfill_count: 0,
+        };
+
+        let created = storage
+            .create_reddit_subscription(&new_sub, Some("initial_post_id"))
+            .expect("create subscription");
+
+        assert_eq!(created.subreddit, "rust");
+        assert_eq!(created.guild_id, 12345);
+        assert_eq!(created.channel_id, 67890);
+
+        let list = storage
+            .list_reddit_subscriptions_for_guild(12345)
+            .expect("list subs");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, created.id);
+
+        let matching = storage
+            .find_subscriptions_for_subreddit("rust")
+            .expect("find subs");
+        assert_eq!(matching.len(), 1);
+
+        // Dedup check
+        assert!(!storage.has_reddit_post_been_delivered(created.id, "post_1").expect("dedup check"));
+        storage.record_reddit_post_delivered(created.id, "post_1").expect("record delivered");
+        assert!(storage.has_reddit_post_been_delivered(created.id, "post_1").expect("dedup check"));
+
+        // Pruning
+        let pruned = storage.prune_old_reddit_posts(0).expect("prune");
+        assert_eq!(pruned, 1);
+
+        // Delete
+        let deleted = storage.delete_reddit_subscription(created.id, 12345).expect("delete sub");
+        assert!(deleted);
+        let list_empty = storage
+            .list_reddit_subscriptions_for_guild(12345)
+            .expect("list subs");
+        assert_eq!(list_empty.len(), 0);
+
         drop(storage);
         let _ = fs::remove_dir_all(&temp_dir);
     }

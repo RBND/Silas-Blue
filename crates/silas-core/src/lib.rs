@@ -6,4 +6,5 @@ pub mod memory;
 pub mod pagination;
 pub mod permissions;
 pub mod quota;
+pub mod reddit;
 pub mod text;

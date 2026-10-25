@@ -264,6 +264,40 @@
             <div id="test-search-results" class="search-results-list"></div>
           </div>
         </div>
+
+        <!-- Global Reddit Settings Card -->
+        <div class="card" style="margin-top: 1.5rem;">
+          <div class="card-header-row">
+            <div>
+              <h3>Reddit Integration &amp; Companion App</h3>
+              <p class="section-desc">Configure Reddit OAuth2 client credentials for background polling and webhook secrets for Devvit real-time push.</p>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="cfg-reddit-client-id">Reddit App Client ID</label>
+              <input type="text" id="cfg-reddit-client-id" class="input-text" placeholder="e.g. 14-char script app ID">
+            </div>
+            <div class="form-group">
+              <label for="cfg-reddit-client-secret">Reddit App Client Secret <span id="badge-has-reddit-secret" class="badge badge-neutral">Unset</span></label>
+              <input type="password" id="cfg-reddit-client-secret" class="input-text" placeholder="Reddit Secret" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+              <label for="cfg-reddit-poll-interval">Polling Interval (Minutes)</label>
+              <input type="number" id="cfg-reddit-poll-interval" class="input-text" min="1" max="1440" value="2">
+            </div>
+            <div class="form-group">
+              <label for="cfg-reddit-webhook-secret">Devvit Webhook Secret <span id="badge-has-reddit-webhook-secret" class="badge badge-neutral">Unset</span></label>
+              <div class="form-row">
+                <input type="password" id="cfg-reddit-webhook-secret" class="input-text" placeholder="Shared secret token" autocomplete="new-password">
+                <button type="button" id="btn-gen-reddit-secret" class="btn btn-secondary btn-sm">Generate</button>
+              </div>
+            </div>
+          </div>
+          <div class="note-box" style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted, #a0aec0);">
+            💡 <strong>Devvit Push:</strong> Subreddit moderators can install the companion Devvit app in <code>devvit/</code>. Configure your Devvit app settings with webhook URL <code>https://&lt;your-domain&gt;/api/webhooks/reddit</code> and the secret token above.
+          </div>
+        </div>
       </section>
 
       <!-- VIEW 3: Server Configuration (4 Sub-Tabs) -->
@@ -284,6 +318,7 @@
           <button type="button" class="subtab-btn" data-subtab="subtab-quotas">2. Token Quotas</button>
           <button type="button" class="subtab-btn" data-subtab="subtab-persona">3. Persona, Memory &amp; Pagination</button>
           <button type="button" class="subtab-btn" data-subtab="subtab-forum">4. Forum Auto-Reply</button>
+          <button type="button" class="subtab-btn" data-subtab="subtab-reddit">5. Reddit Feeds</button>
         </div>
 
         <!-- Sub-Tab 1: Permissions & Channels -->
@@ -452,6 +487,60 @@
           <div class="form-group">
             <label for="gcfg-forum-prompt">Forum Auto-Reply System Prompt Override</label>
             <textarea id="gcfg-forum-prompt" class="input-textarea" rows="4" placeholder="Leave blank to use the server's primary system prompt"></textarea>
+          </div>
+        </div>
+
+        <!-- Sub-Tab 5: Reddit Feeds -->
+        <div id="subtab-reddit" class="subtab-panel card hidden">
+          <h3>Subreddit Feed Subscriptions</h3>
+          <p class="help-text">
+            Automatically post new Reddit submissions to specific Discord channels with rich embeds and filtering.
+          </p>
+
+          <div class="subcard">
+            <h4>Add Subreddit Monitor</h4>
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="reddit-new-sub">Subreddit Name</label>
+                <input type="text" id="reddit-new-sub" class="input-text" placeholder="e.g. rust or technology">
+              </div>
+              <div class="form-group">
+                <label for="reddit-new-channel">Target Discord Channel</label>
+                <select id="reddit-new-channel" class="input-select"></select>
+              </div>
+              <div class="form-group">
+                <label for="reddit-new-min-score">Minimum Upvote Score</label>
+                <input type="number" id="reddit-new-min-score" class="input-text" value="0" min="0">
+              </div>
+              <div class="form-group">
+                <label for="reddit-new-backfill">Immediate Backfill (0 - 5 posts)</label>
+                <input type="number" id="reddit-new-backfill" class="input-text" value="0" min="0" max="5">
+              </div>
+              <div class="form-group">
+                <label for="reddit-new-flairs">Allowed Flairs (optional, comma-separated)</label>
+                <input type="text" id="reddit-new-flairs" class="input-text" placeholder="News, Discussion, Release">
+              </div>
+              <div class="form-group">
+                <label for="reddit-new-keywords">Required Keywords (optional, comma-separated)</label>
+                <input type="text" id="reddit-new-keywords" class="input-text" placeholder="rust, announce, v1">
+              </div>
+              <div class="form-group checkbox-group">
+                <label>
+                  <input type="checkbox" id="reddit-new-nsfw" checked>
+                  Filter out NSFW / 18+ posts
+                </label>
+              </div>
+            </div>
+            <div style="margin-top: 1rem;">
+              <button type="button" id="btn-add-reddit-sub" class="btn btn-primary">Subscribe Channel</button>
+            </div>
+          </div>
+
+          <div class="subcard" style="margin-top: 1.5rem;">
+            <h4>Active Subscriptions in this Server</h4>
+            <div id="reddit-subs-list" style="margin-top: 0.75rem;">
+              <p class="muted">Loading subscriptions...</p>
+            </div>
           </div>
         </div>
       </section>

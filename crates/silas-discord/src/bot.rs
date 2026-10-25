@@ -98,6 +98,7 @@ pub struct BotState {
     pub connected_guilds: Arc<DashMap<u64, ConnectedGuildInfo>>,
     pub bot_identity: Arc<RwLock<BotUserIdentity>>,
     pub gateway_ready: Arc<AtomicBool>,
+    pub http: Arc<RwLock<Option<Arc<Http>>>>,
     pub started_at: Instant,
 }
 
@@ -139,6 +140,7 @@ pub struct BotController {
     connected_guilds: Arc<DashMap<u64, ConnectedGuildInfo>>,
     bot_identity: Arc<RwLock<BotUserIdentity>>,
     gateway_ready: Arc<AtomicBool>,
+    http: Arc<RwLock<Option<Arc<Http>>>>,
 }
 
 impl BotController {
@@ -151,9 +153,10 @@ impl BotController {
         updater: Arc<BotUpdater>,
         telemetry: TelemetryBus,
     ) -> Self {
-        Self {
+        let http = Arc::new(RwLock::new(None));
+        let this = Self {
             inner: Arc::new(tokio::sync::Mutex::new(None)),
-            storage,
+            storage: storage.clone(),
             ai,
             search,
             memory,
@@ -163,7 +166,21 @@ impl BotController {
             connected_guilds: Arc::new(DashMap::new()),
             bot_identity: Arc::new(RwLock::new(BotUserIdentity::default())),
             gateway_ready: Arc::new(AtomicBool::new(false)),
-        }
+            http: Arc::clone(&http),
+        };
+
+        // Spawn background Reddit feed polling worker
+        let http_getter = {
+            let http_clone = Arc::clone(&http);
+            Arc::new(move || http_clone.read().clone())
+        };
+        crate::reddit::spawn_reddit_poller(storage, http_getter);
+
+        this
+    }
+
+    pub fn http(&self) -> Option<Arc<Http>> {
+        self.http.read().clone()
     }
 
     pub fn memory(&self) -> &Arc<ConversationMemory> {
@@ -255,6 +272,7 @@ impl BotController {
             connected_guilds: Arc::clone(&self.connected_guilds),
             bot_identity: Arc::clone(&self.bot_identity),
             gateway_ready: Arc::clone(&self.gateway_ready),
+            http: Arc::clone(&self.http),
             started_at: Instant::now(),
         });
 
@@ -342,8 +360,11 @@ impl BotController {
 
         let shard_manager = Arc::clone(&client.shard_manager);
         let http = Arc::clone(&client.http);
+        *self.http.write() = Some(Arc::clone(&http));
+
         let gateway_ready = Arc::clone(&self.gateway_ready);
         let telemetry = self.telemetry.clone();
+        let http_on_exit = Arc::clone(&self.http);
 
         let join_handle = tokio::spawn(async move {
             if let Err(e) = client.start().await {
@@ -351,6 +372,7 @@ impl BotController {
                     message: format!("Discord Gateway client exited with error: {e}"),
                 });
             }
+            *http_on_exit.write() = None;
             gateway_ready.store(false, Ordering::Release);
         });
 
@@ -371,6 +393,7 @@ impl BotController {
             running.shard_manager.shutdown_all().await;
             let _ = tokio::time::timeout(std::time::Duration::from_secs(5), running.join_handle)
                 .await;
+            *self.http.write() = None;
             self.gateway_ready.store(false, Ordering::Release);
             self.connected_guilds.clear();
             self.telemetry.emit(TelemetryEvent::System {

@@ -231,9 +231,13 @@
       setBadgeState("badge-has-remote-key", Boolean(s.remote_api_key));
       setBadgeState("badge-has-tavily", Boolean(s.tavily_api_key));
       setBadgeState("badge-has-brave", Boolean(s.brave_api_key));
+      setBadgeState("badge-has-reddit-secret", Boolean(s.reddit_client_secret));
+      setBadgeState("badge-has-reddit-webhook-secret", Boolean(s.reddit_webhook_secret));
 
       setValue("cfg-owner-ids", s.bot_owner_id || "");
       setValue("cfg-client-id", s.discord_oauth_client_id || "");
+      setValue("cfg-reddit-client-id", s.reddit_client_id || "");
+      setValue("cfg-reddit-poll-interval", s.reddit_poll_interval_minutes || 2);
       setValue("cfg-ai-provider", s.backend_type || "ollama");
       setValue("cfg-ollama-url", s.ollama_url || "http://127.0.0.1:11434");
       setValue("cfg-llamacpp-url", s.llamacpp_url || "http://127.0.0.1:8081");
@@ -310,6 +314,13 @@
     const brvKey = getValue("cfg-brave-key");
     if (brvKey) payload.brave_api_key = brvKey;
 
+    payload.reddit_client_id = getValue("cfg-reddit-client-id");
+    payload.reddit_poll_interval_minutes = parseInt(getValue("cfg-reddit-poll-interval"), 10) || 2;
+    const redSec = getValue("cfg-reddit-client-secret");
+    if (redSec) payload.reddit_client_secret = redSec;
+    const redWebhookSec = getValue("cfg-reddit-webhook-secret");
+    if (redWebhookSec) payload.reddit_webhook_secret = redWebhookSec;
+
     try {
       await apiFetch("/api/settings", {
         method: "PUT",
@@ -320,6 +331,8 @@
       setValue("cfg-remote-api-key", "");
       setValue("cfg-tavily-key", "");
       setValue("cfg-brave-key", "");
+      setValue("cfg-reddit-client-secret", "");
+      setValue("cfg-reddit-webhook-secret", "");
       showToast("Saved global settings.");
       await loadGlobalSettings();
       await refreshStatus();
@@ -404,6 +417,7 @@
 
       renderMetadataChips(meta);
       renderQuotaUsage(qw);
+      await loadGuildRedditSubscriptions(currentGuildId);
     } catch (e) {
       showToast(`Failed to load server config: ${e.message}`);
     }
@@ -413,12 +427,23 @@
     const textChContainer = document.getElementById("chips-text-channels");
     const forumChContainer = document.getElementById("chips-forum-channels");
     const roleContainer = document.getElementById("chips-roles");
+    const redditChSelect = document.getElementById("reddit-new-channel");
 
     if (textChContainer) textChContainer.replaceChildren();
     if (forumChContainer) forumChContainer.replaceChildren();
     if (roleContainer) roleContainer.replaceChildren();
+    if (redditChSelect) redditChSelect.replaceChildren();
 
     if (!meta) return;
+
+    (meta.channels || []).forEach((ch) => {
+      if (ch.kind !== "forum" && ch.kind !== "category" && redditChSelect) {
+        const opt = document.createElement("option");
+        opt.value = ch.id;
+        opt.textContent = `#${ch.name}`;
+        redditChSelect.appendChild(opt);
+      }
+    });
 
     (meta.channels || []).forEach((ch) => {
       if (ch.kind === "forum" && forumChContainer) {
@@ -519,6 +544,105 @@
       await loadSelectedGuildConfig();
     } catch (e) {
       showToast(`Failed to save server config: ${e.message}`);
+    }
+  }
+
+  async function loadGuildRedditSubscriptions(guildId) {
+    const listEl = document.getElementById("reddit-subs-list");
+    if (!listEl) return;
+    if (!guildId || guildId === "0") {
+      listEl.innerHTML = '<p class="muted">Select a connected server to manage subreddit subscriptions.</p>';
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/guilds/${guildId}/reddit`);
+      const subs = res.subscriptions || [];
+      if (subs.length === 0) {
+        listEl.innerHTML = '<p class="muted">No active subreddit monitors for this server.</p>';
+        return;
+      }
+      listEl.replaceChildren();
+      subs.forEach((sub) => {
+        const row = document.createElement("div");
+        row.className = "reddit-sub-item";
+        row.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0.8rem; background: var(--bg-card-sub, #1f2430); border-radius: 6px; margin-bottom: 0.5rem;";
+        
+        const details = document.createElement("div");
+        let filters = [];
+        if (sub.filter_nsfw) filters.push("NSFW Filter");
+        if (sub.min_score > 0) filters.push(`Min Score: ${sub.min_score}`);
+        if (sub.flair_filter) filters.push(`Flairs: ${sub.flair_filter}`);
+        if (sub.keyword_filter) filters.push(`Keywords: ${sub.keyword_filter}`);
+        
+        details.innerHTML = `<strong>r/${sub.subreddit}</strong> ➔ <span class="badge badge-neutral">&lt;#${sub.channel_id}&gt;</span> ${filters.length ? `<small style="margin-left: 0.5rem; opacity: 0.8">(${filters.join(", ")})</small>` : ""}`;
+        
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn btn-danger btn-sm";
+        delBtn.textContent = "Unsubscribe";
+        delBtn.addEventListener("click", async () => {
+          if (!confirm(`Delete feed subscription for r/${sub.subreddit}?`)) return;
+          try {
+            await apiFetch(`/api/guilds/${guildId}/reddit/${sub.id}`, { method: "DELETE" });
+            showToast(`Unsubscribed from r/${sub.subreddit}`);
+            await loadGuildRedditSubscriptions(guildId);
+          } catch (e) {
+            showToast(`Failed to unsubscribe: ${e.message}`);
+          }
+        });
+
+        row.appendChild(details);
+        row.appendChild(delBtn);
+        listEl.appendChild(row);
+      });
+    } catch (e) {
+      listEl.innerHTML = `<p class="muted">Error loading subscriptions: ${e.message}</p>`;
+    }
+  }
+
+  async function addRedditSubscription() {
+    if (!currentGuildId || currentGuildId === "0") {
+      showToast("Please select a connected Discord server first.");
+      return;
+    }
+    const subName = getValue("reddit-new-sub").trim();
+    const channelId = getValue("reddit-new-channel");
+    if (!subName) {
+      showToast("Please enter a subreddit name.");
+      return;
+    }
+    if (!channelId) {
+      showToast("Please select a target channel.");
+      return;
+    }
+    const minScore = parseInt(getValue("reddit-new-min-score"), 10) || 0;
+    const backfill = parseInt(getValue("reddit-new-backfill"), 10) || 0;
+    const flairs = getValue("reddit-new-flairs").trim() || null;
+    const keywords = getValue("reddit-new-keywords").trim() || null;
+    const filterNsfw = getChecked("reddit-new-nsfw");
+
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/reddit`, {
+        method: "POST",
+        body: JSON.stringify({
+          guild_id: parseInt(currentGuildId, 10),
+          channel_id: parseInt(channelId, 10),
+          subreddit: subName,
+          filter_nsfw: filterNsfw,
+          min_score: minScore,
+          flair_filter: flairs,
+          keyword_filter: keywords,
+          backfill_count: backfill,
+        }),
+      });
+      showToast(`Successfully subscribed to r/${subName}`);
+      setValue("reddit-new-sub", "");
+      setValue("reddit-new-flairs", "");
+      setValue("reddit-new-keywords", "");
+      setValue("reddit-new-backfill", "0");
+      await loadGuildRedditSubscriptions(currentGuildId);
+    } catch (e) {
+      showToast(`Failed to subscribe: ${e.message}`);
     }
   }
 
@@ -809,6 +933,19 @@
     }
 
     bindClick("btn-save-guild-config", saveGuildConfig);
+    bindClick("btn-add-reddit-sub", addRedditSubscription);
+
+    bindClick("btn-gen-reddit-secret", async () => {
+      try {
+        const res = await apiFetch("/api/reddit/generate-secret", { method: "POST" });
+        if (res.secret) {
+          setValue("cfg-reddit-webhook-secret", res.secret);
+          showToast("Generated new webhook secret (click Save Global Settings to persist).");
+        }
+      } catch (e) {
+        showToast(`Failed to generate secret: ${e.message}`);
+      }
+    });
 
     bindClick("btn-reset-guild-quota", async () => {
       if (!currentGuildId) return;
