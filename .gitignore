@@ -24,3 +24,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Local AI agent guidelines with private network/host details
+AGENTS.md
+AGENTS.local.md
