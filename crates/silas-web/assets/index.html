@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Silas Blue v6.0.0 — Administration Console</title>
+  <title>Silas Blue v6.0.1 — Administration Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
   <link rel="stylesheet" href="/app.css">
@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v6.0.0</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.1</span>
         </div>
       </div>
 
@@ -376,22 +376,20 @@
               <input type="text" id="gcfg-default-model" class="input-text" placeholder="Leave blank to use global active model">
             </div>
             <div class="form-group">
-              <label for="gcfg-allowed-channels">Allowed Channel IDs (comma-separated, empty = all channels)</label>
-              <input type="text" id="gcfg-allowed-channels" class="input-text" placeholder="e.g. 112233445566778899">
-              <div id="chips-text-channels" class="chip-bar"></div>
+              <label for="gcfg-allowed-channels">Allowed Channels (empty = all channels allowed)</label>
+              <div id="gcfg-allowed-channels" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="gcfg-prompt-roles">Allowed Prompt Role IDs (empty = @everyone allowed)</label>
-              <input type="text" id="gcfg-prompt-roles" class="input-text" placeholder="Role IDs allowed to chat with bot">
-              <div id="chips-roles" class="chip-bar"></div>
+              <label for="gcfg-prompt-roles">Allowed Prompt Roles (empty = @everyone allowed)</label>
+              <div id="gcfg-prompt-roles" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="gcfg-model-roles">Model Switch Role IDs (empty = Admins only)</label>
-              <input type="text" id="gcfg-model-roles" class="input-text" placeholder="Role IDs allowed to run /setmodel">
+              <label for="gcfg-model-roles">Model Switch Roles (empty = Admins only)</label>
+              <div id="gcfg-model-roles" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="gcfg-admin-roles">Bot Admin Role IDs (empty = Discord Manage Server/Admin)</label>
-              <input type="text" id="gcfg-admin-roles" class="input-text" placeholder="Role IDs allowed to change server bot settings">
+              <label for="gcfg-admin-roles">Bot Admin Roles (empty = Discord Manage Server/Admin)</label>
+              <div id="gcfg-admin-roles" class="combobox-container"></div>
             </div>
           </div>
         </div>
@@ -522,9 +520,8 @@
             </div>
           </div>
           <div class="form-group">
-            <label for="gcfg-forum-channels">Target Forum Channel IDs (comma-separated, empty = all Forum Channels)</label>
-            <input type="text" id="gcfg-forum-channels" class="input-text" placeholder="Leave blank for all forum channels">
-            <div id="chips-forum-channels" class="chip-bar"></div>
+            <label for="gcfg-forum-channels">Target Forum Channels (empty = all Forum Channels)</label>
+            <div id="gcfg-forum-channels" class="combobox-container"></div>
           </div>
           <div class="form-group">
             <label for="gcfg-forum-prompt">Forum Auto-Reply System Prompt Override</label>
@@ -611,6 +608,7 @@
               <select id="update-channel-select" class="input-select">
                 <option value="stable">Stable Releases (Recommended for production)</option>
                 <option value="prerelease">Pre-release / Beta (Bleeding edge features)</option>
+                <option value="latest">Latest GitHub Releases (Bleeding edge features)</option>
               </select>
             </div>
           </div>
@@ -674,9 +672,9 @@
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group">
-              <label for="mod-filter-user">Filter by Discord User ID</label>
-              <input type="text" id="mod-filter-user" class="input-text" placeholder="Leave empty for all server cases">
+            <div class="form-group" style="flex: 2; min-width: 260px;">
+              <label for="mod-filter-user">Filter by Member</label>
+              <div id="mod-filter-user" class="combobox-container"></div>
             </div>
             <div class="form-group form-actions-inline">
               <button type="button" id="btn-apply-case-filter" class="btn btn-secondary">Apply Filter</button>
@@ -879,12 +877,12 @@
               <textarea id="am-whitelisted-domains" class="input-textarea" rows="3" placeholder="discord.com, youtube.com, github.com"></textarea>
             </div>
             <div class="form-group">
-              <label for="am-ignored-channels">Ignored Channel IDs (bypass automod, comma-separated)</label>
-              <input type="text" id="am-ignored-channels" class="input-text" placeholder="123456789, 987654321">
+              <label for="am-ignored-channels">Ignored Channels (bypass automod)</label>
+              <div id="am-ignored-channels" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="am-ignored-roles">Ignored Role IDs (bypass automod, comma-separated)</label>
-              <input type="text" id="am-ignored-roles" class="input-text" placeholder="1122334455, 6677889900">
+              <label for="am-ignored-roles">Ignored Roles (bypass automod)</label>
+              <div id="am-ignored-roles" class="combobox-container"></div>
             </div>
           </div>
         </div>
@@ -988,28 +986,28 @@
           <p class="help-text">Leave specific channels unset to route everything into the Unified Log Channel, or isolate channels per event category.</p>
           <div class="form-grid">
             <div class="form-group">
-              <label for="log-unified-channel">Unified All-Events Channel ID</label>
-              <input type="text" id="log-unified-channel" class="input-text" placeholder="Channel ID for all events (fallback)">
+              <label for="log-unified-channel">Unified All-Events Channel</label>
+              <div id="log-unified-channel" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="log-mod-channel">Moderation Log Channel ID</label>
-              <input type="text" id="log-mod-channel" class="input-text" placeholder="Warns, strikes, kicks, bans, mutes">
+              <label for="log-mod-channel">Moderation Log Channel</label>
+              <div id="log-mod-channel" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="log-message-channel">Message Log Channel ID</label>
-              <input type="text" id="log-message-channel" class="input-text" placeholder="Edits (with diffs) and deletions">
+              <label for="log-message-channel">Message Log Channel</label>
+              <div id="log-message-channel" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="log-member-channel">Member Lifecycle Channel ID</label>
-              <input type="text" id="log-member-channel" class="input-text" placeholder="Joins, leaves, role updates, nick changes">
+              <label for="log-member-channel">Member Lifecycle Channel</label>
+              <div id="log-member-channel" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="log-server-channel">Server Structure Channel ID</label>
-              <input type="text" id="log-server-channel" class="input-text" placeholder="Channels, roles, emoji modifications">
+              <label for="log-server-channel">Server Structure Channel</label>
+              <div id="log-server-channel" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="log-voice-channel">Voice Activity Channel ID</label>
-              <input type="text" id="log-voice-channel" class="input-text" placeholder="Voice join, leave, channel switches, mute/deaf">
+              <label for="log-voice-channel">Voice Activity Channel</label>
+              <div id="log-voice-channel" class="combobox-container"></div>
             </div>
           </div>
         </div>
@@ -1028,12 +1026,12 @@
               </div>
             </div>
             <div class="form-group">
-              <label for="log-ignored-channels">Ignored Channel IDs (comma-separated)</label>
-              <input type="text" id="log-ignored-channels" class="input-text" placeholder="No message edit/delete logs from these channels">
+              <label for="log-ignored-channels">Ignored Channels</label>
+              <div id="log-ignored-channels" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="log-ignored-roles">Ignored Role IDs (comma-separated)</label>
-              <input type="text" id="log-ignored-roles" class="input-text" placeholder="Actions by these roles will not be logged">
+              <label for="log-ignored-roles">Ignored Roles</label>
+              <div id="log-ignored-roles" class="combobox-container"></div>
             </div>
           </div>
         </div>
@@ -1056,8 +1054,8 @@
           <h3>Welcome Announcements</h3>
           <div class="form-grid">
             <div class="form-group">
-              <label for="greet-welcome-channel">Welcome Public Channel ID</label>
-              <input type="text" id="greet-welcome-channel" class="input-text" placeholder="Channel ID for welcome posts">
+              <label for="greet-welcome-channel">Welcome Public Channel</label>
+              <div id="greet-welcome-channel" class="combobox-container"></div>
             </div>
             <div class="form-group checkbox-group">
               <label><input type="checkbox" id="greet-dm-enabled"> Send Direct Message (DM) to New User</label>
@@ -1098,8 +1096,8 @@
           <h3>Farewell Announcements</h3>
           <div class="form-grid">
             <div class="form-group">
-              <label for="greet-farewell-channel">Farewell Channel ID</label>
-              <input type="text" id="greet-farewell-channel" class="input-text" placeholder="Channel ID for farewell posts">
+              <label for="greet-farewell-channel">Farewell Channel</label>
+              <div id="greet-farewell-channel" class="combobox-container"></div>
             </div>
             <div class="form-group" style="grid-column: 1 / -1;">
               <label for="greet-farewell-msg">Farewell Message Text</label>
@@ -1116,12 +1114,12 @@
           <h3>Autorole Assignment</h3>
           <div class="form-grid">
             <div class="form-group">
-              <label for="greet-member-roles">Human Member Autorole IDs (comma-separated)</label>
-              <input type="text" id="greet-member-roles" class="input-text" placeholder="1122334455, 6677889900">
+              <label for="greet-member-roles">Human Member Autoroles</label>
+              <div id="greet-member-roles" class="combobox-container"></div>
             </div>
             <div class="form-group">
-              <label for="greet-bot-roles">Bot Autorole IDs (comma-separated)</label>
-              <input type="text" id="greet-bot-roles" class="input-text" placeholder="9988776655">
+              <label for="greet-bot-roles">Bot Autoroles</label>
+              <div id="greet-bot-roles" class="combobox-container"></div>
             </div>
             <div class="form-group">
               <label for="greet-delay-seconds">Autorole Delay (Seconds, 0 for immediate)</label>
@@ -1499,8 +1497,8 @@
           </div>
           <div class="modal-body">
             <div class="form-group">
-              <label for="mcase-user-id">Target Discord User ID *</label>
-              <input type="text" id="mcase-user-id" class="input-text" placeholder="e.g. 123456789012345678" required>
+              <label for="mcase-user-id">Target Guild Member *</label>
+              <div id="mcase-user-id" class="combobox-container"></div>
             </div>
             <div class="form-group">
               <label for="mcase-action-type">Infraction Action Type *</label>
@@ -1518,8 +1516,9 @@
               <input type="text" id="mcase-reason" class="input-text" placeholder="Reason for penalty" value="Manual disciplinary action">
             </div>
             <div class="form-group">
-              <label for="mcase-duration">Duration in Seconds (Timeouts &amp; Tempbans only)</label>
-              <input type="number" id="mcase-duration" class="input-text" min="0" placeholder="e.g. 3600 for 1 hour">
+              <label for="mcase-duration">Duration (e.g. 1d 2h, 30m, 1hr — empty = permanent)</label>
+              <input type="text" id="mcase-duration" class="input-text" placeholder="e.g. 1hr, 2d, or leave blank for permanent">
+              <div id="mcase-duration-preview" class="duration-preview-text">Normalized: Permanent</div>
             </div>
           </div>
           <div class="modal-footer">
@@ -1591,8 +1590,8 @@
                 </select>
               </div>
               <div class="form-group" style="grid-column: 1 / -1;">
-                <label for="rr-input-reqrole">Required Role ID (For Binding mode, optional)</label>
-                <input type="text" id="rr-input-reqrole" class="input-text" placeholder="Leave empty if none">
+                <label for="rr-input-reqrole">Required Role (For Binding mode, optional)</label>
+                <div id="rr-input-reqrole" class="combobox-container"></div>
               </div>
             </div>
 
@@ -1649,12 +1648,12 @@
                 <label><input type="checkbox" id="trig-reply-dm"> Reply in Author DM</label>
               </div>
               <div class="form-group" style="grid-column: 1 / -1;">
-                <label for="trig-roles">Allowed Role IDs (comma-separated, leave blank for all)</label>
-                <input type="text" id="trig-roles" class="input-text" placeholder="12345, 67890">
+                <label for="trig-roles">Allowed Roles (leave blank for all)</label>
+                <div id="trig-roles" class="combobox-container"></div>
               </div>
               <div class="form-group" style="grid-column: 1 / -1;">
-                <label for="trig-channels">Ignored Channel IDs (comma-separated)</label>
-                <input type="text" id="trig-channels" class="input-text" placeholder="112233, 445566">
+                <label for="trig-channels">Ignored Channels</label>
+                <div id="trig-channels" class="combobox-container"></div>
               </div>
               <div class="form-group" style="grid-column: 1 / -1;">
                 <label for="trig-response">Response Template (TagScript supported: <code>{user}</code>, <code>{ai:...}</code>, <code>{embed}</code>) *</label>

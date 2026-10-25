@@ -367,6 +367,11 @@ label, .field-label {
   outline-offset: 1px;
 }
 
+.input-select option {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+
 .input-with-btn {
   display: flex;
   gap: 0.5rem;

@@ -606,8 +606,8 @@ impl AppSettings {
         }
         if let Some(ch) = patch.update_channel {
             let low = ch.trim().to_ascii_lowercase();
-            self.update_channel = if low == "latest" {
-                "latest".to_owned()
+            self.update_channel = if low == "latest" || low == "prerelease" {
+                low
             } else {
                 "stable".to_owned()
             };

@@ -181,8 +181,77 @@
   }
 
   // ==========================================================================
-  // Reusable Combobox Component
+  // Reusable Combobox Component & Autocomplete Registries
   // ==========================================================================
+  const comboboxRegistry = new Map();
+  const memberCache = new Map();
+
+  function resolveRoleLabel(id) {
+    if (!id) return "";
+    const roles = discordGuildData.roles.get(currentGuildId) || [];
+    const r = roles.find((x) => String(x.id) === String(id));
+    return r ? `@${r.name}` : `Role (${id})`;
+  }
+
+  function resolveChannelLabel(id) {
+    if (!id) return "";
+    const channels = discordGuildData.channels.get(currentGuildId) || [];
+    const ch = channels.find((x) => String(x.id) === String(id));
+    return ch ? `#${ch.name} ${formatChannelKind(ch.kind)}` : `Channel (${id})`;
+  }
+
+  function resolveMemberLabel(id) {
+    if (!id) return "";
+    const m = memberCache.get(String(id));
+    if (m) {
+      return m.display_name ? `${m.display_name} (@${m.username})` : `@${m.username}`;
+    }
+    return `User (${id})`;
+  }
+
+  async function getRoleItems(query) {
+    const roles = await getGuildRoles(currentGuildId);
+    const q = (query || "").trim().toLowerCase();
+    return roles
+      .filter((r) => !q || (r.name || "").toLowerCase().includes(q) || String(r.id).includes(q))
+      .map((r) => ({
+        id: r.id,
+        label: `@${r.name}`,
+        sublabel: r.managed ? "Managed Integration" : (r.color ? `#${r.color}` : undefined),
+      }));
+  }
+
+  function getChannelItemsFetcher(filterKinds = null) {
+    return async function (query) {
+      const channels = await getGuildChannels(currentGuildId);
+      const q = (query || "").trim().toLowerCase();
+      return channels
+        .filter((ch) => {
+          if (filterKinds && !filterKinds.includes(ch.kind)) return false;
+          if (!q) return true;
+          return (ch.name || "").toLowerCase().includes(q) || String(ch.id).includes(q);
+        })
+        .map((ch) => ({
+          id: ch.id,
+          label: `#${ch.name} ${formatChannelKind(ch.kind)}`,
+          sublabel: ch.kind,
+        }));
+    };
+  }
+
+  async function getMemberItems(query) {
+    const q = (query || "").trim();
+    if (q.length < 2) return [];
+    const members = await searchGuildMembers(currentGuildId, q);
+    members.forEach((m) => memberCache.set(String(m.id), m));
+    return members.map((m) => ({
+      id: m.id,
+      label: m.display_name ? `${m.display_name} (@${m.username})` : `@${m.username}`,
+      sublabel: `ID: ${m.id}`,
+      icon: m.avatar_url,
+    }));
+  }
+
   function createCombobox({
     container,
     placeholder = "Search...",
@@ -369,16 +438,23 @@
     }
 
     input.addEventListener("focus", async () => {
-      const items = await getItems(input.value);
+      if (!multiSelect && selectedIds) {
+        input.select();
+      }
+      const items = await getItems("");
       renderOptions(items);
     });
 
     input.addEventListener("input", () => {
+      if (!multiSelect && input.value.trim() === "") {
+        selectedIds = null;
+        if (onChange) onChange(null);
+      }
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(async () => {
         const items = await getItems(input.value);
         renderOptions(items);
-      }, 250);
+      }, 200);
     });
 
     input.addEventListener("keydown", (e) => {
@@ -435,13 +511,15 @@
     }
 
     return {
+      isMulti: multiSelect,
       getValue: () => (multiSelect ? Array.from(selectedIds) : selectedIds),
       setValue: (val) => {
         if (multiSelect) {
           selectedIds = new Set(Array.isArray(val) ? val.map(String) : []);
           updateChips();
+          input.value = "";
         } else {
-          selectedIds = val ? String(val) : null;
+          selectedIds = val !== undefined && val !== null && String(val).trim() !== "" ? String(val).trim() : null;
           updateSingleDisplay();
         }
       },
@@ -450,6 +528,60 @@
         else updateSingleDisplay();
       },
     };
+  }
+
+  function initRoleCombobox(containerOrId, { multiSelect = false, placeholder = "Search roles...", initialValue = null, onChange = null } = {}) {
+    const container = typeof containerOrId === "string" ? document.getElementById(containerOrId) : containerOrId;
+    if (!container) return null;
+    const cb = createCombobox({
+      container,
+      placeholder,
+      multiSelect,
+      getItems: getRoleItems,
+      resolveLabel: resolveRoleLabel,
+      initialValue,
+      onChange,
+    });
+    if (typeof containerOrId === "string") {
+      comboboxRegistry.set(containerOrId, cb);
+    }
+    return cb;
+  }
+
+  function initChannelCombobox(containerOrId, { multiSelect = false, filterKinds = null, placeholder = "Search channels...", initialValue = null, onChange = null } = {}) {
+    const container = typeof containerOrId === "string" ? document.getElementById(containerOrId) : containerOrId;
+    if (!container) return null;
+    const cb = createCombobox({
+      container,
+      placeholder,
+      multiSelect,
+      getItems: getChannelItemsFetcher(filterKinds),
+      resolveLabel: resolveChannelLabel,
+      initialValue,
+      onChange,
+    });
+    if (typeof containerOrId === "string") {
+      comboboxRegistry.set(containerOrId, cb);
+    }
+    return cb;
+  }
+
+  function initUserCombobox(containerOrId, { placeholder = "Search member by username or display name...", initialValue = null, onChange = null } = {}) {
+    const container = typeof containerOrId === "string" ? document.getElementById(containerOrId) : containerOrId;
+    if (!container) return null;
+    const cb = createCombobox({
+      container,
+      placeholder,
+      multiSelect: false,
+      getItems: getMemberItems,
+      resolveLabel: resolveMemberLabel,
+      initialValue,
+      onChange,
+    });
+    if (typeof containerOrId === "string") {
+      comboboxRegistry.set(containerOrId, cb);
+    }
+    return cb;
   }
 
   // ==========================================================================
@@ -701,7 +833,19 @@
       setValue("cfg-remote-base-url", s.remote_base_url || "");
       setValue("cfg-remote-model", s.remote_model || "");
       setValue("cfg-search-provider", s.web_search_provider || "bing");
-      setValue("update-channel-select", s.update_channel || "stable");
+      const rawCh = (s.update_channel || "stable").toLowerCase();
+      const normCh = (rawCh === "latest" || rawCh === "prerelease") ? rawCh : "stable";
+      setValue("update-channel-select", normCh);
+      const chBadge = document.getElementById("channel-status-badge");
+      if (chBadge) {
+        if (normCh === "latest" || normCh === "prerelease") {
+          chBadge.className = "badge badge-warning";
+          chBadge.textContent = "Active: Pre-release";
+        } else {
+          chBadge.className = "badge badge-success";
+          chBadge.textContent = "Active: Stable";
+        }
+      }
 
       await refreshModelDropdown(s.active_model, false);
     } catch (e) {
@@ -882,6 +1026,7 @@
   async function loadSelectedGuildConfig() {
     if (!currentGuildId) return;
     try {
+      await Promise.all([getGuildRoles(currentGuildId), getGuildChannels(currentGuildId)]);
       const res = await apiFetch(`/api/guilds/${currentGuildId}/config`);
       const c = res.config || {};
       const meta = res.metadata || null;
@@ -889,10 +1034,10 @@
 
       setValue("gcfg-bot-nickname", (meta && meta.bot_nickname) || "");
       setValue("gcfg-default-model", c.default_model || "");
-      setValue("gcfg-allowed-channels", (c.reply_users || []).join(", "));
-      setValue("gcfg-prompt-roles", (c.reply_roles || []).join(", "));
-      setValue("gcfg-model-roles", (c.change_model_roles || []).join(", "));
-      setValue("gcfg-admin-roles", (c.change_permission_roles || []).join(", "));
+      setValue("gcfg-allowed-channels", c.reply_users || []);
+      setValue("gcfg-prompt-roles", c.reply_roles || []);
+      setValue("gcfg-model-roles", c.change_model_roles || []);
+      setValue("gcfg-admin-roles", c.change_permission_roles || []);
 
       const tq = c.token_quotas || {};
       const defaultLimit =
@@ -916,77 +1061,15 @@
 
       setChecked("gcfg-forum-enabled", Boolean(c.forum_auto_reply_enabled));
       setChecked("gcfg-forum-search", Boolean(c.web_search_enabled));
-      setValue("gcfg-forum-channels", (c.forum_monitored_channels || []).join(", "));
+      setValue("gcfg-forum-channels", c.forum_monitored_channels || []);
       setValue("gcfg-forum-prompt", c.forum_system_prompt || "");
 
-      renderMetadataChips(meta);
+      comboboxRegistry.forEach((cb) => cb.refresh());
       renderQuotaUsage(qw);
       await loadGuildRedditSubscriptions(currentGuildId);
     } catch (e) {
       showToast(`Failed to load server config: ${e.message}`);
     }
-  }
-
-  function renderMetadataChips(meta) {
-    const textChContainer = document.getElementById("chips-text-channels");
-    const forumChContainer = document.getElementById("chips-forum-channels");
-    const roleContainer = document.getElementById("chips-roles");
-    const redditChSelect = document.getElementById("reddit-new-channel");
-
-    if (textChContainer) textChContainer.replaceChildren();
-    if (forumChContainer) forumChContainer.replaceChildren();
-    if (roleContainer) roleContainer.replaceChildren();
-    if (redditChSelect) redditChSelect.replaceChildren();
-
-    if (!meta) return;
-
-    (meta.channels || []).forEach((ch) => {
-      if (ch.kind !== "forum" && ch.kind !== "category" && redditChSelect) {
-        const opt = document.createElement("option");
-        opt.value = ch.id;
-        opt.textContent = `#${ch.name}`;
-        redditChSelect.appendChild(opt);
-      }
-    });
-
-    (meta.channels || []).forEach((ch) => {
-      if (ch.kind === "forum" && forumChContainer) {
-        forumChContainer.appendChild(
-          createToggleChip(`#${ch.name}`, ch.id, "gcfg-forum-channels")
-        );
-      }
-    });
-
-    (meta.roles || []).forEach((r) => {
-      if (roleContainer) {
-        roleContainer.appendChild(
-          createToggleChip(`@${r.name}`, r.id, "gcfg-prompt-roles")
-        );
-      }
-    });
-  }
-
-  function createToggleChip(label, idValue, targetInputId) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip";
-    btn.textContent = `${label} (${idValue})`;
-    btn.addEventListener("click", () => {
-      const input = document.getElementById(targetInputId);
-      if (!input) return;
-      const items = input.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      const idx = items.indexOf(idValue);
-      if (idx >= 0) {
-        items.splice(idx, 1);
-      } else {
-        items.push(idValue);
-      }
-      input.value = items.join(", ");
-    });
-    return btn;
   }
 
   function renderQuotaUsage(qw) {
@@ -1087,7 +1170,7 @@
 
         const chBadge = document.createElement("span");
         chBadge.className = "badge badge-neutral";
-        chBadge.textContent = `<#${sub.channel_id}>`;
+        chBadge.textContent = resolveChannelLabel(sub.channel_id);
         details.appendChild(chBadge);
 
         let filters = [];
@@ -1314,13 +1397,37 @@
   // DOM Utilities & Event Wiring
   // ==========================================================================
   function getValue(id) {
+    if (comboboxRegistry.has(id)) {
+      const cb = comboboxRegistry.get(id);
+      const val = cb.getValue();
+      if (Array.isArray(val)) {
+        return val.join(", ");
+      }
+      return val || "";
+    }
     const el = document.getElementById(id);
     return el ? el.value.trim() : "";
   }
 
   function setValue(id, val) {
+    if (comboboxRegistry.has(id)) {
+      const cb = comboboxRegistry.get(id);
+      if (cb.isMulti) {
+        if (Array.isArray(val)) {
+          cb.setValue(val);
+        } else if (typeof val === "string") {
+          const items = val.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+          cb.setValue(items);
+        } else {
+          cb.setValue([]);
+        }
+      } else {
+        cb.setValue(val !== undefined && val !== null ? String(val) : null);
+      }
+      return;
+    }
     const el = document.getElementById(id);
-    if (el) el.value = val;
+    if (el) el.value = val !== undefined && val !== null ? val : "";
   }
 
   function getChecked(id) {
@@ -1831,14 +1938,14 @@
 
         // Target User
         const tdUser = document.createElement("td");
-        const codeUser = document.createElement("code");
-        codeUser.textContent = String(c.user_id);
-        tdUser.appendChild(codeUser);
+        tdUser.textContent = resolveMemberLabel(c.user_id);
+        tdUser.title = `ID: ${c.user_id}`;
         tr.appendChild(tdUser);
 
         // Moderator
         const tdMod = document.createElement("td");
-        tdMod.textContent = c.moderator_id === 0 ? "System / Automod" : String(c.moderator_id);
+        tdMod.textContent = c.moderator_id === 0 ? "System / Automod" : resolveMemberLabel(c.moderator_id);
+        tdMod.title = `ID: ${c.moderator_id}`;
         tr.appendChild(tdMod);
 
         // Action Type
@@ -1862,7 +1969,7 @@
         // Duration / Expires
         const tdDuration = document.createElement("td");
         if (c.duration_seconds) {
-          tdDuration.textContent = `${c.duration_seconds}s`;
+          tdDuration.textContent = formatDurationHuman(c.duration_seconds);
         } else if (c.expires_at) {
           const exp = new Date(c.expires_at * 1000).toLocaleString();
           tdDuration.textContent = `Until ${exp}`;
@@ -2021,6 +2128,7 @@
   async function loadAutomodConfig() {
     if (!currentGuildId) return;
     try {
+      await Promise.all([getGuildChannels(currentGuildId), getGuildRoles(currentGuildId)]);
       const res = await apiFetch(`/api/guilds/${currentGuildId}/automod`);
       currentAutomodConfig = res.config || res;
 
@@ -2039,8 +2147,8 @@
 
       setValue("am-blocked-words", (currentAutomodConfig.blocked_words || []).join(", "));
       setValue("am-whitelisted-domains", (currentAutomodConfig.whitelisted_domains || []).join(", "));
-      setValue("am-ignored-channels", (currentAutomodConfig.ignored_channels || []).join(", "));
-      setValue("am-ignored-roles", (currentAutomodConfig.ignored_roles || []).join(", "));
+      setValue("am-ignored-channels", currentAutomodConfig.ignored_channels || []);
+      setValue("am-ignored-roles", currentAutomodConfig.ignored_roles || []);
 
       const weights = currentAutomodConfig.strike_weights || {};
       setValue("am-weight-spam", String(weights.spam ?? 2));
@@ -2050,6 +2158,7 @@
       setValue("am-weight-mention", String(weights.mention ?? 3));
       setValue("am-decay-hours", String(currentAutomodConfig.strike_decay_hours ?? 168));
 
+      comboboxRegistry.forEach((cb) => cb.refresh());
       renderLadderTable();
     } catch (err) {
       showToast(`Failed to load automod config: ${err.message}`);
@@ -2264,6 +2373,7 @@
   async function loadLoggingConfig() {
     if (!currentGuildId) return;
     try {
+      await Promise.all([getGuildChannels(currentGuildId), getGuildRoles(currentGuildId)]);
       const res = await apiFetch(`/api/guilds/${currentGuildId}/logging`);
       const cfg = res.config || res;
 
@@ -2275,13 +2385,15 @@
       setValue("log-voice-channel", cfg.voice_channel_id ? String(cfg.voice_channel_id) : "");
 
       setChecked("log-bots", Boolean(cfg.log_bots));
-      setValue("log-ignored-channels", (cfg.ignored_channels || []).join(", "));
-      setValue("log-ignored-roles", (cfg.ignored_roles || []).join(", "));
+      setValue("log-ignored-channels", cfg.ignored_channels || []);
+      setValue("log-ignored-roles", cfg.ignored_roles || []);
 
       const colNum = cfg.embed_color || 3553599;
       const hex = `#${colNum.toString(16).padStart(6, "0")}`;
       setValue("log-embed-color-picker", hex);
       setValue("log-embed-color-hex", hex);
+
+      comboboxRegistry.forEach((cb) => cb.refresh());
     } catch (err) {
       showToast(`Failed to load logging config: ${err.message}`);
     }
@@ -2337,6 +2449,7 @@
   async function loadGreetingsConfig() {
     if (!currentGuildId) return;
     try {
+      await Promise.all([getGuildChannels(currentGuildId), getGuildRoles(currentGuildId)]);
       const res = await apiFetch(`/api/guilds/${currentGuildId}/greetings`);
       const cfg = res.config || res;
 
@@ -2350,10 +2463,11 @@
       setValue("greet-farewell-msg", cfg.farewell_message || "");
       setValue("greet-farewell-embed", cfg.farewell_embed_json || "");
 
-      setValue("greet-member-roles", (cfg.member_autorole_ids || []).join(", "));
-      setValue("greet-bot-roles", (cfg.bot_autorole_ids || []).join(", "));
+      setValue("greet-member-roles", cfg.member_autorole_ids || []);
+      setValue("greet-bot-roles", cfg.bot_autorole_ids || []);
       setValue("greet-delay-seconds", String(cfg.autorole_delay_seconds ?? 0));
 
+      comboboxRegistry.forEach((cb) => cb.refresh());
       updateGreetingsEmbedPreview();
     } catch (err) {
       showToast(`Failed to load greetings config: ${err.message}`);
@@ -2475,7 +2589,7 @@
 
         const titleDiv = document.createElement("div");
         const titleH4 = document.createElement("strong");
-        titleH4.textContent = `Channel #${g.channel_id}`;
+        titleH4.textContent = resolveChannelLabel(g.channel_id);
         titleDiv.appendChild(titleH4);
 
         const subP = document.createElement("div");
@@ -2504,7 +2618,7 @@
         if (g.required_role_id) {
           const reqDiv = document.createElement("div");
           reqDiv.className = "status-note";
-          reqDiv.textContent = `Requires Role ID: ${g.required_role_id}`;
+          reqDiv.textContent = `Requires Role: ${resolveRoleLabel(g.required_role_id)}`;
           card.appendChild(reqDiv);
         }
 
@@ -2529,7 +2643,7 @@
             const chip = document.createElement("span");
             chip.className = "rr-entry-badge";
             const label = e.button_label ? ` "${e.button_label}"` : "";
-            chip.textContent = `${e.emoji_or_custom_id} ➔ Role ${e.role_id}${label}`;
+            chip.textContent = `${e.emoji_or_custom_id} ➔ ${resolveRoleLabel(e.role_id)}${label}`;
             entriesList.appendChild(chip);
           });
         }
@@ -2577,22 +2691,27 @@
     const row = document.createElement("div");
     row.className = "form-row";
     row.style.alignItems = "center";
+    row.style.gap = "0.5rem";
 
     const inEmoji = document.createElement("input");
     inEmoji.type = "text";
     inEmoji.className = "input-text";
-    inEmoji.placeholder = "Emoji / Custom ID (e.g. 👍)";
+    inEmoji.placeholder = "Emoji (e.g. 👍)";
     inEmoji.value = emoji;
-    inEmoji.style.flex = "1";
+    inEmoji.style.width = "100px";
     row.appendChild(inEmoji);
 
-    const inRole = document.createElement("input");
-    inRole.type = "text";
-    inRole.className = "input-text";
-    inRole.placeholder = "Role ID";
-    inRole.value = roleId;
-    inRole.style.flex = "1";
-    row.appendChild(inRole);
+    const cbRoleContainer = document.createElement("div");
+    cbRoleContainer.className = "combobox-container";
+    cbRoleContainer.style.flex = "2";
+    row.appendChild(cbRoleContainer);
+
+    const cbRole = initRoleCombobox(cbRoleContainer, {
+      multiSelect: false,
+      placeholder: "Select target role...",
+      initialValue: roleId || null,
+    });
+    row._cbRole = cbRole;
 
     const inLabel = document.createElement("input");
     inLabel.type = "text";
@@ -2618,7 +2737,7 @@
     btnRemove.type = "button";
     btnRemove.className = "btn btn-danger btn-sm";
     btnRemove.textContent = "×";
-        btnRemove.addEventListener("click", () => row.remove());
+    btnRemove.addEventListener("click", () => row.remove());
     row.appendChild(btnRemove);
 
     list.appendChild(row);
@@ -2641,20 +2760,18 @@
     const rows = document.querySelectorAll("#rr-entries-builder .form-row");
     rows.forEach((r) => {
       const inputs = r.querySelectorAll("input");
+      const emoji = inputs[0] ? inputs[0].value.trim() : "";
+      const role = r._cbRole ? (r._cbRole.getValue() || "") : "";
+      const lbl = inputs[1] ? inputs[1].value.trim() : "";
       const sel = r.querySelector("select");
-      if (inputs.length >= 2) {
-        const emoji = inputs[0].value.trim();
-        const role = inputs[1].value.trim();
-        const lbl = inputs[2] ? inputs[2].value.trim() : "";
-        const style = sel ? sel.value : "primary";
-        if (emoji && role) {
-          entries.push({
-            emoji_or_custom_id: emoji,
-            role_id: role,
-            button_label: lbl.length > 0 ? lbl : null,
-            button_style: style,
-          });
-        }
+      const style = sel ? sel.value : "primary";
+      if (emoji && role) {
+        entries.push({
+          emoji_or_custom_id: emoji,
+          role_id: role,
+          button_label: lbl.length > 0 ? lbl : null,
+          button_style: style,
+        });
       }
     });
 
@@ -2984,7 +3101,7 @@
 
     function updateBadge(val) {
       if (!badge) return;
-      if (val === "prerelease") {
+      if (val === "prerelease" || val === "latest") {
         badge.className = "badge badge-warning";
         badge.textContent = "Active: Pre-release";
       } else {
@@ -3532,6 +3649,63 @@
   }
 
 
+  function initAllComboboxes() {
+    // Server Configuration > Permissions & Channels
+    initChannelCombobox("gcfg-allowed-channels", { multiSelect: true, placeholder: "Search channels..." });
+    initRoleCombobox("gcfg-prompt-roles", { multiSelect: true, placeholder: "Search prompt roles..." });
+    initRoleCombobox("gcfg-model-roles", { multiSelect: true, placeholder: "Search model switch roles..." });
+    initRoleCombobox("gcfg-admin-roles", { multiSelect: true, placeholder: "Search admin roles..." });
+
+    // Server Configuration > Forum Auto-Reply
+    initChannelCombobox("gcfg-forum-channels", { multiSelect: true, filterKinds: ["forum"], placeholder: "Search forum channels..." });
+
+    // Moderation & Cases
+    initUserCombobox("mod-filter-user", { placeholder: "Search member to filter..." });
+    initUserCombobox("mcase-user-id", { placeholder: "Search member by username or display name..." });
+    bindDurationPreview("mcase-duration", "mcase-duration-preview");
+
+    // Automod & Strikes
+    initChannelCombobox("am-ignored-channels", { multiSelect: true, placeholder: "Search channels to ignore..." });
+    initRoleCombobox("am-ignored-roles", { multiSelect: true, placeholder: "Search roles to ignore..." });
+
+    // Channel Logging
+    initChannelCombobox("log-unified-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select unified log channel..." });
+    initChannelCombobox("log-mod-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select mod log channel..." });
+    initChannelCombobox("log-message-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select message log channel..." });
+    initChannelCombobox("log-member-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select member lifecycle channel..." });
+    initChannelCombobox("log-server-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select server structure channel..." });
+    initChannelCombobox("log-voice-channel", { multiSelect: false, filterKinds: ["text", "voice"], placeholder: "Select voice activity channel..." });
+    initChannelCombobox("log-ignored-channels", { multiSelect: true, placeholder: "Search channels to ignore..." });
+    initRoleCombobox("log-ignored-roles", { multiSelect: true, placeholder: "Search roles to ignore..." });
+
+    // Greetings & Autorole
+    initChannelCombobox("greet-welcome-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select welcome channel..." });
+    initChannelCombobox("greet-farewell-channel", { multiSelect: false, filterKinds: ["text", "announcement"], placeholder: "Select farewell channel..." });
+    initRoleCombobox("greet-member-roles", { multiSelect: true, placeholder: "Search autoroles for members..." });
+    initRoleCombobox("greet-bot-roles", { multiSelect: true, placeholder: "Search autoroles for bots..." });
+
+    // Reaction Roles Modal
+    initChannelCombobox("cb-rr-channel", {
+      multiSelect: false,
+      filterKinds: ["text", "announcement"],
+      placeholder: "Select target text channel...",
+      onChange: (id) => setValue("rr-input-channel", id || ""),
+    });
+    initRoleCombobox("rr-input-reqrole", { multiSelect: false, placeholder: "Select prerequisite role (optional)..." });
+
+    // Custom Triggers Modal
+    initRoleCombobox("trig-roles", { multiSelect: true, placeholder: "Search allowed roles (empty = all)..." });
+    initChannelCombobox("trig-channels", { multiSelect: true, placeholder: "Search ignored channels..." });
+
+    // Reddit Feeds Modal
+    initChannelCombobox("cb-reddit-channel", {
+      multiSelect: false,
+      filterKinds: ["text", "announcement"],
+      placeholder: "Select target text channel...",
+      onChange: (id) => setValue("reddit-new-channel", id || ""),
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initLoginPage();
@@ -3542,6 +3716,7 @@
 
     initNavigation();
     initModals();
+    initAllComboboxes();
     wireAllEventListeners();
 
     checkSessionAndLoadData();
