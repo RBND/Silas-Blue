@@ -679,23 +679,81 @@
     const alertEl = document.getElementById("login-alert");
     if (!alertEl) return;
 
+    // Synchronously parse and display URL error query parameters
     const params = new URLSearchParams(window.location.search);
     const err = params.get("error");
     if (err) {
       const messages = {
         missing_token: "Missing One-Time Login token parameter.",
         invalid_or_expired_otp:
-          "That One-Time Login link has already been used or has expired. Copy the latest URL from your terminal or sign in with Discord.",
+          "That One-Time Login link or token has expired or has already been used. Check your latest terminal stdout or sign in with Discord.",
         oauth_not_configured:
-          "Discord OAuth2 Client ID & Secret are not configured yet. Use the terminal One-Time Login link first.",
+          "Discord OAuth2 Client ID & Secret are not configured yet. Sign in with Host OTP below to configure Discord OAuth2 in Console Settings.",
         oauth_state_missing: "OAuth2 CSRF state cookie expired. Please try again.",
         oauth_state_mismatch: "OAuth2 CSRF state mismatch. Please try again.",
+        oauth_cancelled: "Discord OAuth2 sign-in was cancelled.",
+        session_error: "Unable to create authenticated session token. Please try again.",
         unauthorized_discord_account:
-          "Access denied: that Discord account is not an Application Owner/Admin or listed as bot_owner_id.",
+          "Authentication failed or your Discord account was not authorized. Please check your credentials or contact a bot administrator.",
       };
-      alertEl.textContent = messages[err] || `Authentication error: ${err}`;
+      alertEl.textContent = messages[err] || `Authentication notice: ${err}`;
       alertEl.classList.remove("hidden");
     }
+
+    // Synchronously wire OTP form submit validation
+    const otpForm = document.getElementById("otp-form");
+    const otpInput = document.getElementById("otp-token-input");
+    if (otpForm && otpInput) {
+      otpForm.addEventListener("submit", (e) => {
+        const token = otpInput.value.trim();
+        if (!token) {
+          e.preventDefault();
+          otpInput.focus();
+        } else {
+          otpInput.value = token;
+        }
+      });
+    }
+
+    // Synchronously wire Active Session sign-out button
+    const signoutBtn = document.getElementById("login-signout-btn");
+    if (signoutBtn) {
+      signoutBtn.addEventListener("click", async () => {
+        try {
+          await apiFetch("/auth/logout", { method: "POST" });
+        } catch (_) {}
+        window.location.reload();
+      });
+    }
+
+    // Asynchronously check active user session & OAuth configuration
+    apiFetch("/api/auth/session")
+      .then((sess) => {
+        if (!sess) return;
+
+        // If user already holds a valid session cookie, display active session card
+        if (sess.authenticated) {
+          const sessionCard = document.getElementById("active-session-card");
+          const sessionUser = document.getElementById("active-session-user");
+          const sessionRole = document.getElementById("active-session-role");
+          if (sessionCard && sessionUser && sessionRole) {
+            sessionUser.textContent = sess.username || "User";
+            sessionRole.textContent = sess.is_owner ? "Bot Owner / Admin" : "Server Manager";
+            sessionCard.classList.remove("hidden");
+          }
+        }
+
+        // If OAuth2 is not configured, inform the user
+        if (!sess.oauth_enabled) {
+          const noteEl = document.getElementById("oauth-status-note");
+          if (noteEl) {
+            noteEl.textContent =
+              "Discord OAuth2 setup is pending. Use the Host One-Time Token below to authenticate as bot administrator and set credentials.";
+            noteEl.classList.remove("hidden");
+          }
+        }
+      })
+      .catch(() => {});
   }
 
   // ==========================================================================

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Sign In — Silas Blue v4.0 Console</title>
+  <title>Sign In — Silas Blue Web Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
   <link rel="stylesheet" href="/app.css">
@@ -14,32 +14,102 @@
     <div class="login-brand">
       <img src="/favicon.svg" alt="Silas Blue Logo" class="brand-icon">
       <div>
-        <h1>Silas Blue</h1>
-        <p class="subtitle">Rust v4.0 Administration Console</p>
+        <div class="login-brand-title">
+          <h1>Silas Blue</h1>
+          <span class="badge badge-accent">v6.0.7</span>
+        </div>
+        <p class="subtitle">Discord Bot &amp; Server Management Console</p>
       </div>
     </div>
 
-    <div id="login-alert" class="alert-banner hidden" role="alert"></div>
+    <div id="login-alert" class="alert-banner alert-danger hidden" role="alert"></div>
+
+    <div id="active-session-card" class="active-session-banner hidden" role="region" aria-label="Active Session">
+      <div>
+        <p><strong>Signed in</strong> as <span id="active-session-user" class="text-accent">User</span> (<span id="active-session-role">Admin</span>)</p>
+      </div>
+      <div class="active-session-actions">
+        <a href="/" class="btn btn-primary btn-sm">Open Console</a>
+        <button type="button" id="login-signout-btn" class="btn btn-secondary btn-sm">Sign Out</button>
+      </div>
+    </div>
 
     <section class="login-section">
-      <h2>1. Local One-Time Magic Link</h2>
+      <div class="login-section-header">
+        <h2>Sign In with Discord</h2>
+        <span class="badge badge-neutral">Multi-User</span>
+      </div>
       <p>
-        When starting <code>silas-blue</code> in your terminal, a single-use 256-bit login URL
-        (<code>http://127.0.0.1:8080/auth/otp?token=...</code>) is printed to stdout and automatically opened on desktop systems.
+        Authenticate with your Discord account to manage your servers, moderation workflows, reaction roles, and bot intelligence according to your server role delegations.
       </p>
-    </section>
-
-    <div class="divider"><span>OR</span></div>
-
-    <section class="login-section">
-      <h2>2. Discord OAuth2 Owner Sign-In</h2>
-      <p>
-        Sign in with the Discord account that owns this bot application or is listed in <code>owner_ids</code>.
-      </p>
-      <a href="/auth/login" id="discord-oauth-btn" class="btn btn-primary btn-block">
-        Sign In with Discord
+      <a href="/auth/login" id="discord-oauth-btn" class="btn btn-discord btn-block">
+        <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor">
+          <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.893.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+        </svg>
+        <span>Sign In with Discord</span>
       </a>
+      <div id="oauth-status-note" class="status-note hidden"></div>
+
+      <div class="login-roles-info">
+        <div class="role-pill">
+          <span>👑 Server Owners &amp; Admins</span>
+          <small>Manage your guilds &amp; modules</small>
+        </div>
+        <div class="role-pill">
+          <span>🛡️ Bot Administrators</span>
+          <small>Global config &amp; system settings</small>
+        </div>
+        <div class="role-pill">
+          <span>👥 Delegated Roles</span>
+          <small>Domain-scoped access per server</small>
+        </div>
+      </div>
     </section>
+
+    <div class="divider"><span>OR HOST ADMINISTRATOR</span></div>
+
+    <section class="login-section">
+      <div class="login-section-header">
+        <h2>Host One-Time Token (OTP)</h2>
+        <span class="badge badge-neutral">Local / LAN</span>
+      </div>
+      <p>
+        Starting <code>silas-blue</code> in your terminal outputs a single-use 256-bit admin token to bypass OAuth setup.
+      </p>
+      <form id="otp-form" action="/auth/otp" method="GET" class="otp-form">
+        <label for="otp-token-input" class="visually-hidden">One-Time Login Token</label>
+        <div class="input-with-btn">
+          <input
+            type="text"
+            id="otp-token-input"
+            name="token"
+            class="input-text"
+            placeholder="Paste 256-bit token from terminal stdout..."
+            autocomplete="off"
+            spellcheck="false"
+            required
+          >
+          <button type="submit" id="otp-submit-btn" class="btn btn-secondary">
+            Authorize
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <footer class="login-footer">
+      <span>HMAC-SHA256 Encrypted Sessions</span>
+      <div class="theme-picker-inline">
+        <label for="theme-selector" class="visually-hidden">Color Theme</label>
+        <select id="theme-selector" class="input-select theme-select-sm" aria-label="Color Theme">
+          <option value="system">System Theme</option>
+          <option value="silas-dark">Silas Dark</option>
+          <option value="midnight-oled">Midnight OLED</option>
+          <option value="nord-frost">Nord Frost</option>
+          <option value="cyber-amber">Cyber Amber</option>
+          <option value="daylight-slate">Daylight Slate</option>
+        </select>
+      </div>
+    </footer>
   </main>
   <script src="/app.js"></script>
 </body>
