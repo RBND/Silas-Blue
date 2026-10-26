@@ -58,7 +58,7 @@ zeroize = { version = "1.8", features = ["derive"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast"] }
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
-scraper = "0.20"
+scraper = "0.29"
 html-escape = "0.2"
 async-trait = "0.1"
 futures-util = "0.3"
