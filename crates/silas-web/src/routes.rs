@@ -408,8 +408,8 @@ async fn auth_discord_callback(
             };
             let is_https = is_https_request(&headers);
             let sess_cookie = build_session_cookie(&session_tok, is_https);
-            let clear_state = build_clear_cookie(OAUTH_STATE_COOKIE_NAME);
-            let clear_pkce = build_clear_cookie(OAUTH_PKCE_COOKIE_NAME);
+            let clear_state = build_clear_cookie(OAUTH_STATE_COOKIE_NAME, is_https);
+            let clear_pkce = build_clear_cookie(OAUTH_PKCE_COOKIE_NAME, is_https);
 
             let mut resp = Redirect::to("/").into_response();
             if let Ok(hv) = HeaderValue::from_str(&sess_cookie) {
@@ -435,7 +435,7 @@ async fn auth_logout(headers: HeaderMap) -> Response {
     if verify_csrf(&Method::POST, &headers).is_err() {
         return (StatusCode::FORBIDDEN, "CSRF validation failed").into_response();
     }
-    let clear = build_clear_cookie(crate::auth::SESSION_COOKIE_NAME);
+    let clear = build_clear_cookie(crate::auth::SESSION_COOKIE_NAME, is_https_request(&headers));
     let mut resp = Json(json!({ "ok": true })).into_response();
     if let Ok(hv) = HeaderValue::from_str(&clear) {
         resp.headers_mut().append(header::SET_COOKIE, hv);

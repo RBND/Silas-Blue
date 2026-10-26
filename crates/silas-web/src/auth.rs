@@ -461,14 +461,16 @@ pub fn build_oauth_cookie(name: &str, value: &str, is_https: bool) -> String {
     cookie.build().to_string()
 }
 
-pub fn build_clear_cookie(name: &str) -> String {
-    Cookie::build((name.to_string(), String::new()))
+pub fn build_clear_cookie(name: &str, is_https: bool) -> String {
+    let mut cookie = Cookie::build((name.to_string(), String::new()))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        .max_age(cookie::time::Duration::ZERO)
-        .build()
-        .to_string()
+        .max_age(cookie::time::Duration::ZERO);
+    if is_https {
+        cookie = cookie.secure(true);
+    }
+    cookie.build().to_string()
 }
 
 /// Extract a named cookie from an HTTP `HeaderMap`.

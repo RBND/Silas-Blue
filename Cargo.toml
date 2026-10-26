@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "6.0.9"
+version = "6.0.10"
 edition = "2021"
 authors = ["RobotsNeverDie <https://github.com/RBND/Silas-Blue>"]
 license = "LicenseRef-RBND-NC-1.2"
