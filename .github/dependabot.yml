@@ -1,13 +1,14 @@
 version: 2
 updates:
-  # Maintain Python dependencies in requirements.txt
-  - package-ecosystem: "pip"
+  # Maintain Rust Cargo dependencies in Cargo.toml / Cargo.lock
+  - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "rust"
 
   # Maintain base images in Dockerfile
   - package-ecosystem: "docker"
@@ -18,3 +19,4 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+
