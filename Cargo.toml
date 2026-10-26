@@ -50,7 +50,7 @@ uuid = { version = "1.10", features = ["v4", "serde"] }
 url = "2.5"
 base64 = "0.22"
 sha2 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 subtle = "2.6"
 rand = "0.8"
 hex = "0.4"
