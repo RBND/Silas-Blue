@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "6.0.8"
+version = "6.0.9"
 edition = "2021"
 authors = ["RobotsNeverDie <https://github.com/RBND/Silas-Blue>"]
 license = "LicenseRef-RBND-NC-1.2"
@@ -56,17 +56,17 @@ rand = "0.8"
 hex = "0.4"
 zeroize = { version = "1.8", features = ["derive"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast"] }
-rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
-scraper = "0.20"
-html-escape = "0.2"
+scraper = "0.29"
+html-escape = "0.3"
 async-trait = "0.1"
 futures-util = "0.3"
 poise = "0.6"
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "cache", "chrono"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["limit", "set-header", "trace"] }
+tower-http = { version = "0.7", features = ["limit", "set-header", "trace"] }
 rust-embed = "8.5"
 mime_guess = "2.0"
 cookie = "0.18"
