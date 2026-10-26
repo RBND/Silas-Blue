@@ -62,7 +62,7 @@ scraper = "0.20"
 html-escape = "0.2"
 async-trait = "0.1"
 futures-util = "0.3"
-poise = "0.6"
+poise = "0.7"
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "cache", "chrono"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower = "0.5"
