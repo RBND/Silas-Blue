@@ -59,7 +59,7 @@ ed25519-dalek = { version = "2.1", default-features = false, features = ["std", 
 rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
 scraper = "0.20"
-html-escape = "0.2"
+html-escape = "0.3"
 async-trait = "0.1"
 futures-util = "0.3"
 poise = "0.6"
