@@ -1061,6 +1061,9 @@
       case "triggers":
         await loadCustomTriggers();
         break;
+      case "activity":
+        await loadActivityModule();
+        break;
       case "reddit":
         await loadRedditModule();
         break;
@@ -1724,6 +1727,44 @@
         });
       });
   
+      // Activity & Rewards Event Listeners
+      bindClick("btn-save-activity-config", saveActivityConfig);
+      bindClick("btn-save-cmd-channels", saveCommandChannelsConfig);
+      bindClick("btn-add-default-channel", addDefaultCommandChannel);
+      bindClick("btn-add-cmd-override", addCommandChannelOverride);
+      bindClick("btn-open-add-reward-modal", () => {
+        setValue("reward-modal-target", "500");
+        setChecked("reward-modal-drop", true);
+        openModal("modal-add-reward-rule");
+      });
+      bindClick("btn-submit-add-reward", submitAddRewardRule);
+      bindClick("btn-refresh-leaderboard", loadActivityLeaderboard);
+      bindClick("btn-submit-point-adjust", submitPointAdjustment);
+
+      const lbTimeframe = document.getElementById("leaderboard-timeframe-select");
+      if (lbTimeframe) {
+        lbTimeframe.addEventListener("change", loadActivityLeaderboard);
+      }
+
+      const rewardTypeSel = document.getElementById("reward-modal-type");
+      if (rewardTypeSel) {
+        rewardTypeSel.addEventListener("change", () => {
+          const isTop = rewardTypeSel.value === "top_rank";
+          const lbl = document.getElementById("reward-modal-target-label");
+          const hint = document.getElementById("reward-modal-target-hint");
+          const targetIn = document.getElementById("reward-modal-target");
+          if (isTop) {
+            if (lbl) lbl.textContent = "Top Leaderboard Rank Position *";
+            if (hint) hint.textContent = "Top N members (e.g. 5 for top 5, 10 for top 10) in the timeframe will receive the role.";
+            if (targetIn && (!targetIn.value || targetIn.value === "500")) targetIn.value = "5";
+          } else {
+            if (lbl) lbl.textContent = "Threshold Points Required *";
+            if (hint) hint.textContent = "Members who earn this many points in the selected timeframe will receive the role.";
+            if (targetIn && targetIn.value === "5") targetIn.value = "500";
+          }
+        });
+      }
+
       bindClick("btn-save-guild-config", saveGuildConfig);
       bindClick("btn-add-reddit-sub", addRedditSubscription);
   
@@ -3693,6 +3734,539 @@
     openModal("modal-audit-diff");
   }
 
+
+  // ============================================================================
+  // Activity, Levels & Rewards Module
+  // ============================================================================
+
+  let currentCommandRestrictions = {
+    guild_id: "",
+    default_allowed_channels: [],
+    enabled: false,
+  };
+  let currentCommandOverrides = [];
+
+  async function loadActivityModule() {
+    const noServerEl = document.getElementById("activity-no-server");
+    const contentEl = document.getElementById("activity-content");
+
+    if (!currentGuildId) {
+      if (noServerEl) noServerEl.classList.remove("hidden");
+      if (contentEl) contentEl.classList.add("hidden");
+      return;
+    }
+
+    if (noServerEl) noServerEl.classList.add("hidden");
+    if (contentEl) contentEl.classList.remove("hidden");
+
+    try {
+      await populateActivityRoleAndChannelDropdowns();
+      await Promise.all([
+        loadActivityConfig(),
+        loadCommandChannelsConfig(),
+        loadActivityRewards(),
+        loadActivityLeaderboard(),
+      ]);
+    } catch (err) {
+      showToast(`Error loading activity module: ${err.message}`);
+    }
+  }
+
+  async function populateActivityRoleAndChannelDropdowns() {
+    if (!currentGuildId) return;
+    try {
+      const [roles, channels] = await Promise.all([
+        getGuildRoles(currentGuildId),
+        getGuildChannels(currentGuildId),
+      ]);
+
+      // Populate Announcement Channel Dropdown
+      const annSel = document.getElementById("activity-announce-channel");
+      if (annSel) {
+        annSel.replaceChildren();
+        const defOpt = document.createElement("option");
+        defOpt.value = "";
+        defOpt.textContent = "Disabled (Silent)";
+        annSel.appendChild(defOpt);
+
+        channels.forEach((ch) => {
+          const opt = document.createElement("option");
+          opt.value = ch.id;
+          opt.textContent = `#${ch.name}`;
+          annSel.appendChild(opt);
+        });
+      }
+
+      // Populate Command Channel Selectors
+      const cmdDefSel = document.getElementById("cmd-default-channel-select");
+      if (cmdDefSel) {
+        cmdDefSel.replaceChildren();
+        channels.forEach((ch) => {
+          const opt = document.createElement("option");
+          opt.value = ch.id;
+          opt.textContent = `#${ch.name}`;
+          cmdDefSel.appendChild(opt);
+        });
+      }
+
+      const cmdOverSel = document.getElementById("cmd-override-channel-select");
+      if (cmdOverSel) {
+        cmdOverSel.replaceChildren();
+        channels.forEach((ch) => {
+          const opt = document.createElement("option");
+          opt.value = ch.id;
+          opt.textContent = `#${ch.name}`;
+          cmdOverSel.appendChild(opt);
+        });
+      }
+
+      // Populate Reward Modal Role Select
+      const rewRoleSel = document.getElementById("reward-modal-role");
+      if (rewRoleSel) {
+        rewRoleSel.replaceChildren();
+        roles.forEach((r) => {
+          const opt = document.createElement("option");
+          opt.value = r.id;
+          opt.textContent = `@${r.name}`;
+          rewRoleSel.appendChild(opt);
+        });
+      }
+    } catch (err) {
+      console.warn("Failed to populate role/channel dropdowns:", err);
+    }
+  }
+
+  async function loadActivityConfig() {
+    if (!currentGuildId) return;
+    const res = await apiFetch(`/api/guilds/${currentGuildId}/activity/config`);
+    const cfg = res.config || {};
+
+    setChecked("activity-enabled", Boolean(cfg.enabled));
+    setValue("activity-text-min", String(cfg.text_points_min ?? 15));
+    setValue("activity-text-max", String(cfg.text_points_max ?? 25));
+    setValue("activity-text-cooldown", String(cfg.text_cooldown_seconds ?? 60));
+    setValue("activity-text-min-chars", String(cfg.text_min_chars ?? 5));
+    setChecked("activity-voice-enabled", Boolean(cfg.voice_enabled));
+    setValue("activity-voice-points", String(cfg.voice_points_per_interval ?? 5));
+    setChecked("activity-voice-ignore-afk", Boolean(cfg.voice_ignore_afk));
+    setChecked("activity-voice-ignore-deaf", Boolean(cfg.voice_ignore_deafened));
+    setChecked("activity-reaction-enabled", Boolean(cfg.reaction_enabled));
+    setValue("activity-reaction-give", String(cfg.reaction_give_points ?? 2));
+    setValue("activity-reaction-recv", String(cfg.reaction_receive_points ?? 3));
+    setValue("activity-reaction-cooldown", String(cfg.reaction_cooldown_seconds ?? 30));
+    setValue("activity-announce-channel", cfg.announcement_channel_id || "");
+    setChecked("activity-announce-promotions", Boolean(cfg.announce_promotions));
+  }
+
+  async function saveActivityConfig() {
+    if (!currentGuildId) return;
+    try {
+      const payload = {
+        guild_id: currentGuildId,
+        enabled: getChecked("activity-enabled"),
+        text_min_chars: parseInt(getValue("activity-text-min-chars"), 10) || 5,
+        text_cooldown_seconds: parseInt(getValue("activity-text-cooldown"), 10) || 60,
+        text_points_min: parseInt(getValue("activity-text-min"), 10) || 15,
+        text_points_max: parseInt(getValue("activity-text-max"), 10) || 25,
+        voice_enabled: getChecked("activity-voice-enabled"),
+        voice_interval_minutes: 1,
+        voice_points_per_interval: parseInt(getValue("activity-voice-points"), 10) || 5,
+        voice_ignore_afk: getChecked("activity-voice-ignore-afk"),
+        voice_ignore_deafened: getChecked("activity-voice-ignore-deaf"),
+        reaction_enabled: getChecked("activity-reaction-enabled"),
+        reaction_give_points: parseInt(getValue("activity-reaction-give"), 10) || 2,
+        reaction_receive_points: parseInt(getValue("activity-reaction-recv"), 10) || 3,
+        reaction_cooldown_seconds: parseInt(getValue("activity-reaction-cooldown"), 10) || 30,
+        announcement_channel_id: getValue("activity-announce-channel") || null,
+        announce_promotions: getChecked("activity-announce-promotions"),
+        ignored_channels: [],
+        ignored_roles: [],
+        role_multipliers: {},
+        channel_multipliers: {},
+      };
+
+      await apiFetch(`/api/guilds/${currentGuildId}/activity/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      showToast("Activity and participation settings saved successfully.");
+    } catch (err) {
+      showToast(`Failed to save activity settings: ${err.message}`);
+    }
+  }
+
+  async function loadCommandChannelsConfig() {
+    if (!currentGuildId) return;
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/command-channels`);
+      currentCommandRestrictions = res.restrictions || {
+        guild_id: currentGuildId,
+        default_allowed_channels: [],
+        enabled: false,
+      };
+      currentCommandOverrides = res.rules || [];
+
+      setChecked("cmd-restr-enabled", Boolean(currentCommandRestrictions.enabled));
+      renderDefaultCommandChannelsList();
+      renderCommandOverridesTable();
+    } catch (err) {
+      console.warn("Failed to load command channel restrictions:", err);
+    }
+  }
+
+  function renderDefaultCommandChannelsList() {
+    const container = document.getElementById("cmd-default-channels-list");
+    if (!container) return;
+    container.replaceChildren();
+
+    const channels = currentCommandRestrictions.default_allowed_channels || [];
+    if (channels.length === 0) {
+      const span = document.createElement("span");
+      span.className = "muted";
+      span.textContent = "No default command channels configured (all channels permitted).";
+      container.appendChild(span);
+      return;
+    }
+
+    channels.forEach((cid) => {
+      const badge = document.createElement("span");
+      badge.className = "badge badge-neutral";
+      badge.style.display = "inline-flex";
+      badge.style.alignItems = "center";
+      badge.style.gap = "0.35rem";
+
+      const txt = document.createElement("span");
+      txt.textContent = `#${cid}`;
+      badge.appendChild(txt);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "×";
+      delBtn.style.cursor = "pointer";
+      delBtn.style.background = "none";
+      delBtn.style.border = "none";
+      delBtn.style.color = "inherit";
+      delBtn.style.fontWeight = "bold";
+      delBtn.addEventListener("click", () => {
+        currentCommandRestrictions.default_allowed_channels =
+          currentCommandRestrictions.default_allowed_channels.filter((c) => c !== cid);
+        renderDefaultCommandChannelsList();
+      });
+      badge.appendChild(delBtn);
+
+      container.appendChild(badge);
+    });
+  }
+
+  function addDefaultCommandChannel() {
+    const sel = document.getElementById("cmd-default-channel-select");
+    if (!sel || !sel.value) return;
+    const cid = sel.value;
+    if (!currentCommandRestrictions.default_allowed_channels.includes(cid)) {
+      currentCommandRestrictions.default_allowed_channels.push(cid);
+      renderDefaultCommandChannelsList();
+    }
+  }
+
+  function renderCommandOverridesTable() {
+    const tbody = document.getElementById("cmd-overrides-tbody");
+    if (!tbody) return;
+    tbody.replaceChildren();
+
+    if (currentCommandOverrides.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 3;
+      td.className = "text-center muted";
+      td.textContent = "No command overrides configured.";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    currentCommandOverrides.forEach((rule, idx) => {
+      const tr = document.createElement("tr");
+
+      const tdCmd = document.createElement("td");
+      const code = document.createElement("code");
+      code.textContent = `/${rule.command_name}`;
+      tdCmd.appendChild(code);
+      tr.appendChild(tdCmd);
+
+      const tdCh = document.createElement("td");
+      const channels = rule.allowed_channels || [];
+      tdCh.textContent = channels.length > 0 ? channels.map((c) => `#${c}`).join(", ") : "-";
+      tr.appendChild(tdCh);
+
+      const tdAct = document.createElement("td");
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn btn-danger btn-sm";
+      delBtn.textContent = "Remove";
+      delBtn.addEventListener("click", () => {
+        currentCommandOverrides.splice(idx, 1);
+        renderCommandOverridesTable();
+      });
+      tdAct.appendChild(delBtn);
+      tr.appendChild(tdAct);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  function addCommandChannelOverride() {
+    const nameIn = document.getElementById("cmd-override-name");
+    const chanSel = document.getElementById("cmd-override-channel-select");
+    if (!nameIn || !chanSel || !nameIn.value.trim() || !chanSel.value) {
+      showToast("Please enter a command name and select an allowed channel.");
+      return;
+    }
+
+    const cmdName = nameIn.value.trim().replace(/^\//, "").toLowerCase();
+    const cid = chanSel.value;
+
+    const existing = currentCommandOverrides.find((r) => r.command_name === cmdName);
+    if (existing) {
+      if (!existing.allowed_channels.includes(cid)) {
+        existing.allowed_channels.push(cid);
+      }
+    } else {
+      currentCommandOverrides.push({
+        guild_id: currentGuildId,
+        command_name: cmdName,
+        allowed_channels: [cid],
+        denied_channels: [],
+      });
+    }
+
+    nameIn.value = "";
+    renderCommandOverridesTable();
+  }
+
+  async function saveCommandChannelsConfig() {
+    if (!currentGuildId) return;
+    try {
+      currentCommandRestrictions.enabled = getChecked("cmd-restr-enabled");
+      const payload = {
+        restrictions: currentCommandRestrictions,
+        rules: currentCommandOverrides,
+      };
+
+      await apiFetch(`/api/guilds/${currentGuildId}/command-channels`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      showToast("Command channel restrictions saved.");
+    } catch (err) {
+      showToast(`Failed to save command channel restrictions: ${err.message}`);
+    }
+  }
+
+  async function loadActivityRewards() {
+    if (!currentGuildId) return;
+    const tbody = document.getElementById("activity-rewards-tbody");
+    if (!tbody) return;
+    tbody.replaceChildren();
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/activity/rewards`);
+      const rules = res.rules || [];
+
+      if (rules.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.className = "text-center muted";
+        td.textContent = "No automated reward rules configured. Click 'Add Reward Rule' above.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      rules.forEach((rule) => {
+        const tr = document.createElement("tr");
+
+        const tdRole = document.createElement("td");
+        const roleBadge = document.createElement("span");
+        roleBadge.className = "badge badge-neutral";
+        roleBadge.textContent = `@${rule.role_id}`;
+        tdRole.appendChild(roleBadge);
+        tr.appendChild(tdRole);
+
+        const tdType = document.createElement("td");
+        tdType.textContent = rule.rule_type === "top_rank" ? "Top Rank" : "Threshold";
+        tr.appendChild(tdType);
+
+        const tdTime = document.createElement("td");
+        tdTime.textContent = rule.timeframe;
+        tr.appendChild(tdTime);
+
+        const tdReq = document.createElement("td");
+        tdReq.textContent = rule.rule_type === "top_rank" ? `Top #${rule.top_rank}` : `${rule.threshold_points} pts`;
+        tr.appendChild(tdReq);
+
+        const tdDrop = document.createElement("td");
+        tdDrop.textContent = rule.remove_on_drop ? "Yes" : "No";
+        tr.appendChild(tdDrop);
+
+        const tdAct = document.createElement("td");
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn btn-danger btn-sm";
+        delBtn.textContent = "Delete";
+        delBtn.addEventListener("click", async () => {
+          try {
+            await apiFetch(`/api/guilds/${currentGuildId}/activity/rewards/${encodeURIComponent(rule.id)}`, {
+              method: "DELETE",
+            });
+            showToast("Reward rule deleted.");
+            await loadActivityRewards();
+          } catch (err) {
+            showToast(`Failed to delete rule: ${err.message}`);
+          }
+        });
+        tdAct.appendChild(delBtn);
+        tr.appendChild(tdAct);
+
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      console.warn("Failed to load activity rewards:", err);
+    }
+  }
+
+  async function submitAddRewardRule() {
+    if (!currentGuildId) return;
+    const roleId = getValue("reward-modal-role");
+    const ruleType = getValue("reward-modal-type");
+    const timeframe = getValue("reward-modal-timeframe");
+    const targetVal = parseInt(getValue("reward-modal-target"), 10) || 1;
+    const removeOnDrop = getChecked("reward-modal-drop");
+
+    if (!roleId) {
+      showToast("Please select a role to award.");
+      return;
+    }
+
+    try {
+      const payload = {
+        guild_id: currentGuildId,
+        role_id: roleId,
+        rule_type: ruleType,
+        timeframe: timeframe,
+        threshold_points: ruleType === "threshold" ? targetVal : 0,
+        top_rank: ruleType === "top_rank" ? targetVal : 0,
+        remove_on_drop: removeOnDrop,
+      };
+
+      await apiFetch(`/api/guilds/${currentGuildId}/activity/rewards`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      closeModal("modal-add-reward-rule");
+      showToast("Created reward rule successfully.");
+      await loadActivityRewards();
+    } catch (err) {
+      showToast(`Failed to create reward rule: ${err.message}`);
+    }
+  }
+
+  async function loadActivityLeaderboard() {
+    if (!currentGuildId) return;
+    const tbody = document.getElementById("leaderboard-tbody");
+    if (!tbody) return;
+    tbody.replaceChildren();
+
+    const tf = getValue("leaderboard-timeframe-select") || "lifetime";
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/activity/leaderboard?timeframe=${encodeURIComponent(tf)}&limit=20`);
+      const entries = res.entries || [];
+
+      if (entries.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.className = "text-center muted";
+        td.textContent = "No participants recorded for this timeframe yet.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      entries.forEach((e) => {
+        const tr = document.createElement("tr");
+
+        const tdRank = document.createElement("td");
+        const medal = e.rank === 1 ? "🥇 " : e.rank === 2 ? "🥈 " : e.rank === 3 ? "🥉 " : "";
+        tdRank.textContent = `${medal}#${e.rank}`;
+        tr.appendChild(tdRank);
+
+        const tdUser = document.createElement("td");
+        tdUser.textContent = String(e.user_id);
+        tr.appendChild(tdUser);
+
+        const tdPts = document.createElement("td");
+        const bold = document.createElement("strong");
+        bold.textContent = String(e.points);
+        tdPts.appendChild(bold);
+        tr.appendChild(tdPts);
+
+        const tdText = document.createElement("td");
+        tdText.textContent = String(e.text_points);
+        tr.appendChild(tdText);
+
+        const tdVoice = document.createElement("td");
+        tdVoice.textContent = String(e.voice_points);
+        tr.appendChild(tdVoice);
+
+        const tdReact = document.createElement("td");
+        tdReact.textContent = String(e.reaction_points);
+        tr.appendChild(tdReact);
+
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      console.warn("Failed to load leaderboard:", err);
+    }
+  }
+
+  async function submitPointAdjustment() {
+    if (!currentGuildId) return;
+    const uidIn = document.getElementById("adjust-user-id");
+    const amtIn = document.getElementById("adjust-amount");
+    if (!uidIn || !amtIn || !uidIn.value.trim() || !amtIn.value.trim()) {
+      showToast("Please enter a user ID and point amount.");
+      return;
+    }
+
+    const userId = uidIn.value.trim();
+    const amount = parseInt(amtIn.value.trim(), 10);
+    if (!amount) {
+      showToast("Adjustment amount cannot be zero.");
+      return;
+    }
+
+    try {
+      const res = await apiFetch(`/api/guilds/${currentGuildId}/activity/points/adjust`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, amount: amount }),
+      });
+
+      showToast(`Points adjusted successfully. New total: ${res.new_total} pts`);
+      amtIn.value = "";
+      await loadActivityLeaderboard();
+    } catch (err) {
+      showToast(`Failed to adjust points: ${err.message}`);
+    }
+  }
 
   function initAllComboboxes() {
     // Server Configuration > Permissions & Channels

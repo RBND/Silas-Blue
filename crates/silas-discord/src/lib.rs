@@ -1,5 +1,6 @@
 //! Discord gateway client, event handlers, interactive pagination, and hybrid Poise commands.
 
+pub mod activity;
 pub mod automod;
 pub mod bot;
 pub mod commands;

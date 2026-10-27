@@ -295,6 +295,7 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
             .await;
         }
         FullEvent::VoiceStateUpdate { old, new } => {
+            state.activity.handle_voice_state_update(new);
             if let Some(guild_id) = new.guild_id {
                 let user_opt = new.member.as_ref().map(|m| &m.user);
                 if let Some(user) = user_opt {
@@ -329,6 +330,7 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
             }
         }
         FullEvent::ReactionAdd { add_reaction } => {
+            state.activity.handle_reaction_activity(add_reaction, true, state).await;
             crate::reaction_roles::handle_reaction_add(ctx, add_reaction, state).await;
         }
         FullEvent::ReactionRemove { removed_reaction } => {
@@ -381,7 +383,10 @@ pub async fn handle_gateway_event(ctx: &Context, event: &FullEvent, state: &Arc<
                 return;
             }
 
-            // 3. AI conversation / forum auto-reply / spontaneous chatter
+            // 3. User participation activity points
+            state.activity.handle_text_activity(new_message, state).await;
+
+            // 4. AI conversation / forum auto-reply / spontaneous chatter
             handle_incoming_message(ctx, new_message, state).await;
         }
         _ => {}

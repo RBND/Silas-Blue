@@ -102,6 +102,7 @@ pub struct BotState {
     pub bot_identity: Arc<RwLock<BotUserIdentity>>,
     pub gateway_ready: Arc<AtomicBool>,
     pub http: Arc<RwLock<Option<Arc<Http>>>>,
+    pub activity: Arc<crate::activity::ActivityTracker>,
     pub started_at: Instant,
 }
 
@@ -147,6 +148,7 @@ pub struct BotController {
     gateway_ready: Arc<AtomicBool>,
     http: Arc<RwLock<Option<Arc<Http>>>>,
     cache: Arc<RwLock<Option<Arc<serenity::cache::Cache>>>>,
+    activity: Arc<crate::activity::ActivityTracker>,
 }
 
 impl BotController {
@@ -172,7 +174,17 @@ impl BotController {
         crate::reddit::spawn_reddit_poller(storage.clone(), http_getter);
 
         // Spawn background moderation scheduler worker
-        crate::scheduler::spawn_scheduler_worker(storage.clone(), Arc::clone(&http));
+        let connected_guilds = Arc::new(DashMap::new());
+        let activity = Arc::new(crate::activity::ActivityTracker::new());
+
+        // Spawn background moderation and activity scheduler worker
+        crate::scheduler::spawn_scheduler_worker(
+            storage.clone(),
+            Arc::clone(&http),
+            Arc::clone(&activity),
+            Arc::clone(&connected_guilds),
+            Arc::clone(&cache),
+        );
 
         Self {
             inner: Arc::new(tokio::sync::Mutex::new(None)),
@@ -185,11 +197,12 @@ impl BotController {
             telemetry,
             message_cache,
             member_role_cache,
-            connected_guilds: Arc::new(DashMap::new()),
+            connected_guilds,
             bot_identity: Arc::new(RwLock::new(BotUserIdentity::default())),
             gateway_ready: Arc::new(AtomicBool::new(false)),
             http: Arc::clone(&http),
             cache: Arc::clone(&cache),
+            activity,
         }
     }
 
@@ -293,6 +306,7 @@ impl BotController {
             bot_identity: Arc::clone(&self.bot_identity),
             gateway_ready: Arc::clone(&self.gateway_ready),
             http: Arc::clone(&self.http),
+            activity: Arc::clone(&self.activity),
             started_at: Instant::now(),
         });
 
@@ -326,6 +340,11 @@ impl BotController {
                     ..Default::default()
                 },
                 allowed_mentions: Some(allowed_mentions),
+                command_check: Some(|ctx| {
+                    Box::pin(async move {
+                        commands::enforce_channel_restrictions(ctx).await
+                    })
+                }),
                 event_handler: |ctx, event, _framework, data| {
                     Box::pin(async move {
                         handlers::handle_gateway_event(ctx, event, data).await;

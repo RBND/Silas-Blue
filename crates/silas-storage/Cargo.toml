@@ -23,3 +23,4 @@ tracing.workspace = true
 rand.workspace = true
 sha2.workspace = true
 hmac.workspace = true
+uuid.workspace = true

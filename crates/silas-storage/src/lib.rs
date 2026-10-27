@@ -25,7 +25,7 @@ use silas_core::config::{
 };
 use silas_core::reddit::{clean_subreddit_name, NewRedditSubscription, RedditSubscription};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 const RETENTION_DAYS: i64 = 35;
 
 #[derive(Debug, Error)]
@@ -433,6 +433,154 @@ pub struct NewWebAuditLog<'a> {
     pub status: &'a str,
 }
 
+/// Server participation and points configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ActivityConfig {
+    #[serde(with = "silas_core::snowflake")]
+    pub guild_id: u64,
+    pub enabled: bool,
+    pub text_min_chars: i64,
+    pub text_cooldown_seconds: i64,
+    pub text_points_min: i64,
+    pub text_points_max: i64,
+    pub voice_enabled: bool,
+    pub voice_interval_minutes: i64,
+    pub voice_points_per_interval: i64,
+    pub voice_ignore_afk: bool,
+    pub voice_ignore_deafened: bool,
+    pub reaction_enabled: bool,
+    pub reaction_give_points: i64,
+    pub reaction_receive_points: i64,
+    pub reaction_cooldown_seconds: i64,
+    #[serde(default, with = "silas_core::snowflake::opt")]
+    pub announcement_channel_id: Option<u64>,
+    pub announce_promotions: bool,
+    #[serde(default, with = "silas_core::snowflake::vec")]
+    pub ignored_channels: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
+    pub ignored_roles: Vec<u64>,
+    #[serde(default)]
+    pub role_multipliers: HashMap<String, f64>,
+    #[serde(default)]
+    pub channel_multipliers: HashMap<String, f64>,
+}
+
+impl ActivityConfig {
+    pub fn default_for_guild(guild_id: u64) -> Self {
+        Self {
+            guild_id,
+            enabled: true,
+            text_min_chars: 5,
+            text_cooldown_seconds: 60,
+            text_points_min: 15,
+            text_points_max: 25,
+            voice_enabled: true,
+            voice_interval_minutes: 1,
+            voice_points_per_interval: 5,
+            voice_ignore_afk: true,
+            voice_ignore_deafened: true,
+            reaction_enabled: true,
+            reaction_give_points: 2,
+            reaction_receive_points: 3,
+            reaction_cooldown_seconds: 30,
+            announcement_channel_id: None,
+            announce_promotions: true,
+            ignored_channels: Vec::new(),
+            ignored_roles: Vec::new(),
+            role_multipliers: HashMap::new(),
+            channel_multipliers: HashMap::new(),
+        }
+    }
+}
+
+/// Automated activity reward role rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityRewardRule {
+    pub id: String,
+    #[serde(with = "silas_core::snowflake")]
+    pub guild_id: u64,
+    #[serde(with = "silas_core::snowflake")]
+    pub role_id: u64,
+    pub rule_type: String, // "threshold" or "top_rank"
+    pub timeframe: String, // "weekly", "monthly", "lifetime"
+    pub threshold_points: i64,
+    pub top_rank: i64,
+    pub remove_on_drop: bool,
+    pub created_at: i64,
+}
+
+/// New rule creation parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewActivityRewardRule {
+    #[serde(with = "silas_core::snowflake")]
+    pub guild_id: u64,
+    #[serde(with = "silas_core::snowflake")]
+    pub role_id: u64,
+    pub rule_type: String,
+    pub timeframe: String,
+    pub threshold_points: i64,
+    pub top_rank: i64,
+    pub remove_on_drop: bool,
+}
+
+/// Granular per-command channel restrictions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandChannelRule {
+    #[serde(with = "silas_core::snowflake")]
+    pub guild_id: u64,
+    pub command_name: String,
+    #[serde(default, with = "silas_core::snowflake::vec")]
+    pub allowed_channels: Vec<u64>,
+    #[serde(default, with = "silas_core::snowflake::vec")]
+    pub denied_channels: Vec<u64>,
+}
+
+/// Global server command restrictions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GuildCommandRestrictions {
+    #[serde(with = "silas_core::snowflake")]
+    pub guild_id: u64,
+    #[serde(default, with = "silas_core::snowflake::vec")]
+    pub default_allowed_channels: Vec<u64>,
+    pub enabled: bool,
+}
+
+impl GuildCommandRestrictions {
+    pub fn default_for_guild(guild_id: u64) -> Self {
+        Self {
+            guild_id,
+            default_allowed_channels: Vec::new(),
+            enabled: false,
+        }
+    }
+}
+
+/// Leaderboard ranking entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeaderboardEntry {
+    #[serde(with = "silas_core::snowflake")]
+    pub user_id: u64,
+    pub rank: i64,
+    pub points: i64,
+    pub text_points: i64,
+    pub voice_points: i64,
+    pub reaction_points: i64,
+}
+
+/// Detailed user rank and points breakdown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserRankInfo {
+    #[serde(with = "silas_core::snowflake")]
+    pub user_id: u64,
+    pub rank: i64,
+    pub total_participants: i64,
+    pub points: i64,
+    pub text_points: i64,
+    pub voice_points: i64,
+    pub reaction_points: i64,
+    pub lifetime_points: i64,
+}
+
 /// High-performance unified SQLite storage manager.
 /// - Hot reads (`get_app_settings`, `get_guild_config`) hit lock-free RAM (`ArcSwap` / `DashMap`).
 /// - All writes are serialized through a single persistent WAL writer connection (`writer`).
@@ -656,6 +804,12 @@ impl Storage {
         conn.execute("DELETE FROM custom_triggers WHERE guild_id = ?1", params![gid_i64])?;
         conn.execute("DELETE FROM web_access_grants WHERE guild_id = ?1", params![gid_i64])?;
         conn.execute("DELETE FROM web_audit_logs WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM activity_configs WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM user_activity_daily WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM user_activity_totals WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM activity_reward_rules WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM command_channel_rules WHERE guild_id = ?1", params![gid_i64])?;
+        conn.execute("DELETE FROM guild_command_restrictions WHERE guild_id = ?1", params![gid_i64])?;
         Ok(())
     }
 
@@ -2360,6 +2514,984 @@ impl Storage {
         )?;
         Ok(deleted)
     }
+
+    // ==========================================
+    // ACTIVITY & REWARDS & COMMAND CHANNELS API
+    // ==========================================
+
+    pub fn get_activity_config(&self, guild_id: u64) -> Result<ActivityConfig, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT
+                    guild_id, enabled, text_min_chars, text_cooldown_seconds, text_points_min, text_points_max,
+                    voice_enabled, voice_interval_minutes, voice_points_per_interval, voice_ignore_afk, voice_ignore_deafened,
+                    reaction_enabled, reaction_give_points, reaction_receive_points, reaction_cooldown_seconds,
+                    announcement_channel_id, announce_promotions, ignored_channels_json, ignored_roles_json,
+                    role_multipliers_json, channel_multipliers_json
+                 FROM activity_configs WHERE guild_id = ?1",
+                params![guild_id as i64],
+                |row| {
+                    let gid_i64: i64 = row.get(0)?;
+                    let enabled_i64: i64 = row.get(1)?;
+                    let text_min_chars: i64 = row.get(2)?;
+                    let text_cooldown: i64 = row.get(3)?;
+                    let text_min: i64 = row.get(4)?;
+                    let text_max: i64 = row.get(5)?;
+                    let voice_enabled_i64: i64 = row.get(6)?;
+                    let voice_interval: i64 = row.get(7)?;
+                    let voice_points: i64 = row.get(8)?;
+                    let voice_ignore_afk_i64: i64 = row.get(9)?;
+                    let voice_ignore_deaf_i64: i64 = row.get(10)?;
+                    let reaction_enabled_i64: i64 = row.get(11)?;
+                    let react_give: i64 = row.get(12)?;
+                    let react_recv: i64 = row.get(13)?;
+                    let react_cooldown: i64 = row.get(14)?;
+                    let announce_ch: Option<i64> = row.get(15)?;
+                    let announce_prom_i64: i64 = row.get(16)?;
+                    let ignored_ch_json: String = row.get(17)?;
+                    let ignored_ro_json: String = row.get(18)?;
+                    let role_mult_json: String = row.get(19)?;
+                    let chan_mult_json: String = row.get(20)?;
+
+                    let ignored_channels: Vec<u64> =
+                        serde_json::from_str(&ignored_ch_json).unwrap_or_default();
+                    let ignored_roles: Vec<u64> =
+                        serde_json::from_str(&ignored_ro_json).unwrap_or_default();
+                    let role_multipliers: HashMap<String, f64> =
+                        serde_json::from_str(&role_mult_json).unwrap_or_default();
+                    let channel_multipliers: HashMap<String, f64> =
+                        serde_json::from_str(&chan_mult_json).unwrap_or_default();
+
+                    Ok(ActivityConfig {
+                        guild_id: gid_i64 as u64,
+                        enabled: enabled_i64 != 0,
+                        text_min_chars,
+                        text_cooldown_seconds: text_cooldown,
+                        text_points_min: text_min,
+                        text_points_max: text_max,
+                        voice_enabled: voice_enabled_i64 != 0,
+                        voice_interval_minutes: voice_interval,
+                        voice_points_per_interval: voice_points,
+                        voice_ignore_afk: voice_ignore_afk_i64 != 0,
+                        voice_ignore_deafened: voice_ignore_deaf_i64 != 0,
+                        reaction_enabled: reaction_enabled_i64 != 0,
+                        reaction_give_points: react_give,
+                        reaction_receive_points: react_recv,
+                        reaction_cooldown_seconds: react_cooldown,
+                        announcement_channel_id: announce_ch.map(|c| c as u64),
+                        announce_promotions: announce_prom_i64 != 0,
+                        ignored_channels,
+                        ignored_roles,
+                        role_multipliers,
+                        channel_multipliers,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(res.unwrap_or_else(|| ActivityConfig::default_for_guild(guild_id)))
+    }
+
+    pub fn set_activity_config(&self, config: &ActivityConfig) -> Result<(), StorageError> {
+        let conn = self.writer.lock();
+        let ignored_ch_json = serde_json::to_string(&config.ignored_channels)?;
+        let ignored_ro_json = serde_json::to_string(&config.ignored_roles)?;
+        let role_mult_json = serde_json::to_string(&config.role_multipliers)?;
+        let chan_mult_json = serde_json::to_string(&config.channel_multipliers)?;
+
+        conn.execute(
+            "INSERT INTO activity_configs (
+                guild_id, enabled, text_min_chars, text_cooldown_seconds, text_points_min, text_points_max,
+                voice_enabled, voice_interval_minutes, voice_points_per_interval, voice_ignore_afk, voice_ignore_deafened,
+                reaction_enabled, reaction_give_points, reaction_receive_points, reaction_cooldown_seconds,
+                announcement_channel_id, announce_promotions, ignored_channels_json, ignored_roles_json,
+                role_multipliers_json, channel_multipliers_json
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            ON CONFLICT(guild_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                text_min_chars = excluded.text_min_chars,
+                text_cooldown_seconds = excluded.text_cooldown_seconds,
+                text_points_min = excluded.text_points_min,
+                text_points_max = excluded.text_points_max,
+                voice_enabled = excluded.voice_enabled,
+                voice_interval_minutes = excluded.voice_interval_minutes,
+                voice_points_per_interval = excluded.voice_points_per_interval,
+                voice_ignore_afk = excluded.voice_ignore_afk,
+                voice_ignore_deafened = excluded.voice_ignore_deafened,
+                reaction_enabled = excluded.reaction_enabled,
+                reaction_give_points = excluded.reaction_give_points,
+                reaction_receive_points = excluded.reaction_receive_points,
+                reaction_cooldown_seconds = excluded.reaction_cooldown_seconds,
+                announcement_channel_id = excluded.announcement_channel_id,
+                announce_promotions = excluded.announce_promotions,
+                ignored_channels_json = excluded.ignored_channels_json,
+                ignored_roles_json = excluded.ignored_roles_json,
+                role_multipliers_json = excluded.role_multipliers_json,
+                channel_multipliers_json = excluded.channel_multipliers_json",
+            params![
+                config.guild_id as i64,
+                if config.enabled { 1i64 } else { 0i64 },
+                config.text_min_chars,
+                config.text_cooldown_seconds,
+                config.text_points_min,
+                config.text_points_max,
+                if config.voice_enabled { 1i64 } else { 0i64 },
+                config.voice_interval_minutes,
+                config.voice_points_per_interval,
+                if config.voice_ignore_afk { 1i64 } else { 0i64 },
+                if config.voice_ignore_deafened { 1i64 } else { 0i64 },
+                if config.reaction_enabled { 1i64 } else { 0i64 },
+                config.reaction_give_points,
+                config.reaction_receive_points,
+                config.reaction_cooldown_seconds,
+                config.announcement_channel_id.map(|c| c as i64),
+                if config.announce_promotions { 1i64 } else { 0i64 },
+                ignored_ch_json,
+                ignored_ro_json,
+                role_mult_json,
+                chan_mult_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_text_activity(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+        points: i64,
+    ) -> Result<(), StorageError> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+
+        conn.execute(
+            "INSERT INTO user_activity_daily (
+                guild_id, user_id, date_str, text_points, voice_points, reaction_points,
+                total_points, message_count, voice_minutes, reaction_count
+            ) VALUES (?1, ?2, ?3, ?4, 0, 0, ?4, 1, 0, 0)
+            ON CONFLICT(guild_id, user_id, date_str) DO UPDATE SET
+                text_points = text_points + excluded.text_points,
+                total_points = total_points + excluded.total_points,
+                message_count = message_count + 1",
+            params![guild_id as i64, user_id as i64, today, points],
+        )?;
+
+        conn.execute(
+            "INSERT INTO user_activity_totals (guild_id, user_id, lifetime_points, last_active_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                lifetime_points = lifetime_points + excluded.lifetime_points,
+                last_active_at = excluded.last_active_at",
+            params![guild_id as i64, user_id as i64, points, now],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn record_voice_activity(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+        points: i64,
+        minutes: i64,
+    ) -> Result<(), StorageError> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+
+        conn.execute(
+            "INSERT INTO user_activity_daily (
+                guild_id, user_id, date_str, text_points, voice_points, reaction_points,
+                total_points, message_count, voice_minutes, reaction_count
+            ) VALUES (?1, ?2, ?3, 0, ?4, 0, ?4, 0, ?5, 0)
+            ON CONFLICT(guild_id, user_id, date_str) DO UPDATE SET
+                voice_points = voice_points + excluded.voice_points,
+                total_points = total_points + excluded.total_points,
+                voice_minutes = voice_minutes + excluded.voice_minutes",
+            params![guild_id as i64, user_id as i64, today, points, minutes],
+        )?;
+
+        conn.execute(
+            "INSERT INTO user_activity_totals (guild_id, user_id, lifetime_points, last_active_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                lifetime_points = lifetime_points + excluded.lifetime_points,
+                last_active_at = excluded.last_active_at",
+            params![guild_id as i64, user_id as i64, points, now],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn record_reaction_activity(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+        points: i64,
+    ) -> Result<(), StorageError> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+
+        conn.execute(
+            "INSERT INTO user_activity_daily (
+                guild_id, user_id, date_str, text_points, voice_points, reaction_points,
+                total_points, message_count, voice_minutes, reaction_count
+            ) VALUES (?1, ?2, ?3, 0, 0, ?4, ?4, 0, 0, 1)
+            ON CONFLICT(guild_id, user_id, date_str) DO UPDATE SET
+                reaction_points = reaction_points + excluded.reaction_points,
+                total_points = total_points + excluded.total_points,
+                reaction_count = reaction_count + 1",
+            params![guild_id as i64, user_id as i64, today, points],
+        )?;
+
+        conn.execute(
+            "INSERT INTO user_activity_totals (guild_id, user_id, lifetime_points, last_active_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                lifetime_points = lifetime_points + excluded.lifetime_points,
+                last_active_at = excluded.last_active_at",
+            params![guild_id as i64, user_id as i64, points, now],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn adjust_user_points(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+        delta_points: i64,
+    ) -> Result<i64, StorageError> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+
+        conn.execute(
+            "INSERT INTO user_activity_totals (guild_id, user_id, lifetime_points, last_active_at)
+            VALUES (?1, ?2, MAX(0, ?3), ?4)
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                lifetime_points = MAX(0, lifetime_points + ?3),
+                last_active_at = excluded.last_active_at",
+            params![guild_id as i64, user_id as i64, delta_points, now],
+        )?;
+
+        conn.execute(
+            "INSERT INTO user_activity_daily (
+                guild_id, user_id, date_str, text_points, voice_points, reaction_points,
+                total_points, message_count, voice_minutes, reaction_count
+            ) VALUES (?1, ?2, ?3, 0, 0, 0, MAX(0, ?4), 0, 0, 0)
+            ON CONFLICT(guild_id, user_id, date_str) DO UPDATE SET
+                total_points = MAX(0, total_points + ?4)",
+            params![guild_id as i64, user_id as i64, today, delta_points],
+        )?;
+
+        let new_total: i64 = conn.query_row(
+            "SELECT lifetime_points FROM user_activity_totals WHERE guild_id = ?1 AND user_id = ?2",
+            params![guild_id as i64, user_id as i64],
+            |r| r.get(0),
+        )?;
+
+        Ok(new_total)
+    }
+
+    pub fn reset_user_points(&self, guild_id: u64, user_id: u64) -> Result<(), StorageError> {
+        let conn = self.writer.lock();
+        conn.execute(
+            "UPDATE user_activity_totals SET lifetime_points = 0 WHERE guild_id = ?1 AND user_id = ?2",
+            params![guild_id as i64, user_id as i64],
+        )?;
+        conn.execute(
+            "DELETE FROM user_activity_daily WHERE guild_id = ?1 AND user_id = ?2",
+            params![guild_id as i64, user_id as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_leaderboard(
+        &self,
+        guild_id: u64,
+        timeframe: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<LeaderboardEntry>, i64), StorageError> {
+        let conn = self.writer.lock();
+        let limit_i64 = limit.clamp(1, 100) as i64;
+        let offset_i64 = offset as i64;
+
+        match timeframe.to_lowercase().as_str() {
+            "weekly" => {
+                let cutoff = (Utc::now() - chrono::Duration::days(7))
+                    .format("%Y-%m-%d")
+                    .to_string();
+
+                let total_count: i64 = conn.query_row(
+                    "SELECT COUNT(DISTINCT user_id) FROM user_activity_daily
+                     WHERE guild_id = ?1 AND date_str >= ?2",
+                    params![guild_id as i64, cutoff],
+                    |r| r.get(0),
+                )?;
+
+                let mut stmt = conn.prepare(
+                    "SELECT user_id,
+                            COALESCE(SUM(text_points), 0) AS tp,
+                            COALESCE(SUM(voice_points), 0) AS vp,
+                            COALESCE(SUM(reaction_points), 0) AS rp,
+                            COALESCE(SUM(total_points), 0) AS pts
+                     FROM user_activity_daily
+                     WHERE guild_id = ?1 AND date_str >= ?2
+                     GROUP BY user_id
+                     ORDER BY pts DESC
+                     LIMIT ?3 OFFSET ?4",
+                )?;
+
+                let rows = stmt.query_map(
+                    params![guild_id as i64, cutoff, limit_i64, offset_i64],
+                    |row| {
+                        let uid_i64: i64 = row.get(0)?;
+                        let tp: i64 = row.get(1)?;
+                        let vp: i64 = row.get(2)?;
+                        let rp: i64 = row.get(3)?;
+                        let pts: i64 = row.get(4)?;
+                        Ok((uid_i64 as u64, tp, vp, rp, pts))
+                    },
+                )?;
+
+                let mut entries = Vec::new();
+                for (idx, r) in rows.enumerate() {
+                    let (uid, tp, vp, rp, pts) = r?;
+                    entries.push(LeaderboardEntry {
+                        user_id: uid,
+                        rank: (offset + idx + 1) as i64,
+                        points: pts,
+                        text_points: tp,
+                        voice_points: vp,
+                        reaction_points: rp,
+                    });
+                }
+                Ok((entries, total_count))
+            }
+            "monthly" => {
+                let cutoff = (Utc::now() - chrono::Duration::days(30))
+                    .format("%Y-%m-%d")
+                    .to_string();
+
+                let total_count: i64 = conn.query_row(
+                    "SELECT COUNT(DISTINCT user_id) FROM user_activity_daily
+                     WHERE guild_id = ?1 AND date_str >= ?2",
+                    params![guild_id as i64, cutoff],
+                    |r| r.get(0),
+                )?;
+
+                let mut stmt = conn.prepare(
+                    "SELECT user_id,
+                            COALESCE(SUM(text_points), 0) AS tp,
+                            COALESCE(SUM(voice_points), 0) AS vp,
+                            COALESCE(SUM(reaction_points), 0) AS rp,
+                            COALESCE(SUM(total_points), 0) AS pts
+                     FROM user_activity_daily
+                     WHERE guild_id = ?1 AND date_str >= ?2
+                     GROUP BY user_id
+                     ORDER BY pts DESC
+                     LIMIT ?3 OFFSET ?4",
+                )?;
+
+                let rows = stmt.query_map(
+                    params![guild_id as i64, cutoff, limit_i64, offset_i64],
+                    |row| {
+                        let uid_i64: i64 = row.get(0)?;
+                        let tp: i64 = row.get(1)?;
+                        let vp: i64 = row.get(2)?;
+                        let rp: i64 = row.get(3)?;
+                        let pts: i64 = row.get(4)?;
+                        Ok((uid_i64 as u64, tp, vp, rp, pts))
+                    },
+                )?;
+
+                let mut entries = Vec::new();
+                for (idx, r) in rows.enumerate() {
+                    let (uid, tp, vp, rp, pts) = r?;
+                    entries.push(LeaderboardEntry {
+                        user_id: uid,
+                        rank: (offset + idx + 1) as i64,
+                        points: pts,
+                        text_points: tp,
+                        voice_points: vp,
+                        reaction_points: rp,
+                    });
+                }
+                Ok((entries, total_count))
+            }
+            _ => {
+                // Lifetime
+                let total_count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM user_activity_totals WHERE guild_id = ?1",
+                    params![guild_id as i64],
+                    |r| r.get(0),
+                )?;
+
+                let mut stmt = conn.prepare(
+                    "SELECT t.user_id,
+                            COALESCE(SUM(d.text_points), 0) AS tp,
+                            COALESCE(SUM(d.voice_points), 0) AS vp,
+                            COALESCE(SUM(d.reaction_points), 0) AS rp,
+                            t.lifetime_points AS pts
+                     FROM user_activity_totals t
+                     LEFT JOIN user_activity_daily d ON d.guild_id = t.guild_id AND d.user_id = t.user_id
+                     WHERE t.guild_id = ?1
+                     GROUP BY t.user_id
+                     ORDER BY pts DESC
+                     LIMIT ?2 OFFSET ?3",
+                )?;
+
+                let rows = stmt.query_map(
+                    params![guild_id as i64, limit_i64, offset_i64],
+                    |row| {
+                        let uid_i64: i64 = row.get(0)?;
+                        let tp: i64 = row.get(1)?;
+                        let vp: i64 = row.get(2)?;
+                        let rp: i64 = row.get(3)?;
+                        let pts: i64 = row.get(4)?;
+                        Ok((uid_i64 as u64, tp, vp, rp, pts))
+                    },
+                )?;
+
+                let mut entries = Vec::new();
+                for (idx, r) in rows.enumerate() {
+                    let (uid, tp, vp, rp, pts) = r?;
+                    entries.push(LeaderboardEntry {
+                        user_id: uid,
+                        rank: (offset + idx + 1) as i64,
+                        points: pts,
+                        text_points: tp,
+                        voice_points: vp,
+                        reaction_points: rp,
+                    });
+                }
+                Ok((entries, total_count))
+            }
+        }
+    }
+
+    pub fn get_user_rank(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+        timeframe: &str,
+    ) -> Result<UserRankInfo, StorageError> {
+        let conn = self.writer.lock();
+
+        let lifetime_pts: i64 = conn
+            .query_row(
+                "SELECT lifetime_points FROM user_activity_totals WHERE guild_id = ?1 AND user_id = ?2",
+                params![guild_id as i64, user_id as i64],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(0);
+
+        match timeframe.to_lowercase().as_str() {
+            "weekly" => {
+                let cutoff = (Utc::now() - chrono::Duration::days(7))
+                    .format("%Y-%m-%d")
+                    .to_string();
+
+                let user_breakdown = conn
+                    .query_row(
+                        "SELECT COALESCE(SUM(text_points), 0),
+                                COALESCE(SUM(voice_points), 0),
+                                COALESCE(SUM(reaction_points), 0),
+                                COALESCE(SUM(total_points), 0)
+                         FROM user_activity_daily
+                         WHERE guild_id = ?1 AND user_id = ?2 AND date_str >= ?3",
+                        params![guild_id as i64, user_id as i64, cutoff],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    )
+                    .optional()?;
+
+                let (tp, vp, rp, pts): (i64, i64, i64, i64) =
+                    user_breakdown.unwrap_or((0, 0, 0, 0));
+
+                let total_participants: i64 = conn.query_row(
+                    "SELECT COUNT(DISTINCT user_id) FROM user_activity_daily
+                     WHERE guild_id = ?1 AND date_str >= ?2",
+                    params![guild_id as i64, cutoff],
+                    |r| r.get(0),
+                )?;
+
+                let rank = if pts <= 0 {
+                    total_participants.max(1)
+                } else {
+                    let higher: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM (
+                            SELECT user_id, SUM(total_points) as p
+                            FROM user_activity_daily
+                            WHERE guild_id = ?1 AND date_str >= ?2
+                            GROUP BY user_id
+                            HAVING p > ?3
+                         )",
+                        params![guild_id as i64, cutoff, pts],
+                        |r| r.get(0),
+                    )?;
+                    higher.saturating_add(1)
+                };
+
+                Ok(UserRankInfo {
+                    user_id,
+                    rank,
+                    total_participants,
+                    points: pts,
+                    text_points: tp,
+                    voice_points: vp,
+                    reaction_points: rp,
+                    lifetime_points: lifetime_pts,
+                })
+            }
+            "monthly" => {
+                let cutoff = (Utc::now() - chrono::Duration::days(30))
+                    .format("%Y-%m-%d")
+                    .to_string();
+
+                let user_breakdown = conn
+                    .query_row(
+                        "SELECT COALESCE(SUM(text_points), 0),
+                                COALESCE(SUM(voice_points), 0),
+                                COALESCE(SUM(reaction_points), 0),
+                                COALESCE(SUM(total_points), 0)
+                         FROM user_activity_daily
+                         WHERE guild_id = ?1 AND user_id = ?2 AND date_str >= ?3",
+                        params![guild_id as i64, user_id as i64, cutoff],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    )
+                    .optional()?;
+
+                let (tp, vp, rp, pts): (i64, i64, i64, i64) =
+                    user_breakdown.unwrap_or((0, 0, 0, 0));
+
+                let total_participants: i64 = conn.query_row(
+                    "SELECT COUNT(DISTINCT user_id) FROM user_activity_daily
+                     WHERE guild_id = ?1 AND date_str >= ?2",
+                    params![guild_id as i64, cutoff],
+                    |r| r.get(0),
+                )?;
+
+                let rank = if pts <= 0 {
+                    total_participants.max(1)
+                } else {
+                    let higher: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM (
+                            SELECT user_id, SUM(total_points) as p
+                            FROM user_activity_daily
+                            WHERE guild_id = ?1 AND date_str >= ?2
+                            GROUP BY user_id
+                            HAVING p > ?3
+                         )",
+                        params![guild_id as i64, cutoff, pts],
+                        |r| r.get(0),
+                    )?;
+                    higher.saturating_add(1)
+                };
+
+                Ok(UserRankInfo {
+                    user_id,
+                    rank,
+                    total_participants,
+                    points: pts,
+                    text_points: tp,
+                    voice_points: vp,
+                    reaction_points: rp,
+                    lifetime_points: lifetime_pts,
+                })
+            }
+            _ => {
+                // Lifetime
+                let total_participants: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM user_activity_totals WHERE guild_id = ?1",
+                    params![guild_id as i64],
+                    |r| r.get(0),
+                )?;
+
+                let user_breakdown = conn
+                    .query_row(
+                        "SELECT COALESCE(SUM(text_points), 0),
+                                COALESCE(SUM(voice_points), 0),
+                                COALESCE(SUM(reaction_points), 0)
+                         FROM user_activity_daily
+                         WHERE guild_id = ?1 AND user_id = ?2",
+                        params![guild_id as i64, user_id as i64],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )
+                    .optional()?;
+
+                let (tp, vp, rp): (i64, i64, i64) = user_breakdown.unwrap_or((0, 0, 0));
+
+                let rank = if lifetime_pts <= 0 {
+                    total_participants.max(1)
+                } else {
+                    let higher: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM user_activity_totals
+                         WHERE guild_id = ?1 AND lifetime_points > ?2",
+                        params![guild_id as i64, lifetime_pts],
+                        |r| r.get(0),
+                    )?;
+                    higher.saturating_add(1)
+                };
+
+                Ok(UserRankInfo {
+                    user_id,
+                    rank,
+                    total_participants,
+                    points: lifetime_pts,
+                    text_points: tp,
+                    voice_points: vp,
+                    reaction_points: rp,
+                    lifetime_points: lifetime_pts,
+                })
+            }
+        }
+    }
+
+    pub fn list_activity_reward_rules(
+        &self,
+        guild_id: u64,
+    ) -> Result<Vec<ActivityRewardRule>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, guild_id, role_id, rule_type, timeframe, threshold_points, top_rank, remove_on_drop, created_at
+             FROM activity_reward_rules WHERE guild_id = ?1 ORDER BY created_at ASC",
+        )?;
+
+        let rows = stmt.query_map(params![guild_id as i64], |row| {
+            let id: String = row.get(0)?;
+            let gid_i64: i64 = row.get(1)?;
+            let rid_i64: i64 = row.get(2)?;
+            let rule_type: String = row.get(3)?;
+            let timeframe: String = row.get(4)?;
+            let threshold_points: i64 = row.get(5)?;
+            let top_rank: i64 = row.get(6)?;
+            let remove_on_drop_i64: i64 = row.get(7)?;
+            let created_at: i64 = row.get(8)?;
+
+            Ok(ActivityRewardRule {
+                id,
+                guild_id: gid_i64 as u64,
+                role_id: rid_i64 as u64,
+                rule_type,
+                timeframe,
+                threshold_points,
+                top_rank,
+                remove_on_drop: remove_on_drop_i64 != 0,
+                created_at,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    pub fn create_activity_reward_rule(
+        &self,
+        rule: NewActivityRewardRule,
+    ) -> Result<ActivityRewardRule, StorageError> {
+        let rule_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().timestamp();
+        let conn = self.writer.lock();
+
+        conn.execute(
+            "INSERT INTO activity_reward_rules (
+                id, guild_id, role_id, rule_type, timeframe, threshold_points, top_rank, remove_on_drop, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                rule_id,
+                rule.guild_id as i64,
+                rule.role_id as i64,
+                rule.rule_type,
+                rule.timeframe,
+                rule.threshold_points,
+                rule.top_rank,
+                if rule.remove_on_drop { 1i64 } else { 0i64 },
+                now,
+            ],
+        )?;
+
+        Ok(ActivityRewardRule {
+            id: rule_id,
+            guild_id: rule.guild_id,
+            role_id: rule.role_id,
+            rule_type: rule.rule_type,
+            timeframe: rule.timeframe,
+            threshold_points: rule.threshold_points,
+            top_rank: rule.top_rank,
+            remove_on_drop: rule.remove_on_drop,
+            created_at: now,
+        })
+    }
+
+    pub fn delete_activity_reward_rule(
+        &self,
+        guild_id: u64,
+        rule_id: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let count = conn.execute(
+            "DELETE FROM activity_reward_rules WHERE guild_id = ?1 AND id = ?2",
+            params![guild_id as i64, rule_id],
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Evaluates all reward rules for a guild and computes which users should have which roles.
+    /// Returns `Vec<(role_id, eligible_user_ids, remove_on_drop)>`.
+    pub fn get_eligible_rewards(
+        &self,
+        guild_id: u64,
+    ) -> Result<Vec<(u64, Vec<u64>, bool)>, StorageError> {
+        let rules = self.list_activity_reward_rules(guild_id)?;
+        if rules.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.writer.lock();
+        let mut results = Vec::new();
+
+        for rule in rules {
+            let mut eligible_users = Vec::new();
+            if rule.rule_type == "top_rank" {
+                let limit = rule.top_rank.max(1);
+                match rule.timeframe.to_lowercase().as_str() {
+                    "weekly" => {
+                        let cutoff = (Utc::now() - chrono::Duration::days(7))
+                            .format("%Y-%m-%d")
+                            .to_string();
+                        let mut stmt = conn.prepare(
+                            "SELECT user_id FROM user_activity_daily
+                             WHERE guild_id = ?1 AND date_str >= ?2
+                             GROUP BY user_id
+                             ORDER BY SUM(total_points) DESC
+                             LIMIT ?3",
+                        )?;
+                        let rows = stmt.query_map(
+                            params![guild_id as i64, cutoff, limit],
+                            |row| row.get::<_, i64>(0),
+                        )?;
+                        for r in rows {
+                            eligible_users.push(r? as u64);
+                        }
+                    }
+                    "monthly" => {
+                        let cutoff = (Utc::now() - chrono::Duration::days(30))
+                            .format("%Y-%m-%d")
+                            .to_string();
+                        let mut stmt = conn.prepare(
+                            "SELECT user_id FROM user_activity_daily
+                             WHERE guild_id = ?1 AND date_str >= ?2
+                             GROUP BY user_id
+                             ORDER BY SUM(total_points) DESC
+                             LIMIT ?3",
+                        )?;
+                        let rows = stmt.query_map(
+                            params![guild_id as i64, cutoff, limit],
+                            |row| row.get::<_, i64>(0),
+                        )?;
+                        for r in rows {
+                            eligible_users.push(r? as u64);
+                        }
+                    }
+                    _ => {
+                        // Lifetime top rank
+                        let mut stmt = conn.prepare(
+                            "SELECT user_id FROM user_activity_totals
+                             WHERE guild_id = ?1
+                             ORDER BY lifetime_points DESC
+                             LIMIT ?2",
+                        )?;
+                        let rows = stmt.query_map(
+                            params![guild_id as i64, limit],
+                            |row| row.get::<_, i64>(0),
+                        )?;
+                        for r in rows {
+                            eligible_users.push(r? as u64);
+                        }
+                    }
+                }
+            } else {
+                // Threshold rule
+                let threshold = rule.threshold_points;
+                match rule.timeframe.to_lowercase().as_str() {
+                    "weekly" => {
+                        let cutoff = (Utc::now() - chrono::Duration::days(7))
+                            .format("%Y-%m-%d")
+                            .to_string();
+                        let mut stmt = conn.prepare(
+                            "SELECT user_id FROM user_activity_daily
+                             WHERE guild_id = ?1 AND date_str >= ?2
+                             GROUP BY user_id
+                             HAVING SUM(total_points) >= ?3",
+                        )?;
+                        let rows = stmt.query_map(
+                            params![guild_id as i64, cutoff, threshold],
+                            |row| row.get::<_, i64>(0),
+                        )?;
+                        for r in rows {
+                            eligible_users.push(r? as u64);
+                        }
+                    }
+                    "monthly" => {
+                        let cutoff = (Utc::now() - chrono::Duration::days(30))
+                            .format("%Y-%m-%d")
+                            .to_string();
+                        let mut stmt = conn.prepare(
+                            "SELECT user_id FROM user_activity_daily
+                             WHERE guild_id = ?1 AND date_str >= ?2
+                             GROUP BY user_id
+                             HAVING SUM(total_points) >= ?3",
+                        )?;
+                        let rows = stmt.query_map(
+                            params![guild_id as i64, cutoff, threshold],
+                            |row| row.get::<_, i64>(0),
+                        )?;
+                        for r in rows {
+                            eligible_users.push(r? as u64);
+                        }
+                    }
+                    _ => {
+                        // Lifetime threshold
+                        let mut stmt = conn.prepare(
+                            "SELECT user_id FROM user_activity_totals
+                             WHERE guild_id = ?1 AND lifetime_points >= ?2",
+                        )?;
+                        let rows = stmt.query_map(
+                            params![guild_id as i64, threshold],
+                            |row| row.get::<_, i64>(0),
+                        )?;
+                        for r in rows {
+                            eligible_users.push(r? as u64);
+                        }
+                    }
+                }
+            }
+
+            results.push((rule.role_id, eligible_users, rule.remove_on_drop));
+        }
+
+        Ok(results)
+    }
+
+    pub fn get_guild_command_restrictions(
+        &self,
+        guild_id: u64,
+    ) -> Result<GuildCommandRestrictions, StorageError> {
+        let conn = self.writer.lock();
+        let res = conn
+            .query_row(
+                "SELECT default_allowed_channels_json, enabled FROM guild_command_restrictions WHERE guild_id = ?1",
+                params![guild_id as i64],
+                |row| {
+                    let json: String = row.get(0)?;
+                    let enabled_i64: i64 = row.get(1)?;
+                    let channels: Vec<u64> = serde_json::from_str(&json).unwrap_or_default();
+                    Ok(GuildCommandRestrictions {
+                        guild_id,
+                        default_allowed_channels: channels,
+                        enabled: enabled_i64 != 0,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(res.unwrap_or_else(|| GuildCommandRestrictions::default_for_guild(guild_id)))
+    }
+
+    pub fn set_guild_command_restrictions(
+        &self,
+        restrictions: &GuildCommandRestrictions,
+    ) -> Result<(), StorageError> {
+        let conn = self.writer.lock();
+        let json = serde_json::to_string(&restrictions.default_allowed_channels)?;
+        conn.execute(
+            "INSERT INTO guild_command_restrictions (guild_id, default_allowed_channels_json, enabled)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(guild_id) DO UPDATE SET
+                default_allowed_channels_json = excluded.default_allowed_channels_json,
+                enabled = excluded.enabled",
+            params![
+                restrictions.guild_id as i64,
+                json,
+                if restrictions.enabled { 1i64 } else { 0i64 },
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_command_channel_rules(
+        &self,
+        guild_id: u64,
+    ) -> Result<Vec<CommandChannelRule>, StorageError> {
+        let conn = self.writer.lock();
+        let mut stmt = conn.prepare(
+            "SELECT command_name, allowed_channels_json, denied_channels_json
+             FROM command_channel_rules WHERE guild_id = ?1 ORDER BY command_name ASC",
+        )?;
+
+        let rows = stmt.query_map(params![guild_id as i64], |row| {
+            let command_name: String = row.get(0)?;
+            let allowed_json: String = row.get(1)?;
+            let denied_json: String = row.get(2)?;
+
+            let allowed_channels: Vec<u64> = serde_json::from_str(&allowed_json).unwrap_or_default();
+            let denied_channels: Vec<u64> = serde_json::from_str(&denied_json).unwrap_or_default();
+
+            Ok(CommandChannelRule {
+                guild_id,
+                command_name,
+                allowed_channels,
+                denied_channels,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    pub fn set_command_channel_rule(
+        &self,
+        rule: &CommandChannelRule,
+    ) -> Result<(), StorageError> {
+        let conn = self.writer.lock();
+        let allowed_json = serde_json::to_string(&rule.allowed_channels)?;
+        let denied_json = serde_json::to_string(&rule.denied_channels)?;
+
+        conn.execute(
+            "INSERT INTO command_channel_rules (guild_id, command_name, allowed_channels_json, denied_channels_json)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(guild_id, command_name) DO UPDATE SET
+                allowed_channels_json = excluded.allowed_channels_json,
+                denied_channels_json = excluded.denied_channels_json",
+            params![rule.guild_id as i64, rule.command_name.to_lowercase(), allowed_json, denied_json],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_command_channel_rule(
+        &self,
+        guild_id: u64,
+        command_name: &str,
+    ) -> Result<bool, StorageError> {
+        let conn = self.writer.lock();
+        let count = conn.execute(
+            "DELETE FROM command_channel_rules WHERE guild_id = ?1 AND command_name = ?2",
+            params![guild_id as i64, command_name.to_lowercase()],
+        )?;
+        Ok(count > 0)
+    }
 }
 
 fn query_usage_sum(
@@ -2603,6 +3735,89 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
             );
             conn.execute(
                 "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (5, ?1)",
+                params![now],
+            )?;
+        }
+        if v < 6 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS activity_configs (
+                    guild_id INTEGER PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    text_min_chars INTEGER NOT NULL DEFAULT 5,
+                    text_cooldown_seconds INTEGER NOT NULL DEFAULT 60,
+                    text_points_min INTEGER NOT NULL DEFAULT 15,
+                    text_points_max INTEGER NOT NULL DEFAULT 25,
+                    voice_enabled INTEGER NOT NULL DEFAULT 1,
+                    voice_interval_minutes INTEGER NOT NULL DEFAULT 1,
+                    voice_points_per_interval INTEGER NOT NULL DEFAULT 5,
+                    voice_ignore_afk INTEGER NOT NULL DEFAULT 1,
+                    voice_ignore_deafened INTEGER NOT NULL DEFAULT 1,
+                    reaction_enabled INTEGER NOT NULL DEFAULT 1,
+                    reaction_give_points INTEGER NOT NULL DEFAULT 2,
+                    reaction_receive_points INTEGER NOT NULL DEFAULT 3,
+                    reaction_cooldown_seconds INTEGER NOT NULL DEFAULT 30,
+                    announcement_channel_id INTEGER,
+                    announce_promotions INTEGER NOT NULL DEFAULT 1,
+                    ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+                    ignored_roles_json TEXT NOT NULL DEFAULT '[]',
+                    role_multipliers_json TEXT NOT NULL DEFAULT '{}',
+                    channel_multipliers_json TEXT NOT NULL DEFAULT '{}'
+                ) STRICT;
+
+                CREATE TABLE IF NOT EXISTS user_activity_daily (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    date_str TEXT NOT NULL,
+                    text_points INTEGER NOT NULL DEFAULT 0,
+                    voice_points INTEGER NOT NULL DEFAULT 0,
+                    reaction_points INTEGER NOT NULL DEFAULT 0,
+                    total_points INTEGER NOT NULL DEFAULT 0,
+                    message_count INTEGER NOT NULL DEFAULT 0,
+                    voice_minutes INTEGER NOT NULL DEFAULT 0,
+                    reaction_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id, date_str)
+                ) STRICT;
+                CREATE INDEX IF NOT EXISTS idx_activity_daily_guild_date ON user_activity_daily(guild_id, date_str);
+                CREATE INDEX IF NOT EXISTS idx_activity_daily_user ON user_activity_daily(guild_id, user_id);
+
+                CREATE TABLE IF NOT EXISTS user_activity_totals (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    lifetime_points INTEGER NOT NULL DEFAULT 0,
+                    last_active_at INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id)
+                ) STRICT;
+                CREATE INDEX IF NOT EXISTS idx_activity_totals_lifetime ON user_activity_totals(guild_id, lifetime_points DESC);
+
+                CREATE TABLE IF NOT EXISTS activity_reward_rules (
+                    id TEXT PRIMARY KEY,
+                    guild_id INTEGER NOT NULL,
+                    role_id INTEGER NOT NULL,
+                    rule_type TEXT NOT NULL CHECK(rule_type IN ('threshold', 'top_rank')),
+                    timeframe TEXT NOT NULL CHECK(timeframe IN ('weekly', 'monthly', 'lifetime')),
+                    threshold_points INTEGER NOT NULL DEFAULT 0,
+                    top_rank INTEGER NOT NULL DEFAULT 0,
+                    remove_on_drop INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL
+                ) STRICT;
+                CREATE INDEX IF NOT EXISTS idx_activity_rewards_guild ON activity_reward_rules(guild_id);
+
+                CREATE TABLE IF NOT EXISTS command_channel_rules (
+                    guild_id INTEGER NOT NULL,
+                    command_name TEXT NOT NULL,
+                    allowed_channels_json TEXT NOT NULL DEFAULT '[]',
+                    denied_channels_json TEXT NOT NULL DEFAULT '[]',
+                    PRIMARY KEY (guild_id, command_name)
+                ) STRICT;
+
+                CREATE TABLE IF NOT EXISTS guild_command_restrictions (
+                    guild_id INTEGER PRIMARY KEY,
+                    default_allowed_channels_json TEXT NOT NULL DEFAULT '[]',
+                    enabled INTEGER NOT NULL DEFAULT 0
+                ) STRICT;",
+            )?;
+            conn.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (6, ?1)",
                 params![now],
             )?;
         }
@@ -2913,7 +4128,83 @@ fn initialize_schema(conn: &Connection) -> Result<(), StorageError> {
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_web_audit_guild_time ON web_audit_logs(guild_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_web_audit_user ON web_audit_logs(user_id, created_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_web_audit_created_at ON web_audit_logs(created_at DESC);",
+        CREATE INDEX IF NOT EXISTS idx_web_audit_created_at ON web_audit_logs(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS activity_configs (
+            guild_id INTEGER PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            text_min_chars INTEGER NOT NULL DEFAULT 5,
+            text_cooldown_seconds INTEGER NOT NULL DEFAULT 60,
+            text_points_min INTEGER NOT NULL DEFAULT 15,
+            text_points_max INTEGER NOT NULL DEFAULT 25,
+            voice_enabled INTEGER NOT NULL DEFAULT 1,
+            voice_interval_minutes INTEGER NOT NULL DEFAULT 1,
+            voice_points_per_interval INTEGER NOT NULL DEFAULT 5,
+            voice_ignore_afk INTEGER NOT NULL DEFAULT 1,
+            voice_ignore_deafened INTEGER NOT NULL DEFAULT 1,
+            reaction_enabled INTEGER NOT NULL DEFAULT 1,
+            reaction_give_points INTEGER NOT NULL DEFAULT 2,
+            reaction_receive_points INTEGER NOT NULL DEFAULT 3,
+            reaction_cooldown_seconds INTEGER NOT NULL DEFAULT 30,
+            announcement_channel_id INTEGER,
+            announce_promotions INTEGER NOT NULL DEFAULT 1,
+            ignored_channels_json TEXT NOT NULL DEFAULT '[]',
+            ignored_roles_json TEXT NOT NULL DEFAULT '[]',
+            role_multipliers_json TEXT NOT NULL DEFAULT '{}',
+            channel_multipliers_json TEXT NOT NULL DEFAULT '{}'
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS user_activity_daily (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            date_str TEXT NOT NULL,
+            text_points INTEGER NOT NULL DEFAULT 0,
+            voice_points INTEGER NOT NULL DEFAULT 0,
+            reaction_points INTEGER NOT NULL DEFAULT 0,
+            total_points INTEGER NOT NULL DEFAULT 0,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            voice_minutes INTEGER NOT NULL DEFAULT 0,
+            reaction_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, date_str)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_activity_daily_guild_date ON user_activity_daily(guild_id, date_str);
+        CREATE INDEX IF NOT EXISTS idx_activity_daily_user ON user_activity_daily(guild_id, user_id);
+
+        CREATE TABLE IF NOT EXISTS user_activity_totals (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            lifetime_points INTEGER NOT NULL DEFAULT 0,
+            last_active_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_activity_totals_lifetime ON user_activity_totals(guild_id, lifetime_points DESC);
+
+        CREATE TABLE IF NOT EXISTS activity_reward_rules (
+            id TEXT PRIMARY KEY,
+            guild_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            rule_type TEXT NOT NULL CHECK(rule_type IN ('threshold', 'top_rank')),
+            timeframe TEXT NOT NULL CHECK(timeframe IN ('weekly', 'monthly', 'lifetime')),
+            threshold_points INTEGER NOT NULL DEFAULT 0,
+            top_rank INTEGER NOT NULL DEFAULT 0,
+            remove_on_drop INTEGER NOT NULL DEFAULT 1,
+            created_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_activity_rewards_guild ON activity_reward_rules(guild_id);
+
+        CREATE TABLE IF NOT EXISTS command_channel_rules (
+            guild_id INTEGER NOT NULL,
+            command_name TEXT NOT NULL,
+            allowed_channels_json TEXT NOT NULL DEFAULT '[]',
+            denied_channels_json TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY (guild_id, command_name)
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS guild_command_restrictions (
+            guild_id INTEGER PRIMARY KEY,
+            default_allowed_channels_json TEXT NOT NULL DEFAULT '[]',
+            enabled INTEGER NOT NULL DEFAULT 0
+        ) STRICT;",
     )?;
 
     let now = Utc::now().timestamp();
@@ -3828,6 +5119,110 @@ mod tests {
         })?;
         storage.purge_guild_data(guild_id)?;
         assert!(storage.list_web_audit_logs(Some(guild_id), None, None, 10, 0)?.is_empty());
+
+        drop(storage);
+        let _ = fs::remove_dir_all(&temp_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_activity_points_and_command_channels() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = std::env::temp_dir().join(format!("silas_test_activity_{}", rand::random::<u64>()));
+        fs::create_dir_all(&temp_dir)?;
+        let db_path = temp_dir.join("test_activity.db");
+
+        let storage = Storage::open(&db_path)?;
+        let guild_id = 987654321012345678u64;
+        let user1 = 111111111111111111u64;
+        let user2 = 222222222222222222u64;
+
+        // 1. Activity Config
+        let default_cfg = storage.get_activity_config(guild_id)?;
+        assert!(default_cfg.enabled);
+        assert_eq!(default_cfg.text_points_min, 15);
+
+        let mut custom_cfg = default_cfg.clone();
+        custom_cfg.text_points_min = 20;
+        custom_cfg.text_points_max = 30;
+        custom_cfg.role_multipliers.insert("12345".to_string(), 1.5);
+        storage.set_activity_config(&custom_cfg)?;
+
+        let retrieved_cfg = storage.get_activity_config(guild_id)?;
+        assert_eq!(retrieved_cfg.text_points_min, 20);
+        assert_eq!(retrieved_cfg.role_multipliers.get("12345"), Some(&1.5));
+
+        // 2. Point accrual
+        storage.record_text_activity(guild_id, user1, 50)?;
+        storage.record_voice_activity(guild_id, user1, 30, 6)?;
+        storage.record_reaction_activity(guild_id, user1, 10)?;
+        // User1 total today = 90
+
+        storage.record_text_activity(guild_id, user2, 40)?;
+        // User2 total today = 40
+
+        // 3. Leaderboard verification
+        let (lb, total) = storage.get_leaderboard(guild_id, "lifetime", 10, 0)?;
+        assert_eq!(total, 2);
+        assert_eq!(lb.len(), 2);
+        assert_eq!(lb[0].user_id, user1);
+        assert_eq!(lb[0].points, 90);
+        assert_eq!(lb[0].rank, 1);
+        assert_eq!(lb[1].user_id, user2);
+        assert_eq!(lb[1].points, 40);
+        assert_eq!(lb[1].rank, 2);
+
+        // 4. User Rank
+        let rank1 = storage.get_user_rank(guild_id, user1, "weekly")?;
+        assert_eq!(rank1.rank, 1);
+        assert_eq!(rank1.points, 90);
+        assert_eq!(rank1.total_participants, 2);
+
+        // 5. Point adjustments
+        let new_total = storage.adjust_user_points(guild_id, user2, 100)?;
+        assert_eq!(new_total, 140);
+        let rank2 = storage.get_user_rank(guild_id, user2, "lifetime")?;
+        assert_eq!(rank2.rank, 1); // User2 now has 140 > 90
+
+        // 6. Reward rules
+        let rule = storage.create_activity_reward_rule(NewActivityRewardRule {
+            guild_id,
+            role_id: 888888888888888888,
+            rule_type: "threshold".to_string(),
+            timeframe: "lifetime".to_string(),
+            threshold_points: 100,
+            top_rank: 0,
+            remove_on_drop: true,
+        })?;
+        assert_eq!(rule.threshold_points, 100);
+
+        let eligible = storage.get_eligible_rewards(guild_id)?;
+        assert_eq!(eligible.len(), 1);
+        assert_eq!(eligible[0].0, 888888888888888888);
+        assert_eq!(eligible[0].1, vec![user2]); // Only user2 has >= 100 lifetime
+
+        let deleted_rule = storage.delete_activity_reward_rule(guild_id, &rule.id)?;
+        assert!(deleted_rule);
+
+        // 7. Command channel restrictions
+        let restrictions = storage.get_guild_command_restrictions(guild_id)?;
+        assert!(!restrictions.enabled);
+
+        storage.set_guild_command_restrictions(&GuildCommandRestrictions {
+            guild_id,
+            default_allowed_channels: vec![123456789],
+            enabled: true,
+        })?;
+
+        storage.set_command_channel_rule(&CommandChannelRule {
+            guild_id,
+            command_name: "leaderboard".to_string(),
+            allowed_channels: vec![123456789, 987654321],
+            denied_channels: vec![],
+        })?;
+
+        let rules = storage.list_command_channel_rules(guild_id)?;
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].command_name, "leaderboard");
 
         drop(storage);
         let _ = fs::remove_dir_all(&temp_dir);

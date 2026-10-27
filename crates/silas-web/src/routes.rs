@@ -17,7 +17,7 @@ use base64::Engine;
 use chrono::Utc;
 use rand::RngCore;
 use rust_embed::RustEmbed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::Digest;
 use silas_ai::detector::probe_local_providers;
@@ -30,8 +30,9 @@ use silas_discord::BotController;
 use silas_search::SearchCoordinator;
 use silas_core::tagscript::{process_tagscript, TagScriptContext};
 use silas_storage::{
-    AutomodConfig, GreetingsConfig, LoggingConfig, NewCustomTrigger, NewModCase,
-    NewReactionRoleEntry, NewReactionRoleGroup, NewWebAuditLog, Storage,
+    ActivityConfig, AutomodConfig, CommandChannelRule, GreetingsConfig, GuildCommandRestrictions,
+    LoggingConfig, NewActivityRewardRule, NewCustomTrigger, NewModCase, NewReactionRoleEntry,
+    NewReactionRoleGroup, NewWebAuditLog, Storage,
 };
 use silas_updater::{BotUpdater, CURRENT_VERSION};
 use std::collections::HashMap;
@@ -150,6 +151,30 @@ pub fn build_router(state: Arc<WebState>) -> Router {
         .route(
             "/tagscript/preview",
             post(api_tagscript_preview),
+        )
+        .route(
+            "/guilds/:guild_id/activity/config",
+            get(api_get_activity_config).put(api_put_activity_config),
+        )
+        .route(
+            "/guilds/:guild_id/activity/leaderboard",
+            get(api_get_activity_leaderboard),
+        )
+        .route(
+            "/guilds/:guild_id/activity/rewards",
+            get(api_list_activity_rewards).post(api_create_activity_reward),
+        )
+        .route(
+            "/guilds/:guild_id/activity/rewards/:rule_id",
+            delete(api_delete_activity_reward),
+        )
+        .route(
+            "/guilds/:guild_id/activity/points/adjust",
+            post(api_adjust_activity_points),
+        )
+        .route(
+            "/guilds/:guild_id/command-channels",
+            get(api_get_command_channels).put(api_put_command_channels),
         )
         .route("/reddit/generate-secret", post(api_generate_reddit_secret))
         .route("/update/check", get(api_update_check))
@@ -3088,6 +3113,352 @@ async fn api_tagscript_preview(
 
     let result = process_tagscript(&payload.template, &ctx);
     Json(json!({ "result": result })).into_response()
+}
+
+// ============================================================================
+// Activity, Rewards & Command Channels API
+// ============================================================================
+
+async fn api_get_activity_config(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.get_activity_config(guild_id) {
+        Ok(cfg) => Json(json!({ "config": cfg })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+async fn api_put_activity_config(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Json(mut config): Json<ActivityConfig>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+    config.guild_id = guild_id;
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let before_json = state
+        .storage
+        .get_activity_config(guild_id)
+        .ok()
+        .and_then(|c| serde_json::to_string(&c).ok());
+
+    match state.storage.set_activity_config(&config) {
+        Ok(()) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let after_json = serde_json::to_string(&config).ok();
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: "activity",
+                    action: "update_config",
+                    before_json: before_json.as_deref(),
+                    after_json: after_json.as_deref(),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "config": config })).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct LeaderboardQuery {
+    timeframe: Option<String>,
+    page: Option<usize>,
+    limit: Option<usize>,
+}
+
+async fn api_get_activity_leaderboard(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Query(query): Query<LeaderboardQuery>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let tf = query.timeframe.as_deref().unwrap_or("lifetime");
+    let limit = query.limit.unwrap_or(20).clamp(1, 100);
+    let page = query.page.unwrap_or(1).max(1);
+    let offset = (page - 1) * limit;
+
+    match state.storage.get_leaderboard(guild_id, tf, limit, offset) {
+        Ok((entries, total)) => Json(json!({ "entries": entries, "total": total, "page": page, "limit": limit })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+async fn api_list_activity_rewards(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.list_activity_reward_rules(guild_id) {
+        Ok(rules) => Json(json!({ "rules": rules })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+async fn api_create_activity_reward(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Json(mut rule): Json<NewActivityRewardRule>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+    rule.guild_id = guild_id;
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.create_activity_reward_rule(rule) {
+        Ok(created) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let after_json = serde_json::to_string(&created).ok();
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: "activity",
+                    action: "create_reward_rule",
+                    before_json: None,
+                    after_json: after_json.as_deref(),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "rule": created })).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+async fn api_delete_activity_reward(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path((guild_id_str, rule_id)): Path<(String, String)>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.delete_activity_reward_rule(guild_id, &rule_id) {
+        Ok(deleted) => {
+            if deleted {
+                if let Some(ref c) = claims {
+                    let ip_hdr = headers
+                        .get("x-forwarded-for")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.split(',').next())
+                        .map(str::trim)
+                        .unwrap_or("127.0.0.1");
+
+                    let audit = NewWebAuditLog {
+                        guild_id: Some(guild_id),
+                        user_id,
+                        user_name: &c.username,
+                        domain: "activity",
+                        action: "delete_reward_rule",
+                        before_json: Some(&rule_id),
+                        after_json: None,
+                        ip_address: ip_hdr,
+                        status: "success",
+                    };
+                    let _ = state.storage.insert_web_audit_log(&audit);
+                }
+                Json(json!({ "success": true })).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, Json(json!({ "error": "Rule not found" }))).into_response()
+            }
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct AdjustPointsPayload {
+    user_id: u64,
+    amount: i64,
+}
+
+async fn api_adjust_activity_points(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<AdjustPointsPayload>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let caller_user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, caller_user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    match state.storage.adjust_user_points(guild_id, payload.user_id, payload.amount) {
+        Ok(new_total) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let details = format!("user: {}, amount: {}, new_total: {}", payload.user_id, payload.amount, new_total);
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id: caller_user_id,
+                    user_name: &c.username,
+                    domain: "activity",
+                    action: "adjust_points",
+                    before_json: None,
+                    after_json: Some(&details),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+            Json(json!({ "success": true, "new_total": new_total })).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CommandChannelsPayload {
+    restrictions: GuildCommandRestrictions,
+    rules: Vec<CommandChannelRule>,
+}
+
+async fn api_get_command_channels(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let restr = state.storage.get_guild_command_restrictions(guild_id).unwrap_or_else(|_| GuildCommandRestrictions::default_for_guild(guild_id));
+    let rules = state.storage.list_command_channel_rules(guild_id).unwrap_or_default();
+
+    Json(json!({ "restrictions": restr, "rules": rules })).into_response()
+}
+
+async fn api_put_command_channels(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Json(mut payload): Json<CommandChannelsPayload>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
+    };
+    payload.restrictions.guild_id = guild_id;
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    if let Err(e) = state.storage.set_guild_command_restrictions(&payload.restrictions) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response();
+    }
+
+    for rule in &payload.rules {
+        let mut r = rule.clone();
+        r.guild_id = guild_id;
+        let _ = state.storage.set_command_channel_rule(&r);
+    }
+
+    Json(json!({ "success": true })).into_response()
 }
 
 // ============================================================================

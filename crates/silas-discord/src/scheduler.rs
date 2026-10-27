@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use dashmap::DashMap;
 use parking_lot::RwLock;
-use serenity::all::{EditMember, GuildId, Http, UserId};
+use serenity::all::{Cache, EditMember, GuildId, Http, UserId};
 use silas_storage::Storage;
 use tracing::{debug, error, info, warn};
 
@@ -18,13 +19,22 @@ pub const CHECK_INTERVAL_SECS: u64 = 15;
 /// Number of 15-second cycles before running strike decay (20 cycles = 5 minutes).
 pub const STRIKE_DECAY_CYCLE_TICKS: u64 = 20;
 
-/// Spawns the recurring background task that checks expired cases and decays strikes.
+/// Number of 15-second cycles before ticking voice activity (4 cycles = 60s).
+pub const VOICE_TICK_CYCLE_TICKS: u64 = 4;
+
+/// Number of 15-second cycles before reconciling activity reward roles (40 cycles = 10 minutes).
+pub const REWARD_RECONCILE_CYCLE_TICKS: u64 = 40;
+
+/// Spawns the recurring background task that checks expired cases, decays strikes, and reconciles activity roles.
 pub fn spawn_scheduler_worker(
     storage: Storage,
     http_getter: Arc<RwLock<Option<Arc<Http>>>>,
+    activity_tracker: Arc<crate::activity::ActivityTracker>,
+    connected_guilds: Arc<DashMap<u64, crate::bot::ConnectedGuildInfo>>,
+    cache_getter: Arc<RwLock<Option<Arc<Cache>>>>,
 ) {
     tokio::spawn(async move {
-        info!("Moderation background scheduler worker started (interval: 15s).");
+        info!("Moderation & Activity background scheduler worker started (interval: 15s).");
         let mut tick_counter: u64 = 0;
 
         loop {
@@ -60,6 +70,20 @@ pub fn spawn_scheduler_worker(
                 let retention = storage.get_app_settings().audit_log_retention_days;
                 if let Err(e) = storage.prune_web_audit_logs(retention) {
                     warn!("Failed to prune web audit logs: {e}");
+                }
+            }
+
+            // 3. Process voice activity points accrual (every 60s)
+            if tick_counter.is_multiple_of(VOICE_TICK_CYCLE_TICKS) {
+                activity_tracker.tick_voice_activity(&storage);
+            }
+
+            // 4. Periodically evaluate and reconcile activity reward roles (every 10 minutes)
+            if tick_counter.is_multiple_of(REWARD_RECONCILE_CYCLE_TICKS) {
+                let cache_opt = cache_getter.read().clone();
+                for entry in connected_guilds.iter() {
+                    let gid = *entry.key();
+                    crate::activity::reconcile_guild_rewards(&http, &storage, gid, cache_opt.as_deref()).await;
                 }
             }
         }

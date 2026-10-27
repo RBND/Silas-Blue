@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Silas Blue v6.0.10 — Administration Console</title>
+  <title>Silas Blue v6.0.11 — Administration Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
   <link rel="stylesheet" href="/app.css">
@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v6.0.10</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.11</span>
         </div>
       </div>
 
@@ -58,6 +58,9 @@
         </button>
         <button type="button" class="nav-item" data-view="triggers">
           ⚡ Custom Triggers
+        </button>
+        <button type="button" class="nav-item" data-view="activity">
+          🏆 Activity &amp; Levels
         </button>
         <div class="sidebar-nav-divider" role="separator"><span>SECURITY &amp; GOVERNANCE</span></div>
         <button type="button" class="nav-item" data-view="grants">
@@ -1246,6 +1249,252 @@
         </div>
       </section>
 
+      <!-- VIEW: Activity, Levels & Rewards -->
+      <section id="view-activity" class="view-panel hidden">
+        <header class="view-header">
+          <div>
+            <h2>🏆 Activity, Levels &amp; Rewards</h2>
+            <p class="subtitle">User participation tracking, XP multipliers, automated reward roles, and command channel restrictions.</p>
+          </div>
+          <div class="header-actions">
+            <select id="activity-guild-selector" class="input-select guild-selector-sync" aria-label="Select Server"></select>
+            <button type="button" id="btn-save-activity-config" class="btn btn-primary">Save Activity Settings</button>
+          </div>
+        </header>
+
+        <div id="activity-no-server" class="status-note">
+          Please select a server above to view and manage participation settings, automated rewards, and leaderboards.
+        </div>
+
+        <div id="activity-content" class="hidden">
+          <!-- Card 1: Core Participation Tracking -->
+          <div class="card">
+            <h3>📈 Participation &amp; Point Accrual</h3>
+            <p class="muted">Configure points awarded for chat messages, voice channel presence, and emoji reactions.</p>
+
+            <div class="form-grid" style="margin-top: 1rem;">
+              <div class="form-group checkbox-group" style="grid-column: 1 / -1;">
+                <label>
+                  <input type="checkbox" id="activity-enabled">
+                  <strong>Enable Participation Tracking</strong> (Record XP &amp; stats for server members)
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label for="activity-text-min">Text Points (Min per message)</label>
+                <input type="number" id="activity-text-min" class="input-text" min="1" max="1000" value="15">
+              </div>
+
+              <div class="form-group">
+                <label for="activity-text-max">Text Points (Max per message)</label>
+                <input type="number" id="activity-text-max" class="input-text" min="1" max="1000" value="25">
+              </div>
+
+              <div class="form-group">
+                <label for="activity-text-cooldown">Text Anti-Spam Cooldown (seconds)</label>
+                <input type="number" id="activity-text-cooldown" class="input-text" min="5" max="3600" value="60">
+              </div>
+
+              <div class="form-group">
+                <label for="activity-text-min-chars">Minimum Message Length (characters)</label>
+                <input type="number" id="activity-text-min-chars" class="input-text" min="1" max="500" value="5">
+              </div>
+
+              <div class="form-group checkbox-group" style="grid-column: 1 / -1;">
+                <label>
+                  <input type="checkbox" id="activity-voice-enabled">
+                  <strong>Enable Voice Channel XP</strong> (Award points to active voice members)
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label for="activity-voice-points">Voice Points (per minute)</label>
+                <input type="number" id="activity-voice-points" class="input-text" min="1" max="500" value="5">
+              </div>
+
+              <div class="form-group checkbox-group">
+                <label>
+                  <input type="checkbox" id="activity-voice-ignore-afk" checked>
+                  Ignore AFK Voice Channels
+                </label>
+              </div>
+
+              <div class="form-group checkbox-group">
+                <label>
+                  <input type="checkbox" id="activity-voice-ignore-deaf" checked>
+                  Ignore Self/Server Deafened Members
+                </label>
+              </div>
+
+              <div class="form-group checkbox-group" style="grid-column: 1 / -1;">
+                <label>
+                  <input type="checkbox" id="activity-reaction-enabled">
+                  <strong>Enable Reaction XP</strong>
+                </label>
+              </div>
+
+              <div class="form-group">
+                <label for="activity-reaction-give">Points for Giving a Reaction</label>
+                <input type="number" id="activity-reaction-give" class="input-text" min="0" max="100" value="2">
+              </div>
+
+              <div class="form-group">
+                <label for="activity-reaction-recv">Points for Receiving a Reaction</label>
+                <input type="number" id="activity-reaction-recv" class="input-text" min="0" max="100" value="3">
+              </div>
+
+              <div class="form-group">
+                <label for="activity-reaction-cooldown">Reaction Cooldown (seconds)</label>
+                <input type="number" id="activity-reaction-cooldown" class="input-text" min="1" max="300" value="30">
+              </div>
+
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="activity-announce-channel">Level-Up / Milestone Announcement Channel</label>
+                <select id="activity-announce-channel" class="input-select">
+                  <option value="">Disabled (Silent)</option>
+                </select>
+              </div>
+
+              <div class="form-group checkbox-group" style="grid-column: 1 / -1;">
+                <label>
+                  <input type="checkbox" id="activity-announce-promotions" checked>
+                  Announce Role Promotions (Demotions are always handled quietly)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2: Command Channel Restrictions -->
+          <div class="card">
+            <div class="card-header-split">
+              <div>
+                <h3>🔒 Command Channel Restrictions</h3>
+                <p class="subtitle">Restrict bot commands to dedicated bot channels, with optional per-command overrides.</p>
+              </div>
+              <button type="button" id="btn-save-cmd-channels" class="btn btn-secondary">Save Channel Rules</button>
+            </div>
+
+            <div class="form-grid" style="margin-top: 1rem;">
+              <div class="form-group checkbox-group" style="grid-column: 1 / -1;">
+                <label>
+                  <input type="checkbox" id="cmd-restr-enabled">
+                  <strong>Enforce Channel Restrictions</strong> (Restricts non-mod/admin commands to designated channels)
+                </label>
+              </div>
+
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="cmd-default-channel-select">Add Server Default Command Channel</label>
+                <div style="display: flex; gap: 0.5rem;">
+                  <select id="cmd-default-channel-select" class="input-select" style="flex: 1;"></select>
+                  <button type="button" id="btn-add-default-channel" class="btn btn-secondary">Add Channel</button>
+                </div>
+                <div id="cmd-default-channels-list" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;"></div>
+              </div>
+
+              <div class="form-group" style="grid-column: 1 / -1; margin-top: 1rem;">
+                <h4>Per-Command Overrides</h4>
+                <p class="muted">Override the server default for specific commands (e.g. restrict `/leaderboard` or `/rank`).</p>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                  <input type="text" id="cmd-override-name" class="input-text" placeholder="Command name (e.g. leaderboard)" style="flex: 1;">
+                  <select id="cmd-override-channel-select" class="input-select" style="flex: 1;"></select>
+                  <button type="button" id="btn-add-cmd-override" class="btn btn-secondary">Add Override</button>
+                </div>
+                <div class="table-responsive" style="margin-top: 0.75rem;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Command</th>
+                        <th>Allowed Channels</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cmd-overrides-tbody">
+                      <tr><td colspan="3" class="text-center muted">No command overrides configured.</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3: Automated Reward Roles -->
+          <div class="card">
+            <div class="card-header-split">
+              <div>
+                <h3>🎖️ Automated Role Rewards</h3>
+                <p class="subtitle">Assign roles for reaching point thresholds or holding top leaderboard ranks (e.g. "Helper").</p>
+              </div>
+              <button type="button" id="btn-open-add-reward-modal" class="btn btn-primary btn-sm">Add Reward Rule</button>
+            </div>
+
+            <div class="table-responsive" style="margin-top: 1rem;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>Rule Type</th>
+                    <th>Timeframe</th>
+                    <th>Requirement</th>
+                    <th>Demote on Drop</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="activity-rewards-tbody">
+                  <tr><td colspan="6" class="text-center muted">Loading reward rules...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Card 4: Leaderboard & Member Points -->
+          <div class="card">
+            <div class="card-header-split">
+              <div>
+                <h3>📊 Leaderboard &amp; Points Management</h3>
+                <p class="subtitle">Inspect server standings and adjust member points with audit tracking.</p>
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <select id="leaderboard-timeframe-select" class="input-select input-sm">
+                  <option value="lifetime">Lifetime (All-Time)</option>
+                  <option value="monthly">Monthly (30 Days)</option>
+                  <option value="weekly">Weekly (7 Days)</option>
+                </select>
+                <button type="button" id="btn-refresh-leaderboard" class="btn btn-secondary btn-sm">Refresh</button>
+              </div>
+            </div>
+
+            <div class="table-responsive" style="margin-top: 1rem;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Member ID</th>
+                    <th>Points</th>
+                    <th>Chat XP</th>
+                    <th>Voice XP</th>
+                    <th>Reaction XP</th>
+                  </tr>
+                </thead>
+                <tbody id="leaderboard-tbody">
+                  <tr><td colspan="6" class="text-center muted">Select a timeframe to view standings.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Manual Point Adjustment -->
+            <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+              <h4>Manual Point Adjustment</h4>
+              <p class="muted">Add or deduct participation points for any member. All adjustments are logged to the Audit Trail.</p>
+              <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                <input type="text" id="adjust-user-id" class="input-text" placeholder="User ID (Snowflake)" style="flex: 2; min-width: 200px;">
+                <input type="number" id="adjust-amount" class="input-text" placeholder="Amount (+100 or -50)" style="flex: 1; min-width: 120px;">
+                <button type="button" id="btn-submit-point-adjust" class="btn btn-secondary">Apply Adjustment</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- VIEW 12: Reddit & Devvit Companion -->
       <section id="view-reddit" class="view-panel hidden">
         <header class="view-header">
@@ -1705,6 +1954,53 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-modal="modal-edit-ladder-step">Cancel</button>
             <button type="button" id="btn-submit-edit-ladder" class="btn btn-primary">Save Step</button>
+          </div>
+        </div>
+      </div>
+      <!-- Modal: Add Activity Reward Rule -->
+      <div id="modal-add-reward-rule" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-reward-title">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <h3 id="modal-reward-title">Add Automated Role Reward</h3>
+            <button type="button" class="btn-close-modal" data-modal="modal-add-reward-rule" aria-label="Close">&times;</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-grid">
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="reward-modal-role">Role to Award *</label>
+                <select id="reward-modal-role" class="input-select"></select>
+              </div>
+              <div class="form-group">
+                <label for="reward-modal-type">Rule Type</label>
+                <select id="reward-modal-type" class="input-select">
+                  <option value="threshold">Point Threshold (Reach X points)</option>
+                  <option value="top_rank">Top Leaderboard Rank (Top N participants)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="reward-modal-timeframe">Evaluation Timeframe</label>
+                <select id="reward-modal-timeframe" class="input-select">
+                  <option value="weekly">Weekly (Past 7 Days)</option>
+                  <option value="monthly">Monthly (Past 30 Days)</option>
+                  <option value="lifetime">Lifetime (All-Time)</option>
+                </select>
+              </div>
+              <div class="form-group" style="grid-column: 1 / -1;">
+                <label for="reward-modal-target" id="reward-modal-target-label">Threshold Points Required *</label>
+                <input type="number" id="reward-modal-target" class="input-text" min="1" value="500">
+                <p class="muted" id="reward-modal-target-hint">Members who earn this many points in the selected timeframe will receive the role.</p>
+              </div>
+              <div class="form-group checkbox-group" style="grid-column: 1 / -1;">
+                <label>
+                  <input type="checkbox" id="reward-modal-drop" checked>
+                  <strong>Demote on Drop</strong> (Revoke role if user falls below threshold or out of top ranks)
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-modal="modal-add-reward-rule">Cancel</button>
+            <button type="button" id="btn-submit-add-reward" class="btn btn-primary">Create Reward Rule</button>
           </div>
         </div>
       </div>

@@ -18,6 +18,7 @@ pub enum ConsoleDomain {
     Ai,
     Permissions,
     AuditLog,
+    Activity,
 }
 
 impl ConsoleDomain {
@@ -34,6 +35,7 @@ impl ConsoleDomain {
             Self::Ai => "ai",
             Self::Permissions => "permissions",
             Self::AuditLog => "audit_log",
+            Self::Activity => "activity",
         }
     }
 
@@ -50,6 +52,7 @@ impl ConsoleDomain {
             "ai" => Some(Self::Ai),
             "permissions" | "access" => Some(Self::Permissions),
             "audit_log" | "audit" | "auditlog" => Some(Self::AuditLog),
+            "activity" | "points" | "levels" | "xp" => Some(Self::Activity),
             _ => None,
         }
     }

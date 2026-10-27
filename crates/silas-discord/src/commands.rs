@@ -49,6 +49,11 @@ pub fn all_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
         reddit(),
         crate::reaction_roles::rr(),
         crate::triggers::tag(),
+        leaderboard(),
+        rank(),
+        points(),
+        activity_rewards(),
+        command_channels(),
     ];
     cmds.extend(crate::moderation::mod_commands());
     cmds
@@ -1477,5 +1482,580 @@ pub async fn reddit_list(ctx: Context<'_>) -> Result<(), CommandError> {
     }
 
     ctx.say(out).await?;
+    Ok(())
+}
+
+/// Enforces channel restrictions on non-mod/admin commands server-wide.
+pub async fn enforce_channel_restrictions(ctx: Context<'_>) -> Result<bool, CommandError> {
+    let Some(guild_id) = ctx.guild_id() else {
+        return Ok(true);
+    };
+
+    let state = ctx.data();
+    let settings = state.storage.get_app_settings();
+    let info = extract_caller_roles(ctx, &settings.bot_owner_id).await;
+
+    // Administrators and bot/server owners bypass channel restrictions
+    if info.is_admin || info.is_owner_or_bot_owner {
+        return Ok(true);
+    }
+
+    let channel_id = ctx.channel_id().get();
+    let cmd_name = ctx.command().name.as_str();
+
+    match crate::activity::check_channel_restriction(
+        &state.storage,
+        guild_id.get(),
+        channel_id,
+        cmd_name,
+        false,
+    ) {
+        Ok(()) => Ok(true),
+        Err(allowed_channels) => {
+            let ch_links = if allowed_channels.is_empty() {
+                "a designated bot channel".to_string()
+            } else {
+                allowed_channels
+                    .iter()
+                    .map(|id| format!("<#{id}>"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let msg = format!(
+                "⚠️ **Channel Restricted**\nThe `/{cmd_name}` command can only be used in {ch_links}. Please run it there!"
+            );
+            ctx.send(poise::CreateReply::default().content(msg).ephemeral(true))
+                .await?;
+            Ok(false)
+        }
+    }
+}
+
+#[derive(Debug, poise::ChoiceParameter)]
+pub enum LeaderboardTimeframe {
+    #[name = "Weekly (Past 7 Days)"]
+    Weekly,
+    #[name = "Monthly (Past 30 Days)"]
+    Monthly,
+    #[name = "Lifetime (All-Time)"]
+    Lifetime,
+}
+
+/// View the top participants and leaderboard rankings.
+#[poise::command(slash_command, prefix_command)]
+pub async fn leaderboard(
+    ctx: Context<'_>,
+    #[description = "Timeframe for the leaderboard"] timeframe: Option<LeaderboardTimeframe>,
+) -> Result<(), CommandError> {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say("⚠️ Leaderboard is only available within a server.").await?;
+        return Ok(());
+    };
+    let gid = guild_id.get();
+    let state = ctx.data();
+
+    let tf_str = match timeframe.unwrap_or(LeaderboardTimeframe::Lifetime) {
+        LeaderboardTimeframe::Weekly => "weekly",
+        LeaderboardTimeframe::Monthly => "monthly",
+        LeaderboardTimeframe::Lifetime => "lifetime",
+    };
+
+    let title_tf = match tf_str {
+        "weekly" => "Weekly (Past 7 Days)",
+        "monthly" => "Monthly (Past 30 Days)",
+        _ => "Lifetime (All-Time)",
+    };
+
+    let (top_entries, _total_users) = state.storage.get_leaderboard(gid, tf_str, 50, 0)?;
+    let caller_rank = state.storage.get_user_rank(gid, ctx.author().id.get(), tf_str)?;
+
+    if top_entries.is_empty() {
+        ctx.say(format!("🏆 **Server Leaderboard — {title_tf}**\nNo active participants recorded yet for this period. Start chatting or join voice to earn points!"))
+            .await?;
+        return Ok(());
+    }
+
+    let mut pages = Vec::new();
+    let chunk_size = 10;
+    let chunks: Vec<_> = top_entries.chunks(chunk_size).collect();
+
+    for (page_idx, chunk) in chunks.iter().enumerate() {
+        let mut page_text = format!("🏆 **Server Leaderboard — {title_tf}** (Page {}/{})\n\n", page_idx + 1, chunks.len().max(1));
+        for entry in *chunk {
+            let medal = match entry.rank {
+                1 => "🥇",
+                2 => "🥈",
+                3 => "🥉",
+                _ => "▫️",
+            };
+            page_text.push_str(&format!(
+                "{medal} **#{}.** <@{}> — **{}** pts `(💬 {} | 🎙️ {} | ⭐ {})`\n",
+                entry.rank, entry.user_id, entry.points, entry.text_points, entry.voice_points, entry.reaction_points
+            ));
+        }
+
+        page_text.push_str(&format!(
+            "\n━━━━━━━━━━━━━━━━━━━━\n👤 **Your Standing:** #{} of {} participants • **{}** pts\n",
+            caller_rank.rank, caller_rank.total_participants, caller_rank.points
+        ));
+
+        pages.push(page_text);
+    }
+
+    let owner_id = ctx.author().id.get();
+    if let Some((first_page, action_rows)) = state.pagination.create_view(owner_id, pages) {
+        let mut reply = poise::CreateReply::default().content(first_page);
+        for row in action_rows {
+            reply = reply.components(vec![row]);
+        }
+        ctx.send(reply).await?;
+    }
+
+    Ok(())
+}
+
+async fn display_user_rank(ctx: Context<'_>, target: &serenity::User) -> Result<(), CommandError> {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.say("⚠️ Rank cards are only available within a server.").await?;
+        return Ok(());
+    };
+    let gid = guild_id.get();
+    let target_id = target.id.get();
+    let state = ctx.data();
+
+    let lifetime_rank = state.storage.get_user_rank(gid, target_id, "lifetime")?;
+    let weekly_rank = state.storage.get_user_rank(gid, target_id, "weekly")?;
+    let monthly_rank = state.storage.get_user_rank(gid, target_id, "monthly")?;
+
+    let rules = state.storage.list_activity_reward_rules(gid)?;
+    let mut next_milestone_desc = "No upcoming role milestone".to_string();
+    let mut closest_needed = i64::MAX;
+
+    for rule in &rules {
+        if rule.rule_type == "threshold" {
+            let user_pts = match rule.timeframe.as_str() {
+                "weekly" => weekly_rank.points,
+                "monthly" => monthly_rank.points,
+                _ => lifetime_rank.points,
+            };
+            if rule.threshold_points > user_pts {
+                let needed = rule.threshold_points - user_pts;
+                if needed < closest_needed {
+                    closest_needed = needed;
+                    next_milestone_desc = format!(
+                        "<@&{}> ({} pts needed in {})",
+                        rule.role_id, needed, rule.timeframe
+                    );
+                }
+            }
+        }
+    }
+
+    let content = format!(
+        "📊 **Activity Profile for <@{target_id}>**\n\n\
+         🏆 **Rankings:**\n\
+         • **Lifetime:** #{} of {} ({} pts)\n\
+         • **Monthly (30d):** #{} ({} pts)\n\
+         • **Weekly (7d):** #{} ({} pts)\n\n\
+         📈 **Points Breakdown (Lifetime):**\n\
+         • 💬 Text Chat: **{}** pts\n\
+         • 🎙️ Voice Time: **{}** pts\n\
+         • ⭐ Reactions: **{}** pts\n\n\
+         🎯 **Next Milestone:** {}\n",
+        lifetime_rank.rank, lifetime_rank.total_participants, lifetime_rank.lifetime_points,
+        monthly_rank.rank, monthly_rank.points,
+        weekly_rank.rank, weekly_rank.points,
+        lifetime_rank.text_points, lifetime_rank.voice_points, lifetime_rank.reaction_points,
+        next_milestone_desc,
+    );
+
+    ctx.say(content).await?;
+    Ok(())
+}
+
+/// View your personal rank card, points breakdown, and next milestone.
+#[poise::command(slash_command, prefix_command)]
+pub async fn rank(
+    ctx: Context<'_>,
+    #[description = "Member to check rank for (defaults to yourself)"] user: Option<serenity::User>,
+) -> Result<(), CommandError> {
+    let target = user.as_ref().unwrap_or_else(|| ctx.author());
+    display_user_rank(ctx, target).await
+}
+
+/// Manage participation points and awards.
+#[poise::command(
+    slash_command,
+    prefix_command,
+    subcommands("points_give", "points_take", "points_reset", "points_show")
+)]
+pub async fn points(ctx: Context<'_>) -> Result<(), CommandError> {
+    ctx.say("Use `/points give`, `/points take`, `/points reset`, or `/points show`.").await?;
+    Ok(())
+}
+
+/// Award participation points to a user (Admin/Mod only).
+#[poise::command(slash_command, prefix_command, rename = "give")]
+pub async fn points_give(
+    ctx: Context<'_>,
+    #[description = "Member to award points to"] user: serenity::User,
+    #[description = "Amount of points to give"] amount: i64,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Point adjustments must be executed in a server.").await?;
+        return Ok(());
+    };
+    if amount <= 0 {
+        ctx.say("⚠️ Amount must be greater than 0.").await?;
+        return Ok(());
+    }
+
+    let state = ctx.data();
+    let new_total = state.storage.adjust_user_points(gid.get(), user.id.get(), amount)?;
+    ctx.say(format!("✅ Awarded **+{amount}** points to <@{}>. (New lifetime total: **{new_total}** pts)", user.id.get())).await?;
+    Ok(())
+}
+
+/// Deduct participation points from a user (Admin/Mod only).
+#[poise::command(slash_command, prefix_command, rename = "take")]
+pub async fn points_take(
+    ctx: Context<'_>,
+    #[description = "Member to deduct points from"] user: serenity::User,
+    #[description = "Amount of points to take"] amount: i64,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Point adjustments must be executed in a server.").await?;
+        return Ok(());
+    };
+    if amount <= 0 {
+        ctx.say("⚠️ Amount must be greater than 0.").await?;
+        return Ok(());
+    }
+
+    let state = ctx.data();
+    let new_total = state.storage.adjust_user_points(gid.get(), user.id.get(), -amount)?;
+    ctx.say(format!("✅ Deducted **-{amount}** points from <@{}>. (New lifetime total: **{new_total}** pts)", user.id.get())).await?;
+    Ok(())
+}
+
+/// Reset participation points for a user (Admin/Mod only).
+#[poise::command(slash_command, prefix_command, rename = "reset")]
+pub async fn points_reset(
+    ctx: Context<'_>,
+    #[description = "Member whose points to reset"] user: serenity::User,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Point resets must be executed in a server.").await?;
+        return Ok(());
+    };
+
+    let state = ctx.data();
+    state.storage.reset_user_points(gid.get(), user.id.get())?;
+    ctx.say(format!("🔄 Successfully reset all participation points for <@{}> to 0.", user.id.get())).await?;
+    Ok(())
+}
+
+/// View points and stats for a member.
+#[poise::command(slash_command, prefix_command, rename = "show")]
+pub async fn points_show(
+    ctx: Context<'_>,
+    #[description = "Member to view points for"] user: Option<serenity::User>,
+) -> Result<(), CommandError> {
+    let target = user.as_ref().unwrap_or_else(|| ctx.author());
+    display_user_rank(ctx, target).await
+}
+
+/// Configure automated activity reward roles.
+#[poise::command(
+    slash_command,
+    prefix_command,
+    subcommands("rewards_list", "rewards_add", "rewards_remove")
+)]
+pub async fn activity_rewards(ctx: Context<'_>) -> Result<(), CommandError> {
+    ctx.say("Use `/activity-rewards list`, `/activity-rewards add`, or `/activity-rewards remove`.").await?;
+    Ok(())
+}
+
+/// List all automated activity reward roles.
+#[poise::command(slash_command, prefix_command, rename = "list")]
+pub async fn rewards_list(ctx: Context<'_>) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Reward rules must be viewed in a server.").await?;
+        return Ok(());
+    };
+
+    let state = ctx.data();
+    let rules = state.storage.list_activity_reward_rules(gid.get())?;
+    if rules.is_empty() {
+        ctx.say("📋 No automated activity reward roles are configured. Use `/activity-rewards add` to create one.").await?;
+        return Ok(());
+    }
+
+    let mut out = String::from("📋 **Automated Activity Reward Roles:**\n\n");
+    for rule in rules {
+        let trigger_desc = if rule.rule_type == "top_rank" {
+            format!("Top **#{}** in **{}**", rule.top_rank, rule.timeframe)
+        } else {
+            format!("Threshold **{}** pts in **{}**", rule.threshold_points, rule.timeframe)
+        };
+        let drop_desc = if rule.remove_on_drop { "Yes" } else { "No" };
+        out.push_str(&format!(
+            "• Role: <@&{}> | Type: `{}` | {} | Demote on drop: `{}` | ID: `{}`\n",
+            rule.role_id, rule.rule_type, trigger_desc, drop_desc, rule.id
+        ));
+    }
+
+    ctx.say(out).await?;
+    Ok(())
+}
+
+#[derive(Debug, poise::ChoiceParameter)]
+pub enum RuleTypeChoice {
+    #[name = "Point Threshold"]
+    Threshold,
+    #[name = "Top Leaderboard Rank"]
+    TopRank,
+}
+
+#[derive(Debug, poise::ChoiceParameter)]
+pub enum TimeframeChoice {
+    #[name = "Weekly (Past 7 Days)"]
+    Weekly,
+    #[name = "Monthly (Past 30 Days)"]
+    Monthly,
+    #[name = "Lifetime (All-Time)"]
+    Lifetime,
+}
+
+/// Add an automated activity reward role.
+#[poise::command(slash_command, prefix_command, rename = "add")]
+pub async fn rewards_add(
+    ctx: Context<'_>,
+    #[description = "Role to award"] role: serenity::Role,
+    #[description = "Rule type (Threshold points vs Top Rank)"] rule_type: RuleTypeChoice,
+    #[description = "Timeframe for evaluating eligibility"] timeframe: TimeframeChoice,
+    #[description = "Point threshold or top rank position (e.g. 500 or 5)"] target_number: i64,
+    #[description = "Automatically remove role if user falls below threshold / out of rank"] remove_on_drop: Option<bool>,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Reward rules must be configured in a server.").await?;
+        return Ok(());
+    };
+
+    let rt = match rule_type {
+        RuleTypeChoice::Threshold => "threshold",
+        RuleTypeChoice::TopRank => "top_rank",
+    };
+    let tf = match timeframe {
+        TimeframeChoice::Weekly => "weekly",
+        TimeframeChoice::Monthly => "monthly",
+        TimeframeChoice::Lifetime => "lifetime",
+    };
+
+    let threshold_pts = if rt == "threshold" { target_number.max(1) } else { 0 };
+    let top_rank = if rt == "top_rank" { target_number.max(1) } else { 0 };
+
+    let state = ctx.data();
+    let new_rule = state.storage.create_activity_reward_rule(silas_storage::NewActivityRewardRule {
+        guild_id: gid.get(),
+        role_id: role.id.get(),
+        rule_type: rt.to_string(),
+        timeframe: tf.to_string(),
+        threshold_points: threshold_pts,
+        top_rank,
+        remove_on_drop: remove_on_drop.unwrap_or(true),
+    })?;
+
+    ctx.say(format!(
+        "✅ Created reward rule `{}` for role <@&{}>. Silas Blue will automatically assign and reconcile this role every 10 minutes!",
+        new_rule.id, role.id.get()
+    )).await?;
+    Ok(())
+}
+
+/// Remove an automated activity reward role rule.
+#[poise::command(slash_command, prefix_command, rename = "remove")]
+pub async fn rewards_remove(
+    ctx: Context<'_>,
+    #[description = "Rule ID to remove (see `/activity-rewards list`)"] rule_id: String,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Reward rules must be removed in a server.").await?;
+        return Ok(());
+    };
+
+    let state = ctx.data();
+    let deleted = state.storage.delete_activity_reward_rule(gid.get(), rule_id.trim())?;
+    if deleted {
+        ctx.say(format!("✅ Reward rule `{}` has been deleted.", rule_id.trim())).await?;
+    } else {
+        ctx.say(format!("⚠️ No rule found matching ID `{}`.", rule_id.trim())).await?;
+    }
+    Ok(())
+}
+
+/// Manage channel restrictions for bot commands.
+#[poise::command(
+    slash_command,
+    prefix_command,
+    subcommands("cmd_channels_list", "cmd_channels_set_default", "cmd_channels_set_command", "cmd_channels_remove_command")
+)]
+pub async fn command_channels(ctx: Context<'_>) -> Result<(), CommandError> {
+    ctx.say("Use `/command-channels list`, `/command-channels set-default`, `/command-channels set-command`, or `/command-channels remove-command`.").await?;
+    Ok(())
+}
+
+/// List active command channel restrictions.
+#[poise::command(slash_command, prefix_command, rename = "list")]
+pub async fn cmd_channels_list(ctx: Context<'_>) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Channel restrictions must be viewed in a server.").await?;
+        return Ok(());
+    };
+
+    let state = ctx.data();
+    let restr = state.storage.get_guild_command_restrictions(gid.get())?;
+    let rules = state.storage.list_command_channel_rules(gid.get())?;
+
+    let default_str = if restr.default_allowed_channels.is_empty() {
+        "All channels permitted".to_string()
+    } else {
+        restr.default_allowed_channels.iter().map(|id| format!("<#{id}>")).collect::<Vec<_>>().join(", ")
+    };
+
+    let mut out = format!(
+        "🔒 **Command Channel Restrictions**\n\
+         • Enabled: `{}`\n\
+         • Server Default Channels: {}\n\n\
+         **Per-Command Overrides:**\n",
+        restr.enabled, default_str
+    );
+
+    if rules.is_empty() {
+        out.push_str("*(No command-specific overrides configured; all commands use server defaults)*");
+    } else {
+        for r in rules {
+            let allowed = if r.allowed_channels.is_empty() {
+                "-".to_string()
+            } else {
+                r.allowed_channels.iter().map(|id| format!("<#{id}>")).collect::<Vec<_>>().join(", ")
+            };
+            let denied = if r.denied_channels.is_empty() {
+                "-".to_string()
+            } else {
+                r.denied_channels.iter().map(|id| format!("<#{id}>")).collect::<Vec<_>>().join(", ")
+            };
+            out.push_str(&format!("• `/{}`: Allowed in {}, Denied in {}\n", r.command_name, allowed, denied));
+        }
+    }
+
+    ctx.say(out).await?;
+    Ok(())
+}
+
+/// Set server-wide default command channel restrictions.
+#[poise::command(slash_command, prefix_command, rename = "set-default")]
+pub async fn cmd_channels_set_default(
+    ctx: Context<'_>,
+    #[description = "Enable channel restrictions server-wide"] enabled: bool,
+    #[description = "Channel to add as a default allowed command channel"] channel: Option<serenity::Channel>,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Channel restrictions must be configured in a server.").await?;
+        return Ok(());
+    };
+
+    let state = ctx.data();
+    let mut restr = state.storage.get_guild_command_restrictions(gid.get())?;
+    restr.enabled = enabled;
+    if let Some(ch) = channel {
+        let cid = ch.id().get();
+        if !restr.default_allowed_channels.contains(&cid) {
+            restr.default_allowed_channels.push(cid);
+        }
+    }
+
+    state.storage.set_guild_command_restrictions(&restr)?;
+    ctx.say(format!("✅ Updated server default command restrictions (Enabled: `{enabled}`).")).await?;
+    Ok(())
+}
+
+/// Set allowed channel for a specific command.
+#[poise::command(slash_command, prefix_command, rename = "set-command")]
+pub async fn cmd_channels_set_command(
+    ctx: Context<'_>,
+    #[description = "Command name (e.g. leaderboard or rank)"] command_name: String,
+    #[description = "Allowed channel for this command"] channel: serenity::Channel,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Channel restrictions must be configured in a server.").await?;
+        return Ok(());
+    };
+
+    let clean_cmd = command_name.trim().trim_start_matches('/').to_lowercase();
+    let state = ctx.data();
+    let cid = channel.id().get();
+
+    let rule = silas_storage::CommandChannelRule {
+        guild_id: gid.get(),
+        command_name: clean_cmd.clone(),
+        allowed_channels: vec![cid],
+        denied_channels: vec![],
+    };
+    state.storage.set_command_channel_rule(&rule)?;
+
+    ctx.say(format!("✅ Command `/{clean_cmd}` is now restricted to <#{cid}>.")).await?;
+    Ok(())
+}
+
+/// Remove channel restriction override for a specific command.
+#[poise::command(slash_command, prefix_command, rename = "remove-command")]
+pub async fn cmd_channels_remove_command(
+    ctx: Context<'_>,
+    #[description = "Command name to clear restriction for"] command_name: String,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Channel restrictions must be configured in a server.").await?;
+        return Ok(());
+    };
+
+    let clean_cmd = command_name.trim().trim_start_matches('/').to_lowercase();
+    let state = ctx.data();
+    let deleted = state.storage.delete_command_channel_rule(gid.get(), &clean_cmd)?;
+    if deleted {
+        ctx.say(format!("✅ Cleared channel restrictions for `/{clean_cmd}`.")).await?;
+    } else {
+        ctx.say(format!("⚠️ No channel restriction override found for `/{clean_cmd}`.")).await?;
+    }
     Ok(())
 }
