@@ -3225,7 +3225,61 @@ async fn api_get_activity_leaderboard(
     let offset = (page - 1) * limit;
 
     match state.storage.get_leaderboard(guild_id, tf, limit, offset) {
-        Ok((entries, total)) => Json(json!({ "entries": entries, "total": total, "page": page, "limit": limit })).into_response(),
+        Ok((entries, total)) => {
+            let cache_opt = state.bot.cache();
+            let http_opt = state.bot.http();
+            let gid = serenity::model::id::GuildId::new(guild_id);
+
+            let mut list = Vec::with_capacity(entries.len());
+            for e in entries {
+                let uid = serenity::model::id::UserId::new(e.user_id);
+                let cached_info = cache_opt.as_ref().and_then(|c| {
+                    c.guild(guild_id).and_then(|g| {
+                        g.members.get(&uid).map(|m| {
+                            (
+                                m.user.name.clone(),
+                                m.nick.clone().unwrap_or_else(|| m.user.name.clone()),
+                                m.user.avatar_url(),
+                            )
+                        })
+                    })
+                });
+
+                let (username, display_name, avatar_url) = if let Some(info) = cached_info {
+                    (Some(info.0), Some(info.1), info.2)
+                } else if let Some(ref http) = http_opt {
+                    if let Ok(member) = http.get_member(gid, uid).await {
+                        let u = member.user.name.clone();
+                        let d = member.nick.clone().unwrap_or_else(|| member.user.name.clone());
+                        let a = member.user.avatar_url();
+                        (Some(u), Some(d), a)
+                    } else if let Ok(user) = http.get_user(uid).await {
+                        let u = user.name.clone();
+                        let d = user.global_name.clone().unwrap_or_else(|| user.name.clone());
+                        let a = user.avatar_url();
+                        (Some(u), Some(d), a)
+                    } else {
+                        (None, None, None)
+                    }
+                } else {
+                    (None, None, None)
+                };
+
+                list.push(json!({
+                    "user_id": e.user_id.to_string(),
+                    "rank": e.rank,
+                    "points": e.points,
+                    "text_points": e.text_points,
+                    "voice_points": e.voice_points,
+                    "reaction_points": e.reaction_points,
+                    "username": username,
+                    "display_name": display_name,
+                    "avatar_url": avatar_url,
+                }));
+            }
+
+            Json(json!({ "entries": list, "total": total, "page": page, "limit": limit })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
     }
 }
@@ -3247,7 +3301,29 @@ async fn api_list_activity_rewards(
     }
 
     match state.storage.list_activity_reward_rules(guild_id) {
-        Ok(rules) => Json(json!({ "rules": rules })).into_response(),
+        Ok(rules) => {
+            let cache_opt = state.bot.cache();
+            let list: Vec<Value> = rules.into_iter().map(|r| {
+                let role_name = cache_opt.as_ref().and_then(|c| {
+                    c.guild(guild_id).and_then(|g| {
+                        g.roles.get(&serenity::model::id::RoleId::new(r.role_id)).map(|role| role.name.clone())
+                    })
+                });
+                json!({
+                    "id": r.id,
+                    "guild_id": r.guild_id.to_string(),
+                    "role_id": r.role_id.to_string(),
+                    "role_name": role_name,
+                    "rule_type": r.rule_type,
+                    "threshold_points": r.threshold_points,
+                    "top_rank": r.top_rank,
+                    "timeframe": r.timeframe,
+                    "remove_on_drop": r.remove_on_drop,
+                    "created_at": r.created_at,
+                })
+            }).collect();
+            Json(json!({ "rules": list })).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("{e}") }))).into_response(),
     }
 }

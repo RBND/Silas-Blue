@@ -3945,7 +3945,8 @@
       badge.style.gap = "0.35rem";
 
       const txt = document.createElement("span");
-      txt.textContent = `#${cid}`;
+      txt.textContent = resolveChannelLabel(cid);
+      badge.title = `Channel ID: ${cid}`;
       badge.appendChild(txt);
 
       const delBtn = document.createElement("button");
@@ -4004,7 +4005,7 @@
 
       const tdCh = document.createElement("td");
       const channels = rule.allowed_channels || [];
-      tdCh.textContent = channels.length > 0 ? channels.map((c) => `#${c}`).join(", ") : "-";
+      tdCh.textContent = channels.length > 0 ? channels.map((c) => resolveChannelLabel(c)).join(", ") : "-";
       tr.appendChild(tdCh);
 
       const tdAct = document.createElement("td");
@@ -4100,7 +4101,8 @@
         const tdRole = document.createElement("td");
         const roleBadge = document.createElement("span");
         roleBadge.className = "badge badge-neutral";
-        roleBadge.textContent = `@${rule.role_id}`;
+        roleBadge.textContent = rule.role_name ? `@${rule.role_name}` : resolveRoleLabel(rule.role_id);
+        roleBadge.title = `Role ID: ${rule.role_id}`;
         tdRole.appendChild(roleBadge);
         tr.appendChild(tdRole);
 
@@ -4208,6 +4210,15 @@
       }
 
       entries.forEach((e) => {
+        if (e.user_id) {
+          memberCache.set(String(e.user_id), {
+            id: e.user_id,
+            username: e.username || e.user_id,
+            display_name: e.display_name || e.username || e.user_id,
+            avatar_url: e.avatar_url,
+          });
+        }
+
         const tr = document.createElement("tr");
 
         const tdRank = document.createElement("td");
@@ -4216,7 +4227,52 @@
         tr.appendChild(tdRank);
 
         const tdUser = document.createElement("td");
-        tdUser.textContent = String(e.user_id);
+        tdUser.style.cursor = "pointer";
+        tdUser.title = `Click to select for points adjustment (ID: ${e.user_id})`;
+        tdUser.addEventListener("click", () => {
+          const uidIn = document.getElementById("adjust-user-id");
+          if (uidIn) {
+            uidIn.value = e.user_id;
+            uidIn.focus();
+            showToast(`Selected ${e.display_name || e.username || e.user_id} for point adjustment.`);
+          }
+        });
+
+        const userRow = document.createElement("div");
+        userRow.style.display = "inline-flex";
+        userRow.style.alignItems = "center";
+        userRow.style.gap = "0.6rem";
+
+        if (e.avatar_url) {
+          const img = document.createElement("img");
+          img.src = e.avatar_url;
+          img.alt = "";
+          img.style.width = "26px";
+          img.style.height = "26px";
+          img.style.borderRadius = "50%";
+          img.style.flexShrink = "0";
+          userRow.appendChild(img);
+        }
+
+        const nameWrapper = document.createElement("div");
+        nameWrapper.style.display = "inline-flex";
+        nameWrapper.style.flexDirection = "column";
+
+        const primaryName = document.createElement("strong");
+        const displayName = e.display_name || e.username || resolveMemberLabel(e.user_id);
+        primaryName.textContent = displayName;
+        nameWrapper.appendChild(primaryName);
+
+        if (e.username && e.display_name && e.display_name !== e.username) {
+          const subName = document.createElement("span");
+          subName.className = "muted";
+          subName.style.fontSize = "0.75rem";
+          subName.textContent = `@${e.username}`;
+          nameWrapper.appendChild(subName);
+        }
+
+        userRow.appendChild(nameWrapper);
+        tdUser.appendChild(userRow);
         tr.appendChild(tdUser);
 
         const tdPts = document.createElement("td");
