@@ -1547,6 +1547,7 @@ pub enum LeaderboardTimeframe {
 pub async fn leaderboard(
     ctx: Context<'_>,
     #[description = "Timeframe for the leaderboard"] timeframe: Option<LeaderboardTimeframe>,
+    #[description = "Show leaderboard only to you (private)"] ephemeral: Option<bool>,
 ) -> Result<(), CommandError> {
     let Some(guild_id) = ctx.guild_id() else {
         ctx.say("⚠️ Leaderboard is only available within a server.").await?;
@@ -1554,6 +1555,7 @@ pub async fn leaderboard(
     };
     let gid = guild_id.get();
     let state = ctx.data();
+    let is_ephemeral = ephemeral.unwrap_or(false);
 
     let tf_str = match timeframe.unwrap_or(LeaderboardTimeframe::Lifetime) {
         LeaderboardTimeframe::Weekly => "weekly",
@@ -1571,8 +1573,10 @@ pub async fn leaderboard(
     let caller_rank = state.storage.get_user_rank(gid, ctx.author().id.get(), tf_str)?;
 
     if top_entries.is_empty() {
-        ctx.say(format!("🏆 **Server Leaderboard — {title_tf}**\nNo active participants recorded yet for this period. Start chatting or join voice to earn points!"))
-            .await?;
+        let reply = poise::CreateReply::default()
+            .content(format!("🏆 **Server Leaderboard — {title_tf}**\nNo active participants recorded yet for this period. Start chatting or join voice to earn points!"))
+            .ephemeral(is_ephemeral);
+        ctx.send(reply).await?;
         return Ok(());
     }
 
@@ -1605,7 +1609,9 @@ pub async fn leaderboard(
 
     let owner_id = ctx.author().id.get();
     if let Some((first_page, action_rows)) = state.pagination.create_view(owner_id, pages) {
-        let mut reply = poise::CreateReply::default().content(first_page);
+        let mut reply = poise::CreateReply::default()
+            .content(first_page)
+            .ephemeral(is_ephemeral);
         for row in action_rows {
             reply = reply.components(vec![row]);
         }
@@ -1615,7 +1621,11 @@ pub async fn leaderboard(
     Ok(())
 }
 
-async fn display_user_rank(ctx: Context<'_>, target: &serenity::User) -> Result<(), CommandError> {
+async fn display_user_rank(
+    ctx: Context<'_>,
+    target: &serenity::User,
+    is_ephemeral: bool,
+) -> Result<(), CommandError> {
     let Some(guild_id) = ctx.guild_id() else {
         ctx.say("⚠️ Rank cards are only available within a server.").await?;
         return Ok(());
@@ -1670,7 +1680,10 @@ async fn display_user_rank(ctx: Context<'_>, target: &serenity::User) -> Result<
         next_milestone_desc,
     );
 
-    ctx.say(content).await?;
+    let reply = poise::CreateReply::default()
+        .content(content)
+        .ephemeral(is_ephemeral);
+    ctx.send(reply).await?;
     Ok(())
 }
 
@@ -1679,9 +1692,11 @@ async fn display_user_rank(ctx: Context<'_>, target: &serenity::User) -> Result<
 pub async fn rank(
     ctx: Context<'_>,
     #[description = "Member to check rank for (defaults to yourself)"] user: Option<serenity::User>,
+    #[description = "Show rank card only to you (private)"] ephemeral: Option<bool>,
 ) -> Result<(), CommandError> {
     let target = user.as_ref().unwrap_or_else(|| ctx.author());
-    display_user_rank(ctx, target).await
+    let is_ephemeral = ephemeral.unwrap_or(false);
+    display_user_rank(ctx, target, is_ephemeral).await
 }
 
 /// Manage participation points and awards.
@@ -1770,9 +1785,11 @@ pub async fn points_reset(
 pub async fn points_show(
     ctx: Context<'_>,
     #[description = "Member to view points for"] user: Option<serenity::User>,
+    #[description = "Show only to you (private)"] ephemeral: Option<bool>,
 ) -> Result<(), CommandError> {
     let target = user.as_ref().unwrap_or_else(|| ctx.author());
-    display_user_rank(ctx, target).await
+    let is_ephemeral = ephemeral.unwrap_or(false);
+    display_user_rank(ctx, target, is_ephemeral).await
 }
 
 /// Configure automated activity reward roles.
