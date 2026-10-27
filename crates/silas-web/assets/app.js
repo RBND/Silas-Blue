@@ -1024,6 +1024,7 @@
       });
 
       await loadSelectedGuildConfig();
+      await refreshActiveModule();
     } catch (_) {}
   }
 
@@ -1637,8 +1638,7 @@
       const guildSel = document.getElementById("guild-selector");
       if (guildSel) {
         guildSel.addEventListener("change", async () => {
-          currentGuildId = guildSel.value;
-          await loadSelectedGuildConfig();
+          syncAllGuildSelectors(guildSel.value);
         });
       }
   
@@ -3747,10 +3747,17 @@
   let currentCommandOverrides = [];
 
   async function loadActivityModule() {
+    if (!currentGuildId || currentGuildId === "0") {
+      const sel = document.getElementById("activity-guild-selector") || document.getElementById("guild-selector");
+      if (sel && sel.value && sel.value !== "0") {
+        currentGuildId = sel.value;
+      }
+    }
+
     const noServerEl = document.getElementById("activity-no-server");
     const contentEl = document.getElementById("activity-content");
 
-    if (!currentGuildId) {
+    if (!currentGuildId || currentGuildId === "0") {
       if (noServerEl) noServerEl.classList.remove("hidden");
       if (contentEl) contentEl.classList.add("hidden");
       return;

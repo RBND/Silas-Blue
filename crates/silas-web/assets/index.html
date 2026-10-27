@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Silas Blue v6.0.11 — Administration Console</title>
+  <title>Silas Blue v6.0.12 — Administration Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=6.0.12">
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v6.0.11</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.12</span>
         </div>
       </div>
 
@@ -341,7 +341,7 @@
             <p class="subtitle">Per-server permissions, token quotas, custom AI personas, pagination, and Forum auto-reply.</p>
           </div>
           <div class="header-actions">
-            <select id="guild-selector" class="input-select" aria-label="Select Discord Server"></select>
+            <select id="guild-selector" class="input-select guild-selector-sync" aria-label="Select Discord Server"></select>
             <button type="button" id="btn-save-guild-config" class="btn btn-primary">Save Server Config</button>
           </div>
         </header>
@@ -1262,11 +1262,11 @@
           </div>
         </header>
 
-        <div id="activity-no-server" class="status-note">
+        <div id="activity-no-server" class="status-note hidden">
           Please select a server above to view and manage participation settings, automated rewards, and leaderboards.
         </div>
 
-        <div id="activity-content" class="hidden">
+        <div id="activity-content">
           <!-- Card 1: Core Participation Tracking -->
           <div class="card">
             <h3>📈 Participation &amp; Point Accrual</h3>
@@ -2006,6 +2006,6 @@
       </div>
     </main>
   </div>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=6.0.12"></script>
 </body>
 </html>

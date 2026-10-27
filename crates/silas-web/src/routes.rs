@@ -3491,6 +3491,10 @@ async fn serve_embedded_asset(
         if let Ok(hv) = HeaderValue::from_str(mime.as_ref()) {
             resp.headers_mut().insert(header::CONTENT_TYPE, hv);
         }
+        resp.headers_mut().insert(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, must-revalidate"),
+        );
         return resp;
     }
 
