@@ -54,6 +54,7 @@ pub fn all_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
         points(),
         activity_rewards(),
         command_channels(),
+        sync_commands(),
     ];
     cmds.extend(crate::moderation::mod_commands());
     cmds
@@ -2056,6 +2057,23 @@ pub async fn cmd_channels_remove_command(
         ctx.say(format!("✅ Cleared channel restrictions for `/{clean_cmd}`.")).await?;
     } else {
         ctx.say(format!("⚠️ No channel restriction override found for `/{clean_cmd}`.")).await?;
+    }
+    Ok(())
+}
+
+/// Sync and register all slash commands with this server immediately (Admin/Mod only).
+#[poise::command(slash_command, prefix_command, rename = "sync-commands")]
+pub async fn sync_commands(ctx: Context<'_>) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    ctx.defer_ephemeral().await?;
+    if let Some(gid) = ctx.guild_id() {
+        poise::builtins::register_in_guild(ctx, &ctx.framework().options().commands, gid).await?;
+        ctx.say("✅ Slash commands successfully synced to this server! All commands should appear immediately.").await?;
+    } else {
+        poise::builtins::register_globally(ctx, &ctx.framework().options().commands).await?;
+        ctx.say("✅ Slash commands registered globally.").await?;
     }
     Ok(())
 }

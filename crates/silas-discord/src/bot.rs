@@ -371,6 +371,16 @@ impl BotController {
                         tracing::warn!("Failed to register global slash commands: {e}");
                     }
 
+                    for guild in &ready.guilds {
+                        if let Err(e) =
+                            poise::builtins::register_in_guild(ctx, &framework.options().commands, guild.id).await
+                        {
+                            tracing::warn!("Failed to register guild slash commands in {}: {e}", guild.id);
+                        } else {
+                            tracing::info!("Registered slash commands instantly in guild {}", guild.id);
+                        }
+                    }
+
                     tracing::info!(
                         "Connected to Discord Gateway as {} ({}) across {} guilds.",
                         ready.user.name,
