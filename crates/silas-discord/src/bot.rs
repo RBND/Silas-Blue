@@ -58,6 +58,8 @@ pub struct ConnectedGuildInfo {
     pub icon_url: Option<String>,
     pub member_count: u64,
     pub bot_nickname: Option<String>,
+    #[serde(default)]
+    pub bot_avatar_url: Option<String>,
     pub channels: Vec<GuildChannelInfo>,
     pub roles: Vec<GuildRoleInfo>,
 }
@@ -494,6 +496,41 @@ impl BotController {
         Ok(())
     }
 
+    /// Update or reset the bot's per-guild avatar/icon via Discord REST API.
+    pub async fn update_guild_avatar(
+        &self,
+        guild_id: u64,
+        avatar_data_uri: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let http = {
+            let guard = self.inner.lock().await;
+            guard.as_ref().map(|r| Arc::clone(&r.http))
+        }
+        .ok_or_else(|| "Bot is not currently connected to Discord.".to_string())?;
+
+        let mut map = serde_json::Map::new();
+        match avatar_data_uri {
+            Some(uri) => {
+                map.insert("avatar".to_string(), serde_json::Value::String(uri.to_string()));
+            }
+            None => {
+                map.insert("avatar".to_string(), serde_json::Value::Null);
+            }
+        }
+
+        let member = http
+            .edit_member_me(GuildId::new(guild_id), &map, None)
+            .await
+            .map_err(|e| format!("Failed to update guild avatar on Discord: {e}"))?;
+
+        let new_avatar_url = member.avatar_url();
+        if let Some(mut entry) = self.connected_guilds.get_mut(&guild_id) {
+            entry.bot_avatar_url = new_avatar_url.clone();
+        }
+
+        Ok(new_avatar_url)
+    }
+
     /// Update the bot's global username via Discord REST API.
     pub async fn update_global_username(&self, new_username: &str) -> Result<String, String> {
         let http = {
@@ -567,9 +604,10 @@ pub fn extract_connected_guild_info(
         .collect();
     roles.sort_by_key(|a| std::cmp::Reverse(a.position));
 
-    let bot_nickname = bot_user_id
-        .and_then(|uid| guild.members.get(&serenity::all::UserId::new(uid)))
-        .and_then(|m| m.nick.clone());
+    let bot_member = bot_user_id
+        .and_then(|uid| guild.members.get(&serenity::all::UserId::new(uid)));
+    let bot_nickname = bot_member.as_ref().and_then(|m| m.nick.clone());
+    let bot_avatar_url = bot_member.and_then(|m| m.avatar_url());
 
     ConnectedGuildInfo {
         id: guild.id.get().to_string(),
@@ -577,7 +615,132 @@ pub fn extract_connected_guild_info(
         icon_url: guild.icon_url(),
         member_count: guild.member_count,
         bot_nickname,
+        bot_avatar_url,
         channels,
         roles,
+    }
+}
+
+
+/// Convert raw image bytes into a Discord-compatible data URI (`data:image/<type>;base64,<encoded>`).
+///
+/// Supports PNG, JPEG, GIF, and WebP up to 10 MB.
+pub fn image_bytes_to_data_uri(bytes: &[u8]) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("Image data is empty.".to_string());
+    }
+    const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MB Discord limit
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("Image exceeds maximum size limit of 10 MB.".to_string());
+    }
+
+    let mime = match () {
+        _ if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => "image/png",
+        _ if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) => "image/jpeg",
+        _ if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") => "image/gif",
+        _ if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") => "image/webp",
+        _ => {
+            return Err(
+                "Unsupported image format. Allowed formats are PNG, JPEG, GIF, and WebP."
+                    .to_string(),
+            );
+        }
+    };
+
+    use base64::Engine as _;
+    let encoded = base64::prelude::BASE64_STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
+/// Download an image from an HTTP/HTTPS URL and convert it into a Discord data URI.
+pub async fn download_image_as_data_uri(url: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+    let res = client
+        .get(url)
+        .header("User-Agent", "SilasBlueBot/6.0")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch image from URL: {e}"))?;
+
+    if !res.status().is_success() {
+        return Err(format!(
+            "Image server returned HTTP error status: {}",
+            res.status()
+        ));
+    }
+
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read image response: {e}"))?;
+
+    image_bytes_to_data_uri(&bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_image_bytes_to_data_uri_png() -> Result<(), Box<dyn std::error::Error>> {
+        let png_bytes = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 1, 2, 3];
+        let uri = image_bytes_to_data_uri(&png_bytes).map_err(|e| e.to_string())?;
+        assert!(uri.starts_with("data:image/png;base64,"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_image_bytes_to_data_uri_jpeg() -> Result<(), Box<dyn std::error::Error>> {
+        let jpeg_bytes = [0xFF, 0xD8, 0xFF, 0xE0, 0, 1, 2, 3];
+        let uri = image_bytes_to_data_uri(&jpeg_bytes).map_err(|e| e.to_string())?;
+        assert!(uri.starts_with("data:image/jpeg;base64,"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_image_bytes_to_data_uri_gif() -> Result<(), Box<dyn std::error::Error>> {
+        let gif_bytes = b"GIF89a\x01\x00\x01\x00";
+        let uri = image_bytes_to_data_uri(gif_bytes).map_err(|e| e.to_string())?;
+        assert!(uri.starts_with("data:image/gif;base64,"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_image_bytes_to_data_uri_webp() -> Result<(), Box<dyn std::error::Error>> {
+        let mut webp_bytes = b"RIFF\x00\x00\x00\x00WEBPVP8 ".to_vec();
+        webp_bytes.extend_from_slice(&[0, 1, 2, 3]);
+        let uri = image_bytes_to_data_uri(&webp_bytes).map_err(|e| e.to_string())?;
+        assert!(uri.starts_with("data:image/webp;base64,"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_image_bytes_to_data_uri_invalid() {
+        assert!(image_bytes_to_data_uri(&[]).is_err());
+        assert!(image_bytes_to_data_uri(b"not an image").is_err());
+    }
+
+    #[test]
+    fn test_connected_guild_info_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
+        let info = ConnectedGuildInfo {
+            id: "123456789".to_string(),
+            name: "Test Guild".to_string(),
+            icon_url: Some("https://example.com/icon.png".to_string()),
+            member_count: 42,
+            bot_nickname: Some("Silas".to_string()),
+            bot_avatar_url: Some("https://example.com/avatar.png".to_string()),
+            channels: vec![],
+            roles: vec![],
+        };
+
+        let json = serde_json::to_string(&info)?;
+        let deserialized: ConnectedGuildInfo = serde_json::from_str(&json)?;
+        assert_eq!(deserialized.id, "123456789");
+        assert_eq!(deserialized.bot_avatar_url, Some("https://example.com/avatar.png".to_string()));
+        Ok(())
     }
 }

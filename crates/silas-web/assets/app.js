@@ -1087,6 +1087,7 @@
       const qw = res.quota_window || null;
 
       setValue("gcfg-bot-nickname", (meta && meta.bot_nickname) || "");
+      updateBotIconPreview(meta ? meta.bot_avatar_url : null, res.default_avatar_url || null);
       setValue("gcfg-default-model", c.default_model || "");
       setValue("gcfg-allowed-channels", c.allowed_channels || []);
       setValue("gcfg-prompt-roles", c.reply_roles || []);
@@ -1145,14 +1146,136 @@
       .filter((s) => s.length > 0);
   }
 
+  function updateBotIconPreview(customUrl, defaultUrl) {
+    const previewImg = document.getElementById("gcfg-bot-icon-preview");
+    const badge = document.getElementById("gcfg-bot-icon-badge");
+    const urlInput = document.getElementById("gcfg-bot-icon-url");
+    const fileInput = document.getElementById("gcfg-bot-icon-file");
+
+    if (urlInput) urlInput.value = "";
+    if (fileInput) fileInput.value = "";
+
+    if (!previewImg) return;
+
+    if (customUrl) {
+      previewImg.src = customUrl;
+      if (badge) {
+        badge.textContent = "Custom Server Icon";
+        badge.className = "badge badge-accent";
+      }
+    } else if (defaultUrl) {
+      previewImg.src = defaultUrl;
+      if (badge) {
+        badge.textContent = "Default Bot Icon";
+        badge.className = "badge badge-neutral";
+      }
+    } else {
+      previewImg.src = "/favicon.svg";
+      if (badge) {
+        badge.textContent = "Default Bot Icon";
+        badge.className = "badge badge-neutral";
+      }
+    }
+  }
+
+  async function applyGuildIcon() {
+    if (!currentGuildId) return;
+    const urlInput = getValue("gcfg-bot-icon-url").trim();
+    const fileInput = document.getElementById("gcfg-bot-icon-file");
+    const file = fileInput && fileInput.files && fileInput.files[0];
+
+    let iconData = null;
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        showToast("Icon image must be smaller than 10 MB.");
+        return;
+      }
+      try {
+        iconData = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target ? e.target.result : null);
+          reader.onerror = () => reject(new Error("Failed to read image file"));
+          reader.readAsDataURL(file);
+        });
+      } catch (err) {
+        showToast(`Failed to read file: ${err.message}`);
+        return;
+      }
+    } else if (urlInput) {
+      iconData = urlInput;
+    } else {
+      showToast("Please enter an image URL or choose a file first.");
+      return;
+    }
+
+    const btn = document.getElementById("btn-apply-guild-icon");
+    if (btn) btn.disabled = true;
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/icon`, {
+        method: "POST",
+        body: JSON.stringify({ icon: iconData }),
+      });
+      showToast("Server icon updated successfully!");
+      await loadSelectedGuildConfig();
+    } catch (e) {
+      showToast(`Failed to update server icon: ${e.message}`);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function resetGuildIcon() {
+    if (!currentGuildId) return;
+    if (!confirm("Reset Silas Blue's icon in this server back to the default bot avatar?")) return;
+    const btn = document.getElementById("btn-reset-guild-icon");
+    if (btn) btn.disabled = true;
+    try {
+      await apiFetch(`/api/guilds/${currentGuildId}/icon`, {
+        method: "POST",
+        body: JSON.stringify({ icon: "reset" }),
+      });
+      showToast("Server icon reset to default avatar.");
+      await loadSelectedGuildConfig();
+    } catch (e) {
+      showToast(`Failed to reset server icon: ${e.message}`);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function saveGuildConfig() {
     if (!currentGuildId) return;
     const memEnabled = getChecked("gcfg-memory-enabled");
     const memTurns = memEnabled ? Number(getValue("gcfg-memory-max")) || 6 : 0;
     const defaultLim = Number(getValue("gcfg-token-limit")) || 10000;
 
+    const iconUrl = getValue("gcfg-bot-icon-url").trim();
+    const fileInput = document.getElementById("gcfg-bot-icon-file");
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    let botAvatar = undefined;
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        showToast("Icon image must be smaller than 10 MB.");
+        return;
+      }
+      try {
+        botAvatar = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target ? e.target.result : null);
+          reader.onerror = () => reject(new Error("Failed to read image file"));
+          reader.readAsDataURL(file);
+        });
+      } catch (err) {
+        showToast(`Failed to read icon file: ${err.message}`);
+        return;
+      }
+    } else if (iconUrl) {
+      botAvatar = iconUrl;
+    }
+
     const patch = {
       bot_nickname: getValue("gcfg-bot-nickname"),
+      bot_avatar: botAvatar,
       default_model: getValue("gcfg-default-model"),
       allowed_channels: parseCsvList("gcfg-allowed-channels"),
       reply_roles: parseCsvList("gcfg-prompt-roles"),
@@ -1766,6 +1889,53 @@
       }
 
       bindClick("btn-save-guild-config", saveGuildConfig);
+      bindClick("btn-apply-guild-icon", applyGuildIcon);
+      bindClick("btn-reset-guild-icon", resetGuildIcon);
+
+      const guildIconFile = document.getElementById("gcfg-bot-icon-file");
+      if (guildIconFile) {
+        guildIconFile.addEventListener("change", () => {
+          const file = guildIconFile.files && guildIconFile.files[0];
+          if (file) {
+            if (file.size > 10 * 1024 * 1024) {
+              showToast("Icon image must be smaller than 10 MB.");
+              guildIconFile.value = "";
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const previewImg = document.getElementById("gcfg-bot-icon-preview");
+              if (previewImg && e.target && e.target.result) {
+                previewImg.src = e.target.result;
+                const badge = document.getElementById("gcfg-bot-icon-badge");
+                if (badge) {
+                  badge.textContent = "Selected (Unsaved)";
+                  badge.className = "badge badge-cyan";
+                }
+              }
+            };
+            reader.readAsDataURL(file);
+          }
+        });
+      }
+
+      const guildIconUrl = document.getElementById("gcfg-bot-icon-url");
+      if (guildIconUrl) {
+        guildIconUrl.addEventListener("input", () => {
+          const val = guildIconUrl.value.trim();
+          if (val.startsWith("http://") || val.startsWith("https://") || val.startsWith("data:image/")) {
+            const previewImg = document.getElementById("gcfg-bot-icon-preview");
+            if (previewImg) {
+              previewImg.src = val;
+              const badge = document.getElementById("gcfg-bot-icon-badge");
+              if (badge) {
+                badge.textContent = "URL Preview (Unsaved)";
+                badge.className = "badge badge-cyan";
+              }
+            }
+          }
+        });
+      }
       bindClick("btn-add-reddit-sub", addRedditSubscription);
   
       bindClick("btn-gen-reddit-secret", async () => {

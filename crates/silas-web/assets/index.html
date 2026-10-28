@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Silas Blue v6.0.15 — Administration Console</title>
+  <title>Silas Blue v6.0.16 — Administration Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="stylesheet" href="/app.css?v=6.0.15">
+  <link rel="stylesheet" href="/app.css?v=6.0.16">
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v6.0.15</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.16</span>
         </div>
       </div>
 
@@ -365,6 +365,26 @@
             <div class="form-group">
               <label for="gcfg-default-model">Server Default Model Override</label>
               <input type="text" id="gcfg-default-model" class="input-text" placeholder="Leave blank to use global active model">
+            </div>
+            <div class="form-group form-group-full">
+              <label>Bot Icon in Server</label>
+              <div class="bot-icon-editor">
+                <div class="bot-icon-preview-box">
+                  <img id="gcfg-bot-icon-preview" class="bot-icon-preview-img" alt="Bot Server Icon" src="/favicon.svg">
+                  <span id="gcfg-bot-icon-badge" class="badge badge-neutral">Default Bot Icon</span>
+                </div>
+                <div class="bot-icon-controls">
+                  <div class="bot-icon-inputs">
+                    <input type="text" id="gcfg-bot-icon-url" class="input-text" placeholder="Paste image URL (PNG, JPG, GIF, WebP)">
+                    <input type="file" id="gcfg-bot-icon-file" class="input-file" accept="image/png,image/jpeg,image/gif,image/webp">
+                  </div>
+                  <div class="bot-icon-buttons">
+                    <button type="button" id="btn-apply-guild-icon" class="btn btn-secondary btn-sm">Apply Icon</button>
+                    <button type="button" id="btn-reset-guild-icon" class="btn btn-secondary btn-sm">Reset to Default</button>
+                  </div>
+                  <span class="form-help">Custom per-server avatar for Silas Blue. Supports PNG, JPG, GIF, or WebP up to 10 MB.</span>
+                </div>
+              </div>
             </div>
             <div class="form-group">
               <label for="gcfg-allowed-channels">Allowed Channels (empty = all channels allowed)</label>
@@ -2006,6 +2026,6 @@
       </div>
     </main>
   </div>
-  <script src="/app.js?v=6.0.15"></script>
+  <script src="/app.js?v=6.0.16"></script>
 </body>
 </html>

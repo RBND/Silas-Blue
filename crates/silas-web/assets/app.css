@@ -1305,3 +1305,64 @@ label, .field-label {
     border-bottom: 1px solid var(--border-subtle);
   }
 }
+
+
+/* Guild Bot Server Icon Editor */
+.form-group-full {
+  grid-column: 1 / -1;
+}
+
+.bot-icon-editor {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.bot-icon-preview-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 120px;
+}
+
+.bot-icon-preview-img {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-subtle);
+  background-color: var(--bg-canvas);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+.bot-icon-controls {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.bot-icon-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.bot-icon-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.input-file {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}

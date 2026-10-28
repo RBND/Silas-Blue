@@ -38,6 +38,7 @@ pub fn all_commands() -> Vec<poise::Command<Arc<BotState>, CommandError>> {
         setprompt(),
         setpagination(),
         setnick(),
+        seticon(),
         setforum(),
         quota(),
         config(),
@@ -808,6 +809,103 @@ pub async fn setnick(
     Ok(())
 }
 
+/// Change or reset (`reset`) Silas Blue's server-specific icon/avatar.
+#[poise::command(slash_command, prefix_command, aliases("setavatar", "servericon", "boticon"))]
+pub async fn seticon(
+    ctx: Context<'_>,
+    #[description = "Image attachment for the new server avatar"]
+    image: Option<serenity::all::Attachment>,
+    #[description = "Image URL for the new server avatar, or 'reset' to clear"]
+    #[rest]
+    url_or_action: Option<String>,
+) -> Result<(), CommandError> {
+    if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
+        return Ok(());
+    }
+    let Some(gid) = ctx.guild_id() else {
+        ctx.say("⚠️ Server icons can only be changed inside a server.")
+            .await?;
+        return Ok(());
+    };
+
+    let data_uri_opt = if let Some(att) = image {
+        let bytes = att
+            .download()
+            .await
+            .map_err(|e| format!("Failed to download image attachment: {e}"))?;
+        Some(crate::bot::image_bytes_to_data_uri(&bytes)?)
+    } else if let Some(ref text) = url_or_action {
+        let clean = text.trim();
+        if clean.is_empty()
+            || clean.eq_ignore_ascii_case("reset")
+            || clean.eq_ignore_ascii_case("clear")
+            || clean.eq_ignore_ascii_case("default")
+        {
+            None
+        } else if clean.starts_with("data:image/") {
+            Some(clean.to_string())
+        } else if clean.starts_with("http://") || clean.starts_with("https://") {
+            Some(crate::bot::download_image_as_data_uri(clean).await?)
+        } else {
+            ctx.say("⚠️ Invalid input. Provide an image attachment, an image URL (http/https), or `reset` to clear the icon.")
+                .await?;
+            return Ok(());
+        }
+    } else {
+        let current_custom = ctx
+            .data()
+            .connected_guilds
+            .get(&gid.get())
+            .and_then(|g| g.bot_avatar_url.clone());
+        let msg = match current_custom {
+            Some(ref url) => format!(
+                "ℹ️ This server is currently using a **custom server icon** for Silas Blue.\n                 • View current icon: <{url}>\n                 • To change: `/seticon image:<file>` or `/seticon url_or_action:<url>`\n                 • In chat prefix: `!seticon <url>` or upload an image with `!seticon`\n                 • To reset: `/seticon url_or_action:reset` or `!seticon reset`"
+            ),
+            None => "ℹ️ This server is currently using the **default bot avatar** for Silas Blue.\n                     • To set a custom icon: `/seticon image:<file>` or `/seticon url_or_action:<url>`\n                     • In chat prefix: `!seticon <url>` or upload an image with `!seticon`".to_string(),
+        };
+        ctx.say(msg).await?;
+        return Ok(());
+    };
+
+    let mut map = serde_json::Map::new();
+    match &data_uri_opt {
+        Some(uri) => {
+            map.insert("avatar".to_string(), serde_json::Value::String(uri.clone()));
+        }
+        None => {
+            map.insert("avatar".to_string(), serde_json::Value::Null);
+        }
+    }
+
+    let member = match ctx
+        .serenity_context()
+        .http
+        .edit_member_me(gid, &map, None)
+        .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            ctx.say(format!("❌ Failed to update server icon on Discord: {e}"))
+                .await?;
+            return Ok(());
+        }
+    };
+
+    let new_avatar_url = member.avatar_url();
+    if let Some(mut entry) = ctx.data().connected_guilds.get_mut(&gid.get()) {
+        entry.bot_avatar_url = new_avatar_url.clone();
+    }
+
+    if let Some(ref url) = new_avatar_url {
+        ctx.say(format!("✅ Updated Silas Blue's server icon!\n<{url}>"))
+            .await?;
+    } else {
+        ctx.say("✅ Reset Silas Blue's server icon to the default avatar.")
+            .await?;
+    }
+    Ok(())
+}
+
 /// Configure Forum Channel auto-reply (`on`, `off`, `mode all_chunks|interactive`, `prompt <text>`).
 #[poise::command(slash_command, prefix_command)]
 pub async fn setforum(
@@ -1153,6 +1251,7 @@ pub async fn help(ctx: Context<'_>) -> Result<(), CommandError> {
         • `/setpagination <on|off|chars N>` — Configure interactive pagination buttons\n\
         • `/setforum <on|off|mode ...|prompt ...>` — Configure Forum auto-reply\n\
         • `/setnick <nickname|reset>` — Change the bot's server nickname\n\
+        • `/seticon [image] [url|reset]` — Change or reset the bot's server icon\n\
         • `/ping` & `/invite` — Check latency or generate an invite link",
         silas_updater::CURRENT_VERSION
     );

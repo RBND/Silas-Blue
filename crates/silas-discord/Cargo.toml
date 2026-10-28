@@ -27,5 +27,6 @@ rand.workspace = true
 poise.workspace = true
 serenity.workspace = true
 reqwest.workspace = true
+base64.workspace = true
 html-escape.workspace = true
 regex.workspace = true

@@ -73,6 +73,7 @@ pub fn build_router(state: Arc<WebState>) -> Router {
             "/guilds/:guild_id/config",
             get(api_get_guild_config).put(api_put_guild_config),
         )
+        .route("/guilds/:guild_id/icon", post(api_set_guild_icon))
         .route("/guilds/:guild_id/roles", get(api_get_guild_roles))
         .route("/guilds/:guild_id/channels", get(api_get_guild_channels))
         .route("/guilds/:guild_id/emojis", get(api_get_guild_emojis))
@@ -935,6 +936,7 @@ async fn api_get_guild_config(
 
     let cfg = state.storage.get_guild_config(guild_id);
     let meta = state.bot.guild_metadata(guild_id);
+    let default_avatar_url = state.bot.bot_identity().avatar_url;
     let tq = &cfg.token_quotas;
     let (win_start, win_end, reset_epoch) = calculate_window_period(
         &tq.reset_frequency,
@@ -948,6 +950,7 @@ async fn api_get_guild_config(
     Json(json!({
         "config": *cfg,
         "metadata": meta,
+        "default_avatar_url": default_avatar_url,
         "quota_window": {
             "window_start": win_start.to_rfc3339(),
             "window_end": win_end.to_rfc3339(),
@@ -962,6 +965,8 @@ async fn api_get_guild_config(
 struct GuildConfigWebUpdate {
     #[serde(default)]
     bot_nickname: Option<String>,
+    #[serde(default)]
+    bot_avatar: Option<String>,
     #[serde(flatten)]
     patch: GuildConfigPatch,
 }
@@ -992,6 +997,34 @@ async fn api_put_guild_config(
 
     if let Some(nick) = update.bot_nickname.as_deref() {
         let _ = state.bot.update_guild_nickname(guild_id, Some(nick)).await;
+    }
+
+    if let Some(avatar) = update.bot_avatar.as_deref() {
+        let clean = avatar.trim();
+        let target_avatar = if clean.is_empty()
+            || clean.eq_ignore_ascii_case("reset")
+            || clean.eq_ignore_ascii_case("clear")
+            || clean.eq_ignore_ascii_case("default")
+        {
+            None
+        } else if clean.starts_with("data:image/") {
+            Some(clean.to_string())
+        } else if clean.starts_with("http://") || clean.starts_with("https://") {
+            silas_discord::bot::download_image_as_data_uri(clean).await.ok()
+        } else {
+            None
+        };
+
+        if target_avatar.is_some()
+            || clean.eq_ignore_ascii_case("reset")
+            || clean.eq_ignore_ascii_case("clear")
+            || clean.eq_ignore_ascii_case("default")
+        {
+            let _ = state
+                .bot
+                .update_guild_avatar(guild_id, target_avatar.as_deref())
+                .await;
+        }
     }
 
     let updated = match state.storage.patch_guild_config(guild_id, update.patch) {
@@ -1035,6 +1068,106 @@ async fn api_put_guild_config(
     }))
     .into_response()
 }
+
+#[derive(Deserialize)]
+struct SetGuildIconPayload {
+    #[serde(default)]
+    icon: Option<String>,
+}
+
+async fn api_set_guild_icon(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+    Path(guild_id_str): Path<String>,
+    Json(payload): Json<SetGuildIconPayload>,
+) -> Response {
+    let Ok(guild_id) = guild_id_str.parse::<u64>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid guild ID." })),
+        )
+            .into_response();
+    };
+
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(&headers, &settings);
+    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
+    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    }
+
+    let target_data_uri = match payload.icon.as_deref().map(str::trim) {
+        None => None,
+        Some(s)
+            if s.is_empty()
+                || s.eq_ignore_ascii_case("reset")
+                || s.eq_ignore_ascii_case("clear")
+                || s.eq_ignore_ascii_case("default") =>
+        {
+            None
+        }
+        Some(s) if s.starts_with("data:image/") => Some(s.to_string()),
+        Some(s) if s.starts_with("http://") || s.starts_with("https://") => {
+            match silas_discord::bot::download_image_as_data_uri(s).await {
+                Ok(uri) => Some(uri),
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "error": format!("Failed to download image: {e}") })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+        Some(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid image format. Provide an image URL, base64 data URI, or 'reset'."
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    match state.bot.update_guild_avatar(guild_id, target_data_uri.as_deref()).await {
+        Ok(new_avatar_url) => {
+            if let Some(ref c) = claims {
+                let ip_hdr = headers
+                    .get("x-forwarded-for")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(str::trim)
+                    .unwrap_or("127.0.0.1");
+
+                let audit = NewWebAuditLog {
+                    guild_id: Some(guild_id),
+                    user_id,
+                    user_name: &c.username,
+                    domain: ConsoleDomain::Settings.as_str(),
+                    action: "guild_bot_avatar_update",
+                    before_json: None,
+                    after_json: Some(&json!({ "avatar_url": new_avatar_url }).to_string()),
+                    ip_address: ip_hdr,
+                    status: "success",
+                };
+                let _ = state.storage.insert_web_audit_log(&audit);
+            }
+
+            Json(json!({
+                "ok": true,
+                "avatar_url": new_avatar_url,
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e })),
+        )
+            .into_response(),
+    }
+}
+
 
 // ============================================================================
 // Guild Entity Lookups (Roles, Channels, Emojis, Members) via Serenity Cache/HTTP
@@ -3859,4 +3992,25 @@ mod tests {
         assert_eq!(parsed_greet.member_autorole_ids, vec![803771637493137458]);
         Ok(())
     }
+
+    #[test]
+    fn test_set_guild_icon_payload_deserialization() -> Result<(), Box<dyn std::error::Error>> {
+        let json_data = r#"{"icon": "data:image/png;base64,iVBORw0KGgo="}"#;
+        let payload: SetGuildIconPayload = serde_json::from_str(json_data)?;
+        assert_eq!(payload.icon, Some("data:image/png;base64,iVBORw0KGgo=".to_string()));
+
+        let json_reset = r#"{"icon": "reset"}"#;
+        let payload_reset: SetGuildIconPayload = serde_json::from_str(json_reset)?;
+        assert_eq!(payload_reset.icon, Some("reset".to_string()));
+
+        let json_null = r#"{"icon": null}"#;
+        let payload_null: SetGuildIconPayload = serde_json::from_str(json_null)?;
+        assert_eq!(payload_null.icon, None);
+
+        let json_empty = r#"{}"#;
+        let payload_empty: SetGuildIconPayload = serde_json::from_str(json_empty)?;
+        assert_eq!(payload_empty.icon, None);
+        Ok(())
+    }
+
 }
