@@ -2367,6 +2367,31 @@ impl Storage {
         domain: &str,
         access_level: &str,
     ) -> Result<WebAccessGrant, StorageError> {
+        let norm_target_type = match target_type.trim().to_ascii_lowercase().as_str() {
+            "role" => "role",
+            "user" | "member" => "user",
+            other => {
+                return Err(StorageError::Validation(format!(
+                    "Invalid target_type '{other}': must be 'role' or 'user'"
+                )));
+            }
+        };
+        let norm_level = match access_level.trim().to_ascii_lowercase().as_str() {
+            "view" | "read" => "view",
+            "edit" | "write" | "admin" => "edit",
+            "none" => "none",
+            other => {
+                return Err(StorageError::Validation(format!(
+                    "Invalid access_level '{other}': must be 'view', 'edit', or 'none'"
+                )));
+            }
+        };
+        let domain_lower = domain.trim().to_ascii_lowercase();
+        let norm_domain = match domain_lower.as_str() {
+            "*" | "all" => "*",
+            d => d,
+        };
+
         let now = Utc::now().timestamp();
         let conn = self.writer.lock();
         conn.execute(
@@ -2379,11 +2404,11 @@ impl Storage {
                 updated_at = excluded.updated_at",
             params![
                 guild_id as i64,
-                target_type,
+                norm_target_type,
                 target_id as i64,
                 target_name,
-                domain,
-                access_level,
+                norm_domain,
+                norm_level,
                 now,
             ],
         )?;
@@ -2391,18 +2416,18 @@ impl Storage {
         let id: i64 = conn.query_row(
             "SELECT id FROM web_access_grants
              WHERE guild_id = ?1 AND target_type = ?2 AND target_id = ?3 AND domain = ?4",
-            params![guild_id as i64, target_type, target_id as i64, domain],
+            params![guild_id as i64, norm_target_type, target_id as i64, norm_domain],
             |r| r.get(0),
         )?;
 
         Ok(WebAccessGrant {
             id,
             guild_id,
-            target_type: target_type.to_string(),
+            target_type: norm_target_type.to_string(),
             target_id,
             target_name: target_name.to_string(),
-            domain: domain.to_string(),
-            access_level: access_level.to_string(),
+            domain: norm_domain.to_string(),
+            access_level: norm_level.to_string(),
             created_at: now,
             updated_at: now,
         })

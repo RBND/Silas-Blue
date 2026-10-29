@@ -24,7 +24,9 @@ use silas_ai::detector::probe_local_providers;
 use silas_ai::{validate_endpoint_url, ProviderManager, REMOTE_PRESETS};
 use silas_core::config::{AppSettingsPatch, GuildConfigPatch};
 use silas_core::events::{TelemetryBus, TelemetryEvent};
-use silas_core::permissions::ConsoleDomain;
+use silas_core::permissions::{
+    has_guild_permission, AccessLevel, ConsoleDomain, MemberContext, PermissionDomain,
+};
 use silas_core::quota::calculate_window_period;
 use silas_discord::BotController;
 use silas_search::SearchCoordinator;
@@ -428,6 +430,16 @@ async fn auth_discord_callback(
         .await
     {
         Ok((uid, uname, is_owner)) => {
+            if !is_owner && !user_has_any_guild_access(&state, &uid, &uname).await {
+                state.auth.record_auth_failure(ip);
+                tracing::warn!(
+                    "Discord OAuth2 login denied for {} ({}): no admin/mod/delegated access in any connected server",
+                    uname,
+                    uid
+                );
+                return Redirect::to("/login.html?error=unauthorized_discord_account")
+                    .into_response();
+            }
             state.auth.clear_rate_limit(ip);
             let Ok(session_tok) = state.auth.create_session_token(&uid, &uname, is_owner, &settings) else {
                 return Redirect::to("/login.html?error=session_error").into_response();
@@ -552,21 +564,50 @@ async fn api_status(State(state): State<Arc<WebState>>) -> Json<Value> {
     }))
 }
 
-async fn api_bot_start(State(state): State<Arc<WebState>>) -> Response {
+fn is_request_owner(state: &WebState, headers: &HeaderMap) -> bool {
+    let settings = state.storage.get_app_settings();
+    match state.auth.authenticate_request(headers, &settings) {
+        Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
+        None => false,
+    }
+}
+
+async fn api_bot_start(State(state): State<Arc<WebState>>, headers: HeaderMap) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can start the bot." })),
+        )
+            .into_response();
+    }
     match state.bot.start().await {
         Ok(()) => Json(json!({ "ok": true, "bot_running": true })).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
 }
 
-async fn api_bot_stop(State(state): State<Arc<WebState>>) -> Response {
+async fn api_bot_stop(State(state): State<Arc<WebState>>, headers: HeaderMap) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can stop the bot." })),
+        )
+            .into_response();
+    }
     match state.bot.stop().await {
         Ok(()) => Json(json!({ "ok": true, "bot_running": false })).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
 }
 
-async fn api_bot_restart(State(state): State<Arc<WebState>>) -> Response {
+async fn api_bot_restart(State(state): State<Arc<WebState>>, headers: HeaderMap) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can restart the bot." })),
+        )
+            .into_response();
+    }
     match state.bot.restart().await {
         Ok(()) => Json(json!({ "ok": true, "bot_running": true })).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -580,19 +621,35 @@ struct UpdateProfilePayload {
 
 async fn api_bot_profile(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateProfilePayload>,
 ) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can change the global bot username." })),
+        )
+            .into_response();
+    }
     match state.bot.update_global_username(&payload.username).await {
         Ok(new_name) => Json(json!({ "ok": true, "username": new_name })).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
 }
 
-async fn api_get_settings(State(state): State<Arc<WebState>>) -> Json<Value> {
+async fn api_get_settings(State(state): State<Arc<WebState>>, headers: HeaderMap) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Not Found" })),
+        )
+            .into_response();
+    }
     let settings = state.storage.get_app_settings();
     Json(json!({
         "settings": settings.masked_for_web(),
     }))
+    .into_response()
 }
 
 async fn api_put_settings(
@@ -717,8 +774,15 @@ async fn api_put_settings(
     resp
 }
 
-async fn api_ai_presets() -> Json<Value> {
-    Json(json!({ "presets": REMOTE_PRESETS }))
+async fn api_ai_presets(State(state): State<Arc<WebState>>, headers: HeaderMap) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Not Found" })),
+        )
+            .into_response();
+    }
+    Json(json!({ "presets": REMOTE_PRESETS })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -728,17 +792,26 @@ struct ModelsQuery {
 
 async fn api_ai_models(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Query(q): Query<ModelsQuery>,
 ) -> Json<Value> {
-    let force_refresh = q.refresh.unwrap_or(false);
+    let is_owner = is_request_owner(&state, &headers);
+    let force_refresh = is_owner && q.refresh.unwrap_or(false);
     let models = state.ai.list_models_cached(force_refresh).await;
     Json(json!({ "ok": true, "models": models }))
 }
 
-async fn api_ai_detect(State(state): State<Arc<WebState>>) -> Json<Value> {
+async fn api_ai_detect(State(state): State<Arc<WebState>>, headers: HeaderMap) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can probe local AI backends." })),
+        )
+            .into_response();
+    }
     let settings = state.storage.get_app_settings();
     let probe = probe_local_providers(&settings).await;
-    Json(json!({ "ok": true, "probe": probe }))
+    Json(json!({ "ok": true, "probe": probe })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -748,8 +821,16 @@ struct PullModelPayload {
 
 async fn api_ai_pull(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Json(payload): Json<PullModelPayload>,
 ) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can pull AI models." })),
+        )
+            .into_response();
+    }
     let model = payload.model.trim().to_string();
     if model.is_empty() {
         return (
@@ -788,8 +869,16 @@ struct SearchTestPayload {
 
 async fn api_search_test(
     State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
     Json(payload): Json<SearchTestPayload>,
 ) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can run global search diagnostics." })),
+        )
+            .into_response();
+    }
     let settings = state.storage.get_app_settings();
     let results = state
         .search
@@ -803,6 +892,110 @@ async fn api_search_test(
     .into_response()
 }
 
+const GUILD_DOMAINS: [ConsoleDomain; 11] = [
+    ConsoleDomain::Settings,
+    ConsoleDomain::Moderation,
+    ConsoleDomain::Automod,
+    ConsoleDomain::Logging,
+    ConsoleDomain::Greetings,
+    ConsoleDomain::ReactionRoles,
+    ConsoleDomain::Triggers,
+    ConsoleDomain::Activity,
+    ConsoleDomain::Reddit,
+    ConsoleDomain::Permissions,
+    ConsoleDomain::AuditLog,
+];
+
+/// Effective role and per-domain access profile for a caller in a specific guild.
+#[derive(Debug, Clone, Serialize)]
+pub struct GuildAccessProfile {
+    pub role: &'static str,
+    pub can_access: bool,
+    pub domains: HashMap<&'static str, &'static str>,
+}
+
+impl GuildAccessProfile {
+    pub fn none() -> Self {
+        let mut domains = HashMap::with_capacity(GUILD_DOMAINS.len());
+        for d in GUILD_DOMAINS {
+            domains.insert(d.as_str(), AccessLevel::None.as_str());
+        }
+        Self {
+            role: "none",
+            can_access: false,
+            domains,
+        }
+    }
+
+    pub fn full(role: &'static str) -> Self {
+        let mut domains = HashMap::with_capacity(GUILD_DOMAINS.len());
+        for d in GUILD_DOMAINS {
+            domains.insert(d.as_str(), AccessLevel::Edit.as_str());
+        }
+        Self {
+            role,
+            can_access: true,
+            domains,
+        }
+    }
+
+    pub fn domain_level(&self, domain: ConsoleDomain) -> AccessLevel {
+        self.domains
+            .get(domain.as_str())
+            .and_then(|s| AccessLevel::from_str_relaxed(s))
+            .unwrap_or(AccessLevel::None)
+    }
+
+    pub fn has_domain_access(&self, domain: ConsoleDomain, required: AccessLevel) -> bool {
+        self.domain_level(domain) >= required
+    }
+}
+
+/// Evaluates whether a newly authenticated Discord user has access to at least one connected or configured guild.
+async fn user_has_any_guild_access(state: &WebState, user_id_str: &str, username: &str) -> bool {
+    let Ok(user_id_num) = user_id_str.trim().parse::<u64>() else {
+        return false;
+    };
+    let settings = state.storage.get_app_settings();
+    if state.auth.is_bot_owner(user_id_str, &settings) {
+        return true;
+    }
+
+    let temp_claims = Some(SessionClaims {
+        user_id: user_id_str.to_string(),
+        username: username.to_string(),
+        is_owner: false,
+        epoch: settings.session_epoch,
+        exp: Utc::now().timestamp() + 60,
+    });
+
+    let mut checked = std::collections::HashSet::new();
+    for g in state.bot.connected_guilds_list() {
+        if let Ok(gid) = g.id.parse::<u64>() {
+            checked.insert(gid);
+            if resolve_guild_access(state, gid, user_id_num, &temp_claims)
+                .await
+                .can_access
+            {
+                return true;
+            }
+        }
+    }
+
+    for gid in state.storage.list_guild_ids() {
+        if gid != 0
+            && !checked.contains(&gid)
+            && resolve_guild_access(state, gid, user_id_num, &temp_claims)
+                .await
+                .can_access
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 async fn api_list_guilds(
     State(state): State<Arc<WebState>>,
     headers: HeaderMap,
@@ -813,6 +1006,10 @@ async fn api_list_guilds(
         Some(c) => c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings),
         None => false,
     };
+    let user_id_num = claims
+        .as_ref()
+        .and_then(|c| c.user_id.parse::<u64>().ok())
+        .unwrap_or(0);
 
     let connected = state.bot.connected_guilds_list();
     let mut seen_ids = std::collections::HashSet::new();
@@ -821,31 +1018,38 @@ async fn api_list_guilds(
     for g in connected {
         if let Ok(id_num) = g.id.parse::<u64>() {
             seen_ids.insert(id_num);
-            if !is_owner {
-                let user_id_num = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-                if !user_has_guild_access(&state, id_num, user_id_num, &claims).await {
-                    continue;
-                }
+            let access = resolve_guild_access(&state, id_num, user_id_num, &claims).await;
+            if !access.can_access {
+                continue;
             }
+            list.push(json!({
+                "id": g.id,
+                "name": g.name,
+                "icon_url": g.icon_url,
+                "member_count": g.member_count,
+                "connected": true,
+                "my_role": access.role,
+                "permissions": access.domains,
+            }));
         }
-        list.push(json!({
-            "id": g.id,
-            "name": g.name,
-            "icon_url": g.icon_url,
-            "member_count": g.member_count,
-            "connected": true,
-        }));
     }
 
-    if is_owner {
-        for gid in state.storage.list_guild_ids() {
-            if gid != 0 && !seen_ids.contains(&gid) {
+    for gid in state.storage.list_guild_ids() {
+        if gid != 0 && !seen_ids.contains(&gid) {
+            let access = if is_owner {
+                GuildAccessProfile::full("owner")
+            } else {
+                resolve_guild_access(&state, gid, user_id_num, &claims).await
+            };
+            if access.can_access {
                 list.push(json!({
                     "id": gid.to_string(),
                     "name": format!("Server {gid}"),
                     "icon_url": null,
                     "member_count": 0,
                     "connected": false,
+                    "my_role": access.role,
+                    "permissions": access.domains,
                 }));
             }
         }
@@ -854,64 +1058,276 @@ async fn api_list_guilds(
     Json(json!({ "guilds": list }))
 }
 
-/// Helper to evaluate if caller has console access to a specific guild.
-async fn user_has_guild_access(
+/// Resolves the caller's full role (`owner`, `admin`, `moderator`, `delegated`, `none`)
+/// and per-domain access levels (`none`, `view`, `edit`) for `guild_id`.
+pub async fn resolve_guild_access(
     state: &WebState,
     guild_id: u64,
     user_id: u64,
     claims: &Option<SessionClaims>,
-) -> bool {
-    let Some(c) = claims else { return false };
+) -> GuildAccessProfile {
+    let Some(c) = claims else {
+        return GuildAccessProfile::none();
+    };
     let settings = state.storage.get_app_settings();
     if c.is_owner || state.auth.is_bot_owner(&c.user_id, &settings) {
-        return true;
+        return GuildAccessProfile::full("owner");
+    }
+    if user_id == 0 {
+        return GuildAccessProfile::none();
     }
 
-    // 1. Check Serenity Cache / Guild permissions
+    let mut is_guild_owner = false;
+    let mut is_discord_admin = false;
+    let mut is_discord_mod = false;
+    let mut member_role_ids: Option<Vec<u64>> = None;
+    let mut member_role_names: Vec<String> = Vec::new();
+
+    // 1. Check Serenity guild cache for owner_id and cached member roles
     if let Some(cache) = state.bot.cache() {
         if let Some(guild) = cache.guild(guild_id) {
             if guild.owner_id.get() == user_id {
-                return true;
+                is_guild_owner = true;
             }
             if let Some(member) = guild.members.get(&serenity::model::id::UserId::new(user_id)) {
-                let perms = guild.member_permissions(member);
-                if perms.contains(serenity::model::permissions::Permissions::ADMINISTRATOR)
-                    || perms.contains(serenity::model::permissions::Permissions::MANAGE_GUILD)
-                    || perms.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
-                {
-                    return true;
-                }
+                let roles: Vec<u64> = member.roles.iter().map(|r| r.get()).collect();
+                state.bot.member_role_cache().insert(guild_id, user_id, roles.clone());
+                member_role_ids = Some(roles);
             }
         }
     }
 
-    // 2. Fallback to Discord REST API if member not in cache
-    if let Some(http) = state.bot.http() {
-        if let Ok(member) = http.get_member(serenity::model::id::GuildId::new(guild_id), serenity::model::id::UserId::new(user_id)).await {
-            if let Some(cache) = state.bot.cache() {
-                if let Some(guild) = cache.guild(guild_id) {
-                    let perms = guild.member_permissions(&member);
+    if is_guild_owner {
+        return GuildAccessProfile::full("admin");
+    }
+
+    // 2. Check MemberRoleCache before falling back to Discord REST API
+    if member_role_ids.is_none() {
+        member_role_ids = state.bot.member_role_cache().get(guild_id, user_id);
+    }
+
+    // 3. Fallback to Discord REST API if member roles are not cached yet
+    if member_role_ids.is_none() {
+        if let Some(http) = state.bot.http() {
+            if let Ok(member) = http
+                .get_member(
+                    serenity::model::id::GuildId::new(guild_id),
+                    serenity::model::id::UserId::new(user_id),
+                )
+                .await
+            {
+                let roles: Vec<u64> = member.roles.iter().map(|r| r.get()).collect();
+                state.bot.member_role_cache().insert(guild_id, user_id, roles.clone());
+                if let Some(perms) = member.permissions {
                     if perms.contains(serenity::model::permissions::Permissions::ADMINISTRATOR)
                         || perms.contains(serenity::model::permissions::Permissions::MANAGE_GUILD)
-                        || perms.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
                     {
-                        return true;
+                        is_discord_admin = true;
+                    }
+                    if perms.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
+                        || perms.contains(serenity::model::permissions::Permissions::KICK_MEMBERS)
+                        || perms.contains(serenity::model::permissions::Permissions::BAN_MEMBERS)
+                        || perms.contains(serenity::model::permissions::Permissions::MANAGE_MESSAGES)
+                    {
+                        is_discord_mod = true;
+                    }
+                }
+                member_role_ids = Some(roles);
+            }
+        }
+    }
+
+    let role_ids = member_role_ids.unwrap_or_default();
+
+    // 4. Evaluate role permissions and role names from Serenity's guild roles cache
+    if let Some(cache) = state.bot.cache() {
+        if let Some(guild) = cache.guild(guild_id) {
+            // Check @everyone role permissions as well as assigned roles
+            if let Some(everyone_role) = guild.roles.get(&serenity::model::id::RoleId::new(guild_id)) {
+                let p = everyone_role.permissions;
+                if p.contains(serenity::model::permissions::Permissions::ADMINISTRATOR)
+                    || p.contains(serenity::model::permissions::Permissions::MANAGE_GUILD)
+                {
+                    is_discord_admin = true;
+                }
+                if p.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
+                    || p.contains(serenity::model::permissions::Permissions::KICK_MEMBERS)
+                    || p.contains(serenity::model::permissions::Permissions::BAN_MEMBERS)
+                    || p.contains(serenity::model::permissions::Permissions::MANAGE_MESSAGES)
+                {
+                    is_discord_mod = true;
+                }
+            }
+            for rid in &role_ids {
+                if let Some(role) = guild.roles.get(&serenity::model::id::RoleId::new(*rid)) {
+                    member_role_names.push(role.name.clone());
+                    let p = role.permissions;
+                    if p.contains(serenity::model::permissions::Permissions::ADMINISTRATOR)
+                        || p.contains(serenity::model::permissions::Permissions::MANAGE_GUILD)
+                    {
+                        is_discord_admin = true;
+                    }
+                    if p.contains(serenity::model::permissions::Permissions::MODERATE_MEMBERS)
+                        || p.contains(serenity::model::permissions::Permissions::KICK_MEMBERS)
+                        || p.contains(serenity::model::permissions::Permissions::BAN_MEMBERS)
+                        || p.contains(serenity::model::permissions::Permissions::MANAGE_MESSAGES)
+                    {
+                        is_discord_mod = true;
                     }
                 }
             }
         }
     }
 
-    // 3. Check explicit database grants (by user_id or by member roles)
+    // 5. Check GuildConfig Bot Admin Roles / Users (`change_permission_roles` / `change_permission_users`)
+    let guild_cfg = state.storage.get_guild_config(guild_id);
+    let member_ctx = MemberContext {
+        user_id,
+        is_guild_owner,
+        is_administrator: is_discord_admin,
+        role_ids: &role_ids,
+        role_names: &member_role_names,
+    };
+    let is_guild_bot_admin = has_guild_permission(&member_ctx, &guild_cfg, PermissionDomain::ManageBot);
+
+    if is_discord_admin || is_guild_bot_admin {
+        return GuildAccessProfile::full("admin");
+    }
+
+    // 6. Build domain permissions from Moderator defaults + Delegated Web Access Grants
+    let mut domain_levels: HashMap<ConsoleDomain, AccessLevel> =
+        GUILD_DOMAINS.into_iter().map(|d| (d, AccessLevel::None)).collect();
+
+    if is_discord_mod {
+        domain_levels.insert(ConsoleDomain::Moderation, AccessLevel::Edit);
+        domain_levels.insert(ConsoleDomain::Automod, AccessLevel::View);
+        domain_levels.insert(ConsoleDomain::Logging, AccessLevel::View);
+        domain_levels.insert(ConsoleDomain::Activity, AccessLevel::View);
+        domain_levels.insert(ConsoleDomain::AuditLog, AccessLevel::View);
+    }
+
     if let Ok(grants) = state.storage.get_web_access_grants(guild_id) {
         for grant in grants {
-            if grant.target_type == "user" && grant.target_id == user_id {
-                return true;
+            let matches_principal = (grant.target_type == "user" && grant.target_id == user_id)
+                || (grant.target_type == "role"
+                    && (role_ids.contains(&grant.target_id) || grant.target_id == guild_id));
+            if !matches_principal {
+                continue;
+            }
+            let level = AccessLevel::from_str_relaxed(&grant.access_level).unwrap_or(AccessLevel::None);
+            if let Some(dom) = ConsoleDomain::from_str_relaxed(&grant.domain) {
+                if dom == ConsoleDomain::All {
+                    for d in GUILD_DOMAINS {
+                        let cur = domain_levels.get(&d).copied().unwrap_or(AccessLevel::None);
+                        if level > cur {
+                            domain_levels.insert(d, level);
+                        }
+                    }
+                } else if GUILD_DOMAINS.contains(&dom) {
+                    let cur = domain_levels.get(&dom).copied().unwrap_or(AccessLevel::None);
+                    if level > cur {
+                        domain_levels.insert(dom, level);
+                    }
+                }
             }
         }
     }
 
-    false
+    let can_access = domain_levels.values().any(|lvl| lvl.can_view());
+    if !can_access {
+        return GuildAccessProfile::none();
+    }
+
+    let is_delegated_admin = domain_levels
+        .get(&ConsoleDomain::Settings)
+        .copied()
+        .unwrap_or(AccessLevel::None)
+        .can_edit()
+        && domain_levels
+            .get(&ConsoleDomain::Permissions)
+            .copied()
+            .unwrap_or(AccessLevel::None)
+            .can_edit();
+
+    let role = if is_delegated_admin {
+        "admin"
+    } else if is_discord_mod {
+        "moderator"
+    } else {
+        "delegated"
+    };
+
+    let mut domains_str = HashMap::with_capacity(GUILD_DOMAINS.len());
+    for d in GUILD_DOMAINS {
+        let lvl = domain_levels.get(&d).copied().unwrap_or(AccessLevel::None);
+        domains_str.insert(d.as_str(), lvl.as_str());
+    }
+
+    GuildAccessProfile {
+        role,
+        can_access: true,
+        domains: domains_str,
+    }
+}
+
+/// Helper to evaluate if caller has any console access to a specific guild (used for shared entity lookups).
+async fn user_has_guild_access(
+    state: &WebState,
+    guild_id: u64,
+    user_id: u64,
+    claims: &Option<SessionClaims>,
+) -> bool {
+    resolve_guild_access(state, guild_id, user_id, claims)
+        .await
+        .can_access
+}
+
+/// Enforces that the caller has at least `required` access level for `domain` in `guild_id`.
+/// Returns `Ok((claims, user_id))` or an `Err(Response)` (`404` if no access to guild, `403` if insufficient domain role).
+#[allow(clippy::result_large_err)]
+async fn check_guild_domain_access(
+    state: &WebState,
+    headers: &HeaderMap,
+    guild_id: u64,
+    domain: ConsoleDomain,
+    required: AccessLevel,
+) -> Result<(Option<SessionClaims>, u64), Response> {
+    check_guild_any_domain_access(state, headers, guild_id, &[domain], required).await
+}
+
+/// Enforces that the caller has at least `required` access level for any of `domains` in `guild_id`.
+#[allow(clippy::result_large_err)]
+async fn check_guild_any_domain_access(
+    state: &WebState,
+    headers: &HeaderMap,
+    guild_id: u64,
+    domains: &[ConsoleDomain],
+    required: AccessLevel,
+) -> Result<(Option<SessionClaims>, u64), Response> {
+    let settings = state.storage.get_app_settings();
+    let claims = state.auth.authenticate_request(headers, &settings);
+    let user_id = claims
+        .as_ref()
+        .and_then(|c| c.user_id.parse::<u64>().ok())
+        .unwrap_or(0);
+    let profile = resolve_guild_access(state, guild_id, user_id, &claims).await;
+    if !profile.can_access {
+        return Err((StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response());
+    }
+    if !domains.iter().any(|&d| profile.has_domain_access(d, required)) {
+        let req_str = if required.can_edit() { "edit" } else { "view" };
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": format!(
+                    "Insufficient permissions ({} role does not have '{}' access to this module).",
+                    profile.role, req_str
+                )
+            })),
+        )
+            .into_response());
+    }
+    Ok((claims, user_id))
 }
 
 async fn api_get_guild_config(
@@ -927,11 +1343,16 @@ async fn api_get_guild_config(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Settings,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     let cfg = state.storage.get_guild_config(guild_id);
@@ -985,12 +1406,18 @@ async fn api_put_guild_config(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Settings,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let current = state.storage.get_guild_config(guild_id);
     let before_json = serde_json::to_string(&*current).unwrap_or_default();
@@ -1010,7 +1437,16 @@ async fn api_put_guild_config(
         } else if clean.starts_with("data:image/") {
             Some(clean.to_string())
         } else if clean.starts_with("http://") || clean.starts_with("https://") {
-            silas_discord::bot::download_image_as_data_uri(clean).await.ok()
+            match silas_discord::bot::download_image_as_data_uri(clean).await {
+                Ok(uri) => Some(uri),
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "error": format!("Failed to download avatar image: {e}") })),
+                    )
+                        .into_response();
+                }
+            }
         } else {
             None
         };
@@ -1089,12 +1525,18 @@ async fn api_set_guild_icon(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Settings,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let target_data_uri = match payload.icon.as_deref().map(str::trim) {
         None => None,
@@ -1384,11 +1826,16 @@ async fn api_list_guild_grants(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Permissions,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.get_web_access_grants(guild_id) {
@@ -1419,12 +1866,18 @@ async fn api_upsert_guild_grant(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Permissions,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     if payload.target_type != "role" && payload.target_type != "user" {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "target_type must be 'role' or 'user'." }))).into_response();
@@ -1481,12 +1934,18 @@ async fn api_delete_guild_grant(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid grant ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Permissions,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     match state.storage.delete_web_access_grant(guild_id, grant_id) {
         Ok(true) => {
@@ -1541,11 +2000,16 @@ async fn api_get_guild_audit_log(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::AuditLog,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     let limit = q.limit.unwrap_or(50).clamp(1, 100) as usize;
@@ -1607,12 +2071,18 @@ async fn api_reset_guild_quota(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Settings,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let cfg = state.storage.get_guild_config(guild_id);
     let tq = &cfg.token_quotas;
@@ -1671,12 +2141,18 @@ async fn api_clear_guild_memory(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Settings,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     state.bot.memory().clear_guild(guild_id);
 
@@ -1944,11 +2420,16 @@ async fn api_list_guild_reddit_subs(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Reddit, ConsoleDomain::Settings],
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.list_reddit_subscriptions_for_guild(guild_id) {
@@ -1975,12 +2456,18 @@ async fn api_create_guild_reddit_sub(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Reddit, ConsoleDomain::Settings],
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     new_sub.guild_id = guild_id;
     let clean_sub = silas_core::reddit::clean_subreddit_name(&new_sub.subreddit);
@@ -2084,12 +2571,18 @@ async fn api_delete_guild_reddit_sub(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Reddit, ConsoleDomain::Settings],
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     match state.storage.delete_reddit_subscription(sub_id, guild_id) {
         Ok(true) => {
@@ -2129,7 +2622,17 @@ async fn api_delete_guild_reddit_sub(
     }
 }
 
-async fn api_generate_reddit_secret() -> Response {
+async fn api_generate_reddit_secret(
+    State(state): State<Arc<WebState>>,
+    headers: HeaderMap,
+) -> Response {
+    if !is_request_owner(&state, &headers) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Only the Bot Owner can generate global webhook secrets." })),
+        )
+            .into_response();
+    }
     let mut bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut bytes);
     let secret = hex::encode(bytes);
@@ -2160,11 +2663,16 @@ async fn api_list_mod_cases(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Moderation,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     let cases = match query.user_id {
@@ -2208,12 +2716,18 @@ async fn api_create_mod_case(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Moderation,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let new_case = NewModCase {
         guild_id,
@@ -2287,12 +2801,18 @@ async fn api_update_mod_case_reason(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Moderation,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     // Verify case belongs to guild
     if let Ok(Some(existing_case)) = state.storage.get_mod_case(guild_id, case_id) {
@@ -2360,12 +2880,18 @@ async fn api_deactivate_mod_case(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Moderation,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     // Verify case belongs to guild
     if let Ok(Some(existing_case)) = state.storage.get_mod_case(guild_id, case_id) {
@@ -2434,11 +2960,16 @@ async fn api_get_guild_strikes(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Moderation, ConsoleDomain::Automod],
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     if let Some(target_user_id) = query.user_id {
@@ -2483,12 +3014,18 @@ async fn api_decay_guild_strikes(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Moderation, ConsoleDomain::Automod],
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let cutoff = match payload.cutoff_epoch {
         Some(ts) => ts,
@@ -2555,11 +3092,16 @@ async fn api_get_automod_config(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Automod,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.get_automod_config(guild_id) {
@@ -2587,12 +3129,18 @@ async fn api_put_automod_config(
     };
     config.guild_id = guild_id;
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Automod,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let before_json = state
         .storage
@@ -2647,11 +3195,16 @@ async fn api_get_logging_config(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Logging,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.get_logging_config(guild_id) {
@@ -2679,12 +3232,18 @@ async fn api_put_logging_config(
     };
     config.guild_id = guild_id;
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Logging,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let before_json = state
         .storage
@@ -2739,11 +3298,16 @@ async fn api_get_greetings_config(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Greetings,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.get_greetings_config(guild_id) {
@@ -2771,12 +3335,18 @@ async fn api_put_greetings_config(
     };
     config.guild_id = guild_id;
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Greetings,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let before_json = state
         .storage
@@ -2854,11 +3424,16 @@ async fn api_list_reaction_roles(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::ReactionRoles,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.get_guild_reaction_roles(guild_id) {
@@ -2885,12 +3460,18 @@ async fn api_create_reaction_roles(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::ReactionRoles,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let new_group = NewReactionRoleGroup {
         guild_id,
@@ -2975,12 +3556,18 @@ async fn api_delete_reaction_role_group(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::ReactionRoles,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     // Verify group belongs to this guild to prevent cross-guild IDOR
     let groups = state.storage.get_guild_reaction_roles(guild_id).unwrap_or_default();
@@ -3058,11 +3645,16 @@ async fn api_list_custom_triggers(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Triggers,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.list_custom_triggers(guild_id) {
@@ -3089,12 +3681,18 @@ async fn api_create_custom_trigger(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Triggers,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let new_trigger = NewCustomTrigger {
         guild_id,
@@ -3156,12 +3754,18 @@ async fn api_delete_custom_trigger(
             .into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Triggers,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     match state.storage.delete_custom_trigger(guild_id, &trigger_name) {
         Ok(true) => {
@@ -3261,11 +3865,16 @@ async fn api_get_activity_config(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Activity,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.get_activity_config(guild_id) {
@@ -3285,12 +3894,18 @@ async fn api_put_activity_config(
     };
     config.guild_id = guild_id;
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Activity,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     let before_json = state
         .storage
@@ -3345,11 +3960,16 @@ async fn api_get_activity_leaderboard(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Activity,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     let tf = query.timeframe.as_deref().unwrap_or("lifetime");
@@ -3426,11 +4046,16 @@ async fn api_list_activity_rewards(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Activity,
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     match state.storage.list_activity_reward_rules(guild_id) {
@@ -3472,12 +4097,18 @@ async fn api_create_activity_reward(
     };
     rule.guild_id = guild_id;
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Activity,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     match state.storage.create_activity_reward_rule(rule) {
         Ok(created) => {
@@ -3518,12 +4149,18 @@ async fn api_delete_activity_reward(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, user_id) = match check_guild_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        ConsoleDomain::Activity,
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     match state.storage.delete_activity_reward_rule(guild_id, &rule_id) {
         Ok(deleted) => {
@@ -3574,12 +4211,18 @@ async fn api_adjust_activity_points(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let caller_user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, caller_user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
-    }
+    let (claims, caller_user_id) = match check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Activity, ConsoleDomain::Moderation],
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
 
     match state.storage.adjust_user_points(guild_id, payload.user_id, payload.amount) {
         Ok(new_total) => {
@@ -3626,11 +4269,16 @@ async fn api_get_command_channels(
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid guild ID." }))).into_response();
     };
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Settings, ConsoleDomain::Activity],
+        AccessLevel::View,
+    )
+    .await
+    {
+        return resp;
     }
 
     let restr = state.storage.get_guild_command_restrictions(guild_id).unwrap_or_else(|_| GuildCommandRestrictions::default_for_guild(guild_id));
@@ -3650,11 +4298,16 @@ async fn api_put_command_channels(
     };
     payload.restrictions.guild_id = guild_id;
 
-    let settings = state.storage.get_app_settings();
-    let claims = state.auth.authenticate_request(&headers, &settings);
-    let user_id = claims.as_ref().and_then(|c| c.user_id.parse::<u64>().ok()).unwrap_or(0);
-    if !user_has_guild_access(&state, guild_id, user_id, &claims).await {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "Not Found" }))).into_response();
+    if let Err(resp) = check_guild_any_domain_access(
+        &state,
+        &headers,
+        guild_id,
+        &[ConsoleDomain::Settings, ConsoleDomain::Activity],
+        AccessLevel::Edit,
+    )
+    .await
+    {
+        return resp;
     }
 
     if let Err(e) = state.storage.set_guild_command_restrictions(&payload.restrictions) {
@@ -4010,6 +4663,43 @@ mod tests {
         let json_empty = r#"{}"#;
         let payload_empty: SetGuildIconPayload = serde_json::from_str(json_empty)?;
         assert_eq!(payload_empty.icon, None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_guild_access_profile_roles_and_domains() -> Result<(), Box<dyn std::error::Error>> {
+        let admin = GuildAccessProfile::full("admin");
+        assert!(admin.can_access);
+        assert_eq!(admin.role, "admin");
+        assert!(admin.has_domain_access(ConsoleDomain::Settings, AccessLevel::Edit));
+        assert!(admin.has_domain_access(ConsoleDomain::Permissions, AccessLevel::Edit));
+        assert!(admin.has_domain_access(ConsoleDomain::Moderation, AccessLevel::Edit));
+
+        let storage = Storage::open(":memory:")?;
+        let guild_id = 555666777;
+        // Grant 'view' on 'logging' and 'edit' on 'moderation' to a role
+        let g1 = storage.create_or_update_web_access_grant(
+            guild_id,
+            "role",
+            1001,
+            "@ModRole",
+            "logging",
+            "read",
+        )?;
+        assert_eq!(g1.access_level, "view");
+
+        let g2 = storage.create_or_update_web_access_grant(
+            guild_id,
+            "role",
+            1001,
+            "@ModRole",
+            "moderation",
+            "write",
+        )?;
+        assert_eq!(g2.access_level, "edit");
+
+        let grants = storage.get_web_access_grants(guild_id)?;
+        assert_eq!(grants.len(), 2);
         Ok(())
     }
 

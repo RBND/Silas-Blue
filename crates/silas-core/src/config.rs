@@ -24,6 +24,29 @@ pub fn is_valid_snowflake_str(s: &str) -> bool {
     SNOWFLAKE_RE.is_match(trimmed) && trimmed.parse::<u64>().is_ok()
 }
 
+/// Normalizes a single or comma-separated list of Discord Snowflake IDs.
+/// Returns `Some(normalized_csv)` if empty or all non-empty tokens are valid Snowflakes, else `None`.
+pub fn normalize_snowflake_csv(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Some(String::new());
+    }
+    let mut valid_ids: Vec<String> = Vec::new();
+    for part in trimmed.split(',') {
+        let p = part.trim();
+        if p.is_empty() {
+            continue;
+        }
+        if !is_valid_snowflake_str(p) {
+            return None;
+        }
+        if !valid_ids.iter().any(|existing| existing == p) {
+            valid_ids.push(p.to_owned());
+        }
+    }
+    Some(valid_ids.join(", "))
+}
+
 /// Parses a valid Snowflake string into `u64`.
 pub fn parse_snowflake(s: &str) -> Option<u64> {
     let trimmed = s.trim();
@@ -407,6 +430,18 @@ impl AppSettings {
         }
         String::new()
     }
+
+    /// Checks whether a Discord user ID string matches any configured `bot_owner_id` (supports comma-separated IDs).
+    pub fn is_owner_id(&self, user_id: &str) -> bool {
+        let target = user_id.trim();
+        if target.is_empty() {
+            return false;
+        }
+        self.bot_owner_id
+            .split(',')
+            .map(str::trim)
+            .any(|id| !id.is_empty() && id == target)
+    }
 }
 
 /// Partial update payload for `AppSettings`.
@@ -494,12 +529,11 @@ impl AppSettings {
             }
         }
         if let Some(owner) = patch.bot_owner_id {
-            let trimmed = owner.trim();
-            if (trimmed.is_empty() || is_valid_snowflake_str(trimmed))
-                && trimmed != self.bot_owner_id
-            {
-                self.bot_owner_id = trimmed.to_owned();
-                self.session_epoch = self.session_epoch.saturating_add(1);
+            if let Some(normalized) = normalize_snowflake_csv(&owner) {
+                if normalized != self.bot_owner_id {
+                    self.bot_owner_id = normalized;
+                    self.session_epoch = self.session_epoch.saturating_add(1);
+                }
             }
         }
         if let Some(bt) = patch.backend_type {

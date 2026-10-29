@@ -19,6 +19,7 @@ pub enum ConsoleDomain {
     Permissions,
     AuditLog,
     Activity,
+    Reddit,
 }
 
 impl ConsoleDomain {
@@ -36,23 +37,25 @@ impl ConsoleDomain {
             Self::Permissions => "permissions",
             Self::AuditLog => "audit_log",
             Self::Activity => "activity",
+            Self::Reddit => "reddit",
         }
     }
 
     pub fn from_str_relaxed(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
-            "all" => Some(Self::All),
-            "settings" | "config" => Some(Self::Settings),
-            "moderation" | "mod" => Some(Self::Moderation),
+            "all" | "*" => Some(Self::All),
+            "settings" | "config" | "servers" => Some(Self::Settings),
+            "moderation" | "mod" | "cases" => Some(Self::Moderation),
             "automod" => Some(Self::Automod),
             "logging" | "logs" => Some(Self::Logging),
             "greetings" => Some(Self::Greetings),
             "reaction_roles" | "reactionroles" | "rr" => Some(Self::ReactionRoles),
             "triggers" => Some(Self::Triggers),
             "ai" => Some(Self::Ai),
-            "permissions" | "access" => Some(Self::Permissions),
+            "permissions" | "access" | "grants" => Some(Self::Permissions),
             "audit_log" | "audit" | "auditlog" => Some(Self::AuditLog),
             "activity" | "points" | "levels" | "xp" => Some(Self::Activity),
+            "reddit" | "devvit" => Some(Self::Reddit),
             _ => None,
         }
     }
@@ -79,8 +82,8 @@ impl AccessLevel {
     pub fn from_str_relaxed(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "none" => Some(Self::None),
-            "view" => Some(Self::View),
-            "edit" => Some(Self::Edit),
+            "view" | "read" => Some(Self::View),
+            "edit" | "write" | "admin" => Some(Self::Edit),
             _ => None,
         }
     }

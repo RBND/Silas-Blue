@@ -76,7 +76,7 @@ async fn extract_caller_roles(ctx: Context<'_>, bot_owner_id: &str) -> CallerRol
     let mut is_admin = false;
     let user_id = ctx.author().id.get();
     let mut is_owner_or_bot_owner =
-        !bot_owner_id.trim().is_empty() && bot_owner_id.trim() == user_id.to_string();
+        bot_owner_id.split(',').map(str::trim).any(|id| !id.is_empty() && id == user_id.to_string());
 
     if let Some(member) = ctx.author_member().await {
         for r in &member.roles {
@@ -127,7 +127,7 @@ async fn check_caller_permission(
     let user_id = ctx.author().id.get();
 
     let Some(guild_id) = ctx.guild_id() else {
-        let is_bot_owner = settings.bot_owner_id.trim() == user_id.to_string();
+        let is_bot_owner = settings.is_owner_id(&user_id.to_string());
         let allowed = is_bot_owner || has_dm_permission(settings.allow_dms, domain);
         if !allowed {
             ctx.say("⛔ You do not have permission to run this command in DMs.")
@@ -1269,7 +1269,7 @@ pub async fn setglobalname(
 ) -> Result<(), CommandError> {
     let state = ctx.data();
     let settings = state.storage.get_app_settings();
-    if settings.bot_owner_id.trim() != ctx.author().id.get().to_string() {
+    if !settings.is_owner_id(&ctx.author().id.get().to_string()) {
         ctx.say("⛔ Only the configured Bot Owner can change the global username.")
             .await?;
         return Ok(());
@@ -1313,7 +1313,7 @@ pub async fn update(
 ) -> Result<(), CommandError> {
     let state = ctx.data();
     let settings = state.storage.get_app_settings();
-    if settings.bot_owner_id.trim() != ctx.author().id.get().to_string() {
+    if !settings.is_owner_id(&ctx.author().id.get().to_string()) {
         ctx.say("⛔ Only the configured Bot Owner can run `/update`.")
             .await?;
         return Ok(());

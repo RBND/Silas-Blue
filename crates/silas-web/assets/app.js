@@ -55,10 +55,12 @@
       sel.value = saved;
       sel.addEventListener("change", () => {
         applyTheme(sel.value, true);
-        apiFetch("/api/settings", {
-          method: "PUT",
-          body: JSON.stringify({ theme: sel.value }),
-        }).catch(() => {});
+        if (currentUserSession && currentUserSession.is_owner) {
+          apiFetch("/api/settings", {
+            method: "PUT",
+            body: JSON.stringify({ theme: sel.value }),
+          }).catch(() => {});
+        }
       });
     }
 
@@ -941,9 +943,7 @@
   }
 
   async function saveGlobalSettings() {
-    const ownerIdRaw = getValue("cfg-owner-ids")
-      .split(",")[0]
-      .trim();
+    const ownerIdRaw = getValue("cfg-owner-ids").trim();
 
     const payload = {
       bot_owner_id: ownerIdRaw,
@@ -992,14 +992,132 @@
   }
 
   // ==========================================================================
-  // Server Configuration (4 Sub-Tabs + Chip Selectors)
+  // Server Configuration & Role-Based UI Governance
   // ==========================================================================
+  const guildPermissionsMap = new Map();
+
+  function hasGuildDomainAccess(guildId, domain, requiredLevel) {
+    const isOwner = Boolean(currentUserSession && currentUserSession.is_owner);
+    if (isOwner) return true;
+    const entry = guildPermissionsMap.get(String(guildId));
+    if (!entry) return false;
+    if (entry.role === "owner" || entry.role === "admin") return true;
+    const perms = entry.permissions || {};
+    const raw = (perms[domain] || perms["*"] || "none").toLowerCase();
+    if (requiredLevel === "edit") {
+      return raw === "edit" || raw === "write" || raw === "admin";
+    }
+    return raw === "view" || raw === "read" || raw === "edit" || raw === "write" || raw === "admin";
+  }
+
+  function applyGuildRolePermissions(guildId) {
+    const isOwner = Boolean(currentUserSession && currentUserSession.is_owner);
+    const entry = guildPermissionsMap.get(String(guildId)) || {
+      role: isOwner ? "owner" : "delegated",
+      permissions: {},
+    };
+    const roleLabelMap = {
+      owner: "Bot Owner",
+      admin: "Server Admin",
+      moderator: "Moderator",
+      delegated: "Delegated",
+    };
+    const roleLabel = roleLabelMap[isOwner ? "owner" : entry.role] || "Member";
+    const uname = (currentUserSession && currentUserSession.username) || "User";
+    setText("session-username", `${uname} (${roleLabel})`);
+
+    const canView = (dom) => hasGuildDomainAccess(guildId, dom, "view");
+    const canEdit = (dom) => hasGuildDomainAccess(guildId, dom, "edit");
+
+    const viewVisibility = {
+      overview: isOwner,
+      backends: isOwner,
+      updates: isOwner,
+      invite: isOwner,
+      servers: canView("settings"),
+      reddit: canView("reddit") || canView("settings"),
+      moderation: canView("moderation"),
+      automod: canView("automod"),
+      logging: canView("logging"),
+      greetings: canView("greetings"),
+      "reaction-roles": canView("reaction_roles"),
+      triggers: canView("triggers"),
+      activity: canView("activity"),
+      grants: canView("permissions"),
+      "audit-log": canView("audit_log"),
+    };
+
+    const navButtons = document.querySelectorAll(".nav-item[data-view]");
+    navButtons.forEach((btn) => {
+      const v = btn.getAttribute("data-view");
+      const allowed = Boolean(viewVisibility[v]);
+      if (allowed) {
+        btn.classList.remove("hidden");
+      } else {
+        btn.classList.add("hidden");
+      }
+    });
+
+    const toggleBtn = (id, allowed) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !allowed;
+    };
+
+    toggleBtn("btn-save-guild-config", canEdit("settings"));
+    toggleBtn("btn-apply-guild-icon", canEdit("settings"));
+    toggleBtn("btn-reset-guild-icon", canEdit("settings"));
+    toggleBtn("btn-reset-guild-quota", canEdit("settings"));
+    toggleBtn("btn-clear-guild-memory", canEdit("settings"));
+    toggleBtn("btn-add-reddit-sub", canEdit("reddit") || canEdit("settings"));
+    toggleBtn("btn-add-reddit-companion-sub", canEdit("reddit") || canEdit("settings"));
+    toggleBtn("btn-open-manual-case", canEdit("moderation"));
+    toggleBtn("btn-trigger-strike-decay", canEdit("moderation") || canEdit("automod"));
+    toggleBtn("btn-save-automod", canEdit("automod"));
+    toggleBtn("btn-add-ladder-step", canEdit("automod"));
+    toggleBtn("btn-save-logging", canEdit("logging"));
+    toggleBtn("btn-save-greetings", canEdit("greetings"));
+    toggleBtn("btn-open-rr-modal", canEdit("reaction_roles"));
+    toggleBtn("btn-open-trigger-modal", canEdit("triggers"));
+    toggleBtn("btn-save-activity-config", canEdit("activity"));
+    toggleBtn("btn-open-add-reward-modal", canEdit("activity"));
+    toggleBtn("btn-save-cmd-channels", canEdit("activity") || canEdit("settings"));
+    toggleBtn("btn-add-default-channel", canEdit("activity") || canEdit("settings"));
+    toggleBtn("btn-add-cmd-override", canEdit("activity") || canEdit("settings"));
+    toggleBtn("btn-submit-point-adjust", canEdit("activity") || canEdit("moderation"));
+    toggleBtn("btn-create-grant", canEdit("permissions"));
+
+    const activeNav = document.querySelector(".nav-item.active[data-view]");
+    if (!activeNav || activeNav.classList.contains("hidden")) {
+      const firstVisible = document.querySelector(".nav-item[data-view]:not(.hidden)");
+      if (firstVisible) {
+        const target = firstVisible.getAttribute("data-view");
+        navButtons.forEach((b) => b.classList.remove("active"));
+        firstVisible.classList.add("active");
+        document.querySelectorAll(".view-panel").forEach((panel) => {
+          if (panel.id === `view-${target}`) {
+            panel.classList.remove("hidden");
+          } else {
+            panel.classList.add("hidden");
+          }
+        });
+      }
+    }
+  }
+
   async function loadGuildList() {
     const selectors = document.querySelectorAll("#guild-selector, .guild-selector-sync");
     if (selectors.length === 0) return;
     try {
       const res = await apiFetch("/api/guilds");
       const guilds = res.guilds || [];
+      guildPermissionsMap.clear();
+      guilds.forEach((g) => {
+        guildPermissionsMap.set(String(g.id), {
+          role: g.my_role || "delegated",
+          permissions: g.permissions || {},
+        });
+      });
 
       selectors.forEach((sel) => {
         sel.replaceChildren();
@@ -1013,7 +1131,10 @@
           guilds.forEach((g) => {
             const opt = document.createElement("option");
             opt.value = g.id;
-            opt.textContent = g.connected ? `${g.name} (${g.id})` : `${g.name} [Offline]`;
+            const roleTag = g.my_role ? ` [${g.my_role.toUpperCase()}]` : "";
+            opt.textContent = g.connected
+              ? `${g.name} (${g.id})${roleTag}`
+              : `${g.name} [Offline]${roleTag}`;
             sel.appendChild(opt);
           });
           if (!currentGuildId || !guilds.some((g) => g.id === currentGuildId)) {
@@ -1023,7 +1144,7 @@
         }
       });
 
-      await loadSelectedGuildConfig();
+      applyGuildRolePermissions(currentGuildId);
       await refreshActiveModule();
     } catch (_) {}
   }
@@ -1034,6 +1155,7 @@
     selectors.forEach((sel) => {
       sel.value = currentGuildId;
     });
+    applyGuildRolePermissions(currentGuildId);
     refreshActiveModule();
   }
 
@@ -1390,7 +1512,7 @@
     }
   }
 
-  async function addRedditSubscription() {
+  async function addServerSubtabRedditSubscription() {
     if (!currentGuildId || currentGuildId === "0") {
       showToast("Please select a connected Discord server first.");
       return;
@@ -1936,7 +2058,7 @@
           }
         });
       }
-      bindClick("btn-add-reddit-sub", addRedditSubscription);
+      bindClick("btn-add-reddit-sub", addServerSubtabRedditSubscription);
   
       bindClick("btn-gen-reddit-secret", async () => {
         try {
@@ -1944,6 +2066,18 @@
           if (res.secret) {
             setValue("cfg-reddit-webhook-secret", res.secret);
             showToast("Generated new webhook secret (click Save Global Settings to persist).");
+          }
+        } catch (e) {
+          showToast(`Failed to generate secret: ${e.message}`);
+        }
+      });
+
+      bindClick("btn-gen-reddit-global-secret", async () => {
+        try {
+          const res = await apiFetch("/api/reddit/generate-secret", { method: "POST" });
+          if (res.secret) {
+            setValue("reddit-global-webhook-secret", res.secret);
+            showToast("Generated new webhook secret (click Save Global Secret to persist).");
           }
         } catch (e) {
           showToast(`Failed to generate secret: ${e.message}`);
@@ -2044,7 +2178,7 @@
       // Reddit & Devvit
       bindClick("btn-refresh-reddit", loadRedditModule);
       bindClick("btn-save-reddit-global", saveRedditGlobalSettings);
-      bindClick("btn-add-reddit-sub", addRedditSubscription);
+      bindClick("btn-add-reddit-companion-sub", addRedditSubscription);
 
       // Grants
       bindClick("btn-refresh-grants", loadGrantsModule);
@@ -2079,22 +2213,36 @@
         window.location.href = '/login.html';
         return;
       }
-      setText('session-username', sess.username || 'Admin');
+      const roleSuffix = sess.is_owner ? ' (Bot Owner)' : '';
+      setText('session-username', (sess.username || 'Admin') + roleSuffix);
     } catch (_) {
       window.location.href = '/login.html';
       return;
     }
 
-    try {
-      await Promise.allSettled([
-        refreshStatus(),
-        loadGlobalSettings(),
-        loadGuildList(),
-        loadSnapshots(),
-      ]);
-    } catch (_) {}
+    if (currentUserSession && currentUserSession.is_owner) {
+      try {
+        await Promise.allSettled([
+          refreshStatus(),
+          loadGlobalSettings(),
+          loadGuildList(),
+          loadSnapshots(),
+        ]);
+      } catch (_) {}
+      connectTelemetryWebSocket();
+    } else {
+      ["overview", "backends", "updates", "invite"].forEach((v) => {
+        const navBtn = document.querySelector(`.nav-item[data-view="${v}"]`);
+        if (navBtn) navBtn.classList.add("hidden");
+      });
+      try {
+        await Promise.allSettled([
+          refreshStatus(),
+          loadGuildList(),
+        ]);
+      } catch (_) {}
+    }
 
-    connectTelemetryWebSocket();
     setInterval(refreshStatus, 10000);
   }
 
@@ -3628,10 +3776,18 @@
               }));
           } else {
             const members = await searchGuildMembers(currentGuildId, q);
-            return members.map((m) => ({
-              id: m.id,
-              label: `${m.display_name || m.username} (@${m.username})`,
-            }));
+            return members.map((m) => {
+              const display = m.nick || m.global_name || m.username;
+              memberCache.set(String(m.id), {
+                id: m.id,
+                username: m.username,
+                display_name: display,
+              });
+              return {
+                id: m.id,
+                label: `${display} (@${m.username})`,
+              };
+            });
           }
         },
         resolveLabel: (id) => {
@@ -3640,7 +3796,7 @@
             const r = roles.find((x) => String(x.id) === String(id));
             return r ? `@${r.name}` : `Role ${id}`;
           } else {
-            return `User ${id}`;
+            return resolveMemberLabel(id);
           }
         },
         onChange: (id) => {
@@ -3677,41 +3833,60 @@
 
       grants.forEach((grant) => {
         const tr = document.createElement("tr");
+        const pType = (grant.target_type || grant.principal_type || "user").toLowerCase();
+        const pId = grant.target_id || grant.principal_id || "";
+        const pName = grant.target_name || "";
 
         const tdType = document.createElement("td");
         const typeBadge = document.createElement("span");
-        typeBadge.className = grant.principal_type === "role" ? "badge badge-cyan" : "badge badge-purple";
-        typeBadge.textContent = grant.principal_type === "role" ? "ROLE" : "USER";
+        typeBadge.className = pType === "role" ? "badge badge-cyan" : "badge badge-purple";
+        typeBadge.textContent = pType === "role" ? "ROLE" : "USER";
         tdType.appendChild(typeBadge);
         tr.appendChild(tdType);
 
         const tdPrincipal = document.createElement("td");
-        if (grant.principal_type === "role") {
-          const r = roles.find((x) => String(x.id) === String(grant.principal_id));
-          tdPrincipal.textContent = r ? `@${r.name} (${grant.principal_id})` : `Role ID ${grant.principal_id}`;
+        if (pType === "role") {
+          const r = roles.find((x) => String(x.id) === String(pId));
+          if (r) {
+            tdPrincipal.textContent = `@${r.name} (${pId})`;
+          } else if (pName && pName !== "Unknown Target") {
+            tdPrincipal.textContent = `${pName} (${pId})`;
+          } else {
+            tdPrincipal.textContent = `Role ID ${pId}`;
+          }
+        } else if (pName && pName !== "Unknown Target") {
+          tdPrincipal.textContent = `${pName} (${pId})`;
         } else {
-          tdPrincipal.textContent = `User ID ${grant.principal_id}`;
+          tdPrincipal.textContent = `User ID ${pId}`;
         }
         tr.appendChild(tdPrincipal);
 
         const tdDomain = document.createElement("td");
         const domBadge = document.createElement("span");
         domBadge.className = "badge badge-neutral";
-        domBadge.textContent = grant.domain === "*" ? "ALL (*)" : grant.domain.toUpperCase();
+        domBadge.textContent = grant.domain === "*" ? "ALL (*)" : String(grant.domain || "").toUpperCase();
         tdDomain.appendChild(domBadge);
         tr.appendChild(tdDomain);
 
         const tdLevel = document.createElement("td");
         const lvlBadge = document.createElement("span");
-        if (grant.access_level === "admin") lvlBadge.className = "badge badge-danger";
-        else if (grant.access_level === "write") lvlBadge.className = "badge badge-warning";
-        else lvlBadge.className = "badge badge-success";
-        lvlBadge.textContent = grant.access_level.toUpperCase();
+        const normLvl = String(grant.access_level || "view").toLowerCase();
+        if (normLvl === "admin" || normLvl === "edit" || normLvl === "write") {
+          lvlBadge.className = "badge badge-warning";
+          lvlBadge.textContent = "EDIT (READ & WRITE)";
+        } else {
+          lvlBadge.className = "badge badge-success";
+          lvlBadge.textContent = "VIEW ONLY";
+        }
         tdLevel.appendChild(lvlBadge);
         tr.appendChild(tdLevel);
 
         const tdDate = document.createElement("td");
-        tdDate.textContent = grant.created_at ? new Date(grant.created_at * 1000).toLocaleString() : "N/A";
+        tdDate.textContent = grant.updated_at
+          ? new Date(grant.updated_at * 1000).toLocaleString()
+          : grant.created_at
+          ? new Date(grant.created_at * 1000).toLocaleString()
+          : "N/A";
         tr.appendChild(tdDate);
 
         const tdAction = document.createElement("td");
@@ -3719,6 +3894,7 @@
         btnRevoke.type = "button";
         btnRevoke.className = "btn btn-danger btn-sm";
         btnRevoke.textContent = "Revoke";
+        btnRevoke.disabled = !hasGuildDomainAccess(currentGuildId, "permissions", "edit");
         btnRevoke.addEventListener("click", async () => {
           try {
             await apiFetch(`/api/guilds/${currentGuildId}/grants/${grant.id}`, {
@@ -3750,19 +3926,30 @@
     const principalType = typeSel ? typeSel.value : "role";
     const principalId = cbPrincipalContainer ? cbPrincipalContainer._selectedPrincipalId : null;
     const domain = domainSel ? domainSel.value : "*";
-    const accessLevel = levelSel ? levelSel.value : "read";
+    const accessLevel = levelSel ? levelSel.value : "view";
 
     if (!principalId) {
       showToast("Please select a Discord role or member.");
       return;
     }
 
+    let targetName = "Unknown Target";
+    if (principalType === "role") {
+      const roles = discordGuildData.roles.get(currentGuildId) || [];
+      const r = roles.find((x) => String(x.id) === String(principalId));
+      if (r && r.name) targetName = `@${r.name}`;
+    } else {
+      const m = memberCache.get(String(principalId));
+      if (m) targetName = m.display_name ? `${m.display_name} (@${m.username})` : `@${m.username}`;
+    }
+
     try {
       await apiFetch(`/api/guilds/${currentGuildId}/grants`, {
         method: "POST",
         body: JSON.stringify({
-          principal_type: principalType,
-          principal_id: String(principalId),
+          target_type: principalType,
+          target_id: String(principalId),
+          target_name: targetName,
           domain,
           access_level: accessLevel,
         }),

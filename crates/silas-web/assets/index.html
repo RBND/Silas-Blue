@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>Silas Blue v6.0.16 — Administration Console</title>
+  <title>Silas Blue v6.0.17 — Administration Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/site.webmanifest">
-  <link rel="stylesheet" href="/app.css?v=6.0.16">
+  <link rel="stylesheet" href="/app.css?v=6.0.17">
 </head>
 <body>
   <div class="app-layout">
@@ -17,7 +17,7 @@
         <img src="/favicon.svg" alt="Silas Blue" class="brand-icon">
         <div>
           <h1 class="brand-title">Silas Blue</h1>
-          <span id="sidebar-version" class="badge badge-neutral">v6.0.16</span>
+          <span id="sidebar-version" class="badge badge-neutral">v6.0.17</span>
         </div>
       </div>
 
@@ -1542,7 +1542,7 @@
               <label for="reddit-global-webhook-secret">Companion Webhook Shared Secret</label>
               <div class="input-with-btn">
                 <input type="password" id="reddit-global-webhook-secret" class="input-text" placeholder="Shared signing secret for Devvit webhook">
-                <button type="button" id="btn-gen-reddit-secret" class="btn btn-secondary btn-sm">Generate Secret</button>
+                <button type="button" id="btn-gen-reddit-global-secret" class="btn btn-secondary btn-sm">Generate Secret</button>
               </div>
             </div>
           </div>
@@ -1596,7 +1596,7 @@
                 </select>
               </div>
               <div class="form-group form-actions-inline" style="align-self: flex-end;">
-                <button type="button" id="btn-add-reddit-sub" class="btn btn-secondary">+ Add Feed</button>
+                <button type="button" id="btn-add-reddit-companion-sub" class="btn btn-secondary">+ Add Feed</button>
               </div>
             </div>
           </div>
@@ -1659,19 +1659,25 @@
               <div class="form-group">
                 <label for="grant-domain">Permission Domain</label>
                 <select id="grant-domain" class="input-select">
-                  <option value="*">All Domains (*)</option>
+                  <option value="*">All Server Domains (*)</option>
                   <option value="moderation">Moderation (Cases &amp; Infractions)</option>
                   <option value="automod">Automod &amp; Strikes</option>
                   <option value="logging">Channel Logging</option>
+                  <option value="greetings">Greetings &amp; Farewells</option>
+                  <option value="reaction_roles">Reaction Roles</option>
+                  <option value="triggers">Custom Triggers</option>
+                  <option value="activity">Activity &amp; Rewards</option>
+                  <option value="reddit">Reddit Companion Feeds</option>
                   <option value="settings">Server Settings &amp; Customization</option>
+                  <option value="permissions">Access &amp; Roles Governance</option>
+                  <option value="audit_log">Configuration Audit Log</option>
                 </select>
               </div>
               <div class="form-group">
                 <label for="grant-level">Access Level</label>
                 <select id="grant-level" class="input-select">
-                  <option value="admin">Admin (Full Control)</option>
-                  <option value="write">Write (Manage &amp; Edit)</option>
-                  <option value="read">Read (View Only)</option>
+                  <option value="edit">Edit / Manage (Read &amp; Write)</option>
+                  <option value="view">View Only (Read Only)</option>
                 </select>
               </div>
               <div class="form-group form-actions-inline" style="grid-column: 1 / -1; align-self: flex-start;">
@@ -1706,6 +1712,12 @@
                 <option value="moderation">Moderation Cases</option>
                 <option value="automod">Automod &amp; Strikes</option>
                 <option value="logging">Logging Routing</option>
+                <option value="greetings">Greetings</option>
+                <option value="reaction_roles">Reaction Roles</option>
+                <option value="triggers">Custom Triggers</option>
+                <option value="activity">Activity &amp; Rewards</option>
+                <option value="reddit">Reddit Feeds</option>
+                <option value="permissions">Access Grants</option>
               </select>
               <button type="button" id="btn-audit-prev" class="btn btn-secondary btn-sm" disabled>&larr; Prev</button>
               <span id="audit-page-indicator" class="badge badge-neutral">Page 1</span>
@@ -2026,6 +2038,6 @@
       </div>
     </main>
   </div>
-  <script src="/app.js?v=6.0.16"></script>
+  <script src="/app.js?v=6.0.17"></script>
 </body>
 </html>

@@ -220,6 +220,10 @@ impl BotController {
         &self.memory
     }
 
+    pub fn member_role_cache(&self) -> &Arc<MemberRoleCache> {
+        &self.member_role_cache
+    }
+
     pub fn ai(&self) -> &Arc<ProviderManager> {
         &self.ai
     }
@@ -652,15 +656,51 @@ pub fn image_bytes_to_data_uri(bytes: &[u8]) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{encoded}"))
 }
 
+pub fn validate_image_url_ssrf(raw_url: &str) -> Result<reqwest::Url, String> {
+    let parsed = silas_ai::validate_endpoint_url(raw_url, true, false)
+        .map_err(|e| format!("Blocked image URL: {e}"))?;
+    let Some(host_str) = parsed.host_str() else {
+        return Err("URL is missing a host.".to_string());
+    };
+    let host_lower = host_str.trim_matches(&['[', ']'][..]).to_ascii_lowercase();
+    if host_lower == "localhost"
+        || host_lower.ends_with(".local")
+        || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".lan")
+    {
+        return Err("Image URL cannot target local or internal hostnames.".to_string());
+    }
+    if let Ok(ip) = host_lower.parse::<std::net::IpAddr>() {
+        let is_private_or_reserved = match ip {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_private()
+                    || v4.is_loopback()
+                    || v4.is_link_local()
+                    || (v4.octets()[0] == 100 && (v4.octets()[1] & 0b1100_0000) == 64)
+            }
+            std::net::IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || (v6.segments().first().copied().unwrap_or(0) & 0xfe00 == 0xfc00)
+            }
+        };
+        if is_private_or_reserved {
+            return Err("Image URL cannot target private or loopback IP addresses.".to_string());
+        }
+    }
+    Ok(parsed)
+}
+
 /// Download an image from an HTTP/HTTPS URL and convert it into a Discord data URI.
 pub async fn download_image_as_data_uri(url: &str) -> Result<String, String> {
+    let validated = validate_image_url_ssrf(url)?;
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let res = client
-        .get(url)
+    let mut res = client
+        .get(validated)
         .header("User-Agent", "SilasBlueBot/6.0")
         .send()
         .await
@@ -673,12 +713,25 @@ pub async fn download_image_as_data_uri(url: &str) -> Result<String, String> {
         ));
     }
 
-    let bytes = res
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read image response: {e}"))?;
+    if let Some(len) = res.content_length() {
+        if len > 10 * 1024 * 1024 {
+            return Err("Image exceeds the 10 MB maximum size limit.".to_string());
+        }
+    }
 
-    image_bytes_to_data_uri(&bytes)
+    let mut buf = Vec::new();
+    while let Some(chunk) = res
+        .chunk()
+        .await
+        .map_err(|e| format!("Failed to read image response stream: {e}"))?
+    {
+        if buf.len().saturating_add(chunk.len()) > 10 * 1024 * 1024 {
+            return Err("Image exceeds the 10 MB maximum size limit.".to_string());
+        }
+        buf.extend_from_slice(&chunk);
+    }
+
+    image_bytes_to_data_uri(&buf)
 }
 
 #[cfg(test)]
@@ -742,5 +795,19 @@ mod tests {
         assert_eq!(deserialized.id, "123456789");
         assert_eq!(deserialized.bot_avatar_url, Some("https://example.com/avatar.png".to_string()));
         Ok(())
+    }
+
+    #[test]
+    fn test_validate_image_url_ssrf_blocks_internal_targets() {
+        assert!(validate_image_url_ssrf("http://127.0.0.1/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("http://localhost:8080/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("http://169.254.169.254/latest/meta-data/").is_err());
+        assert!(validate_image_url_ssrf("http://10.0.0.5/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("http://192.168.1.1/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("http://172.16.0.1/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("http://[::1]/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("http://printer.local/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("ftp://cdn.discordapp.com/avatar.png").is_err());
+        assert!(validate_image_url_ssrf("https://cdn.discordapp.com/avatars/123/abc.png").is_ok());
     }
 }

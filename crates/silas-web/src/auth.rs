@@ -273,11 +273,7 @@ impl AuthManager {
         if user_id == "local-console" {
             return true;
         }
-        let owner_id = settings.bot_owner_id.trim();
-        if !owner_id.is_empty() && owner_id == user_id.trim() {
-            return true;
-        }
-        false
+        settings.is_owner_id(user_id)
     }
 
     /// Exchange a Discord OAuth2 authorization code with PKCE verification and authenticate the user.
