@@ -2413,7 +2413,7 @@ dependencies = [
 name = "silas-discord"
 version = "6.0.17"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "dashmap 6.2.1",
  "html-escape",
@@ -2455,7 +2455,7 @@ name = "silas-search"
 version = "6.0.17"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "futures-util",
  "html-escape",
  "indexmap",
@@ -2517,7 +2517,7 @@ name = "silas-web"
 version = "6.0.17"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "cookie",
  "dashmap 6.2.1",
