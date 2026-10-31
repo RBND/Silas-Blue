@@ -56,7 +56,7 @@ rand = "0.8"
 hex = "0.4"
 zeroize = { version = "1.8", features = ["derive"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast"] }
-rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
 scraper = "0.29"
 html-escape = "0.3"
