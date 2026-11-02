@@ -351,9 +351,14 @@ impl BotController {
                         commands::enforce_channel_restrictions(ctx).await
                     })
                 }),
-                event_handler: |ctx, event, _framework, data| {
+                event_handler: |framework, event| {
                     Box::pin(async move {
-                        handlers::handle_gateway_event(ctx, event, data).await;
+                        handlers::handle_gateway_event(
+                            framework.serenity_context,
+                            event,
+                            framework.user_data,
+                        )
+                        .await;
                         Ok(())
                     })
                 },

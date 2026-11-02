@@ -7,6 +7,7 @@ WORKDIR /build
 
 # Copy Cargo workspace manifests and source crates
 COPY Cargo.toml Cargo.lock ./
+COPY patches ./patches
 COPY crates ./crates
 
 # Build release binaries (LTO, stripped, single codegen-unit)

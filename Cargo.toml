@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "6.0.17"
+version = "6.0.18"
 edition = "2021"
 authors = ["RobotsNeverDie <https://github.com/RBND/Silas-Blue>"]
 license = "LicenseRef-RBND-NC-1.2"
@@ -62,7 +62,7 @@ scraper = "0.29"
 html-escape = "0.3"
 async-trait = "0.1"
 futures-util = "0.3"
-poise = "0.6"
+poise = "0.7"
 serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "rustls_backend", "model", "cache", "chrono"] }
 axum = { version = "0.7", features = ["ws", "macros"] }
 tower = "0.5"
@@ -88,3 +88,6 @@ lto = "thin"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+[patch.crates-io]
+tokio-tungstenite = { path = "patches/tokio-tungstenite" }

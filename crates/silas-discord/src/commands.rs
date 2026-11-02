@@ -416,7 +416,7 @@ pub async fn setmemory(
 #[poise::command(slash_command, prefix_command)]
 pub async fn setttl(
     ctx: Context<'_>,
-    #[description = "Expiration timeout in minutes (1-1440)"] minutes: isize,
+    #[description = "Expiration timeout in minutes (1-1440)"] minutes: i64,
 ) -> Result<(), CommandError> {
     if !check_caller_permission(ctx, PermissionDomain::ManageBot).await? {
         return Ok(());
@@ -427,7 +427,7 @@ pub async fn setttl(
         return Ok(());
     };
 
-    let clamped = minutes.clamp(1, 1440);
+    let clamped = isize::try_from(minutes.clamp(1, 1440)).unwrap_or(60);
     ctx.data()
         .storage
         .patch_guild_config_async(
@@ -1601,7 +1601,7 @@ pub async fn enforce_channel_restrictions(ctx: Context<'_>) -> Result<bool, Comm
     }
 
     let channel_id = ctx.channel_id().get();
-    let cmd_name = ctx.command().name.as_str();
+    let cmd_name: &str = &ctx.command().name;
 
     match crate::activity::check_channel_restriction(
         &state.storage,
