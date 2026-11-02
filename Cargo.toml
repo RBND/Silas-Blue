@@ -43,7 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 regex = "1.11"
 dashmap = "6.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 indexmap = "2.6"
 arc-swap = "1.7"
 uuid = { version = "1.10", features = ["v4", "serde"] }
