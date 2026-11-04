@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "6.0.18"
+version = "6.0.19"
 edition = "2021"
 authors = ["RobotsNeverDie <https://github.com/RBND/Silas-Blue>"]
 license = "LicenseRef-RBND-NC-1.2"
@@ -43,12 +43,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 regex = "1.11"
 dashmap = "6.1"
-parking_lot = "0.12"
+parking_lot = "0.13"
 indexmap = "2.6"
 arc-swap = "1.7"
 uuid = { version = "1.10", features = ["v4", "serde"] }
 url = "2.5"
-base64 = "0.22"
+base64 = "0.23"
 sha2 = "0.10"
 hmac = "0.12"
 subtle = "2.6"
@@ -56,7 +56,7 @@ rand = "0.8"
 hex = "0.4"
 zeroize = { version = "1.8", features = ["derive"] }
 ed25519-dalek = { version = "2.1", default-features = false, features = ["std", "fast"] }
-rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+rusqlite = { version = "0.41", features = ["bundled", "backup"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "gzip"] }
 scraper = "0.29"
 html-escape = "0.3"

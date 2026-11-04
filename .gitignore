@@ -28,3 +28,17 @@ Thumbs.db
 # Local AI agent guidelines with private network/host details
 AGENTS.md
 AGENTS.local.md
+
+# --- RBND Standardized Secret & Runtime Protection ---
+.env
+.env.*
+!.env.tpl
+!.env.example
+*.pem
+*.key
+*.pfx
+*.ppk
+*.runtime.*
+deploy-keys/*
+!deploy-keys/README.md
+secrets/*

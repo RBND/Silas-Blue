@@ -1,0 +1,13 @@
+﻿# --- RBND Standardized Secret & Runtime Protection ---
+.env
+.env.*
+!.env.tpl
+!.env.example
+*.pem
+*.key
+*.pfx
+*.ppk
+*.runtime.*
+deploy-keys/*
+!deploy-keys/README.md
+secrets/*
